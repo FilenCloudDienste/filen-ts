@@ -79,9 +79,8 @@ describe("SlideshowBar", () => {
 		expect(slideshow.go).toHaveBeenNthCalledWith(2, -1)
 	})
 
-	it("the interval menu sets the preference and reports open/closed", async () => {
+	it("the interval menu sets the preference, closes on a pick and reports open/closed", async () => {
 		const slideshow = makeSlideshow()
-
 		renderBar(slideshow)
 		fireEvent.click(screen.getByRole("button", { name: "Time per image" }))
 		await act(async () => {
@@ -91,15 +90,38 @@ describe("SlideshowBar", () => {
 		expect(slideshow.setMenuOpen).toHaveBeenLastCalledWith(true)
 
 		fireEvent.click(screen.getByRole("menuitemradio", { name: "10 s" }))
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(300)
+		})
 
 		expect(slideshowPrefs().intervalSeconds).toBe(10)
+		expect(screen.queryByRole("menu")).toBeNull()
+		expect(slideshow.setMenuOpen).toHaveBeenLastCalledWith(false)
+	})
 
+	it("an Escape closes the interval menu and reports it closed", async () => {
+		const slideshow = makeSlideshow()
+
+		renderBar(slideshow)
+		fireEvent.click(screen.getByRole("button", { name: "Time per image" }))
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(50)
+		})
 		fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" })
 		await act(async () => {
 			await vi.advanceTimersByTimeAsync(300)
 		})
 
+		expect(screen.queryByRole("menu")).toBeNull()
 		expect(slideshow.setMenuOpen).toHaveBeenLastCalledWith(false)
+		expect(slideshow.stop).not.toHaveBeenCalled()
+	})
+
+	it("sits over the slide: positioned and raised on its stage", () => {
+		renderBar(makeSlideshow())
+
+		expect(bar().className).toContain("absolute")
+		expect(bar().className).toContain("z-10")
 	})
 
 	it("the subfolders toggle shows only when available and disables while loading", () => {

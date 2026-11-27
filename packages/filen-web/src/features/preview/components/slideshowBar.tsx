@@ -161,6 +161,8 @@ export function SlideshowBar({
 							<DropdownMenuRadioItem
 								key={option}
 								value={String(option)}
+								// A choice, as in a select: picking one closes the menu.
+								closeOnClick
 							>
 								{t("previewSlideshowIntervalValue", { count: option })}
 							</DropdownMenuRadioItem>

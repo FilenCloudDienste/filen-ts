@@ -795,6 +795,8 @@ describe("SlideshowSlot", () => {
 		)
 		expect(view.container.firstElementChild).toBe(outer)
 		expect(outer?.className).toContain("size-full")
+		// Its own stacking context: nothing the viewer raises rises over the bar beside the slot.
+		expect(outer?.className).toContain("isolate")
 		expect(view.getByTestId("child").parentElement).toBe(inner)
 		view.rerender(
 			<SlideshowSlot value={null}>

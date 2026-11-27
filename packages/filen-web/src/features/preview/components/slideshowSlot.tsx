@@ -18,7 +18,8 @@ function alwaysVisible(): boolean {
 // elements whatever `value` is, so the viewer under it never remounts. A slide is hidden until it is to be seen
 // (value.visible), the grid's thumbnail under it meanwhile, then fades in; the thumbnail is dropped once the fade is
 // done. An item that is no slide (paged to by hand) shows as it always does. Outside a slideshow the wrappers lay
-// nothing out (display: contents), so the viewer sits exactly as it does without them.
+// nothing out (display: contents), so the viewer sits exactly as it does without them. During one the slot is its own
+// stacking context, so nothing a viewer raises can rise over the slideshow bar beside it.
 export function SlideshowSlot({ value, children }: { value: SlideshowSlotValue | null; children: ReactNode }) {
 	const slide = value !== null && value.signals !== null ? value : null
 	const visible = useSyncExternalStore(slide?.subscribe ?? subscribeNothing, slide?.visible ?? alwaysVisible, alwaysVisible)
@@ -43,7 +44,7 @@ export function SlideshowSlot({ value, children }: { value: SlideshowSlotValue |
 	return (
 		<ImageShownContext value={value?.shown ?? null}>
 			<SlideSignalsContext value={value?.signals ?? null}>
-				<div className={value === null ? "contents" : "relative size-full"}>
+				<div className={value === null ? "contents" : "relative isolate size-full"}>
 					{placeholder === null ? null : (
 						<img
 							src={placeholder}
