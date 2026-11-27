@@ -23,9 +23,9 @@ import { saveSetting } from "@/lib/saveSetting"
 import {
 	rootCrumb,
 	enterCrumb,
+	enterResultCrumbs,
 	jumpToCrumb,
 	toBrowseEntries,
-	filterEntries,
 	sortEntries,
 	entryKey,
 	entryName,
@@ -66,6 +66,8 @@ import { DownloadTooLargeNote, PublicLinkError } from "@/features/publicLinks/co
 import { useIsOnline } from "@/lib/useIsOnline"
 import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { useReportViewing } from "@/features/publicLinks/lib/reportSubject"
+import { useLinkSearch } from "@/features/publicLinks/hooks/useLinkSearch"
+import type { LinkSearchScope } from "@/features/publicLinks/lib/linkSearch"
 
 // One download at a time, the whole directory's zip ("zip") or a row's file or subdirectory, or the selection ("item").
 type DownloadUiState =
@@ -85,14 +87,15 @@ interface SaveTarget {
 }
 
 // The directory browse surface: a virtual navigation stack (breadcrumb clicks + folder opens mutate a
-// client-side crumb array, the route/hash never change — old-web parity), a client-side filter/sort over the
-// current level's already-fetched entries in drive's list or grid view (one choice per browser), a selection over them,
-// and a flag-gated
+// client-side crumb array, the route/hash never change — old-web parity), a sort over the current level's
+// already-fetched entries in drive's list or grid view (one choice per browser), a search of the level's whole subtree
+// in its place while the field holds a query (lib/linkSearch.ts: listed once, matched in the worker), a selection over
+// what is listed, and a flag-gated
 // whole-directory zip download. An opened file shows the shared FileHero in-place (same session, password
 // carried) rather than hard-navigating to /f/ (which would need a per-file link that does not exist), paging through
 // the level's files as listed (pagerEntries), held as they were when it opened.
 export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: DirPublicLink }) {
-	const { t } = useTranslation(["publicLinks", "common"])
+	const { t } = useTranslation(["publicLinks", "common", "drive"])
 	const isOnline = useIsOnline()
 	const [stack, setStack] = useState<BrowseCrumb[]>(() => [rootCrumb(info)])
 	const [selected, setSelected] = useState<{ entry: FileEntry; pager: BrowsePagerList } | null>(null)
@@ -116,6 +119,9 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 	const linkScope = linkFingerprint(link)
 	const viewModeQuery = usePublicViewModeQuery()
 	const viewMode = viewModeQuery.data ?? DEFAULT_PUBLIC_VIEW_MODE
+	const { state: search, session: searchSession } = useLinkSearch(link)
+	const searching = nameSearchKey(filter).length > 0
+	const searchScope: LinkSearchScope = { uuid: current.uuid, dir: current.dir, ancestry: stack.map(crumb => crumb.uuid) }
 
 	// An abuse report names where in the link the visitor is.
 	useReportViewing(
@@ -123,8 +129,8 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 	)
 
 	const sorted = listing.data === undefined ? [] : sortEntries(toBrowseEntries(listing.data), sort)
-	// The sort is stable and the filter order-preserving, so a keystroke narrows the sorted level as it is.
-	const visible = filterEntries(sorted, filter)
+	// A query's matches come sorted from the worker.
+	const visible = searching ? (search.status === "results" ? search.entries : []) : sorted
 	const picked = selectedEntries(visible, selection)
 	const pickedBytes = selectionBytes(picked)
 
@@ -137,10 +143,20 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 		setDownload(prev => (prev.status === "running" ? prev : { status: "idle" }))
 	}
 
+	function changeSort(next: DriveSortBy): void {
+		setSort(next)
+
+		if (searching) {
+			searchSession.search(searchScope, filter, next)
+		}
+	}
+
 	function openEntry(entry: BrowseEntry): void {
 		if (entry.kind === "dir") {
-			setStack(prev => enterCrumb(prev, entry))
+			// A search result's directory is reached down its trail.
+			setStack(prev => (entry.trail === undefined ? enterCrumb(prev, entry) : enterResultCrumbs(prev, entry)))
 			setFilter("")
+			searchSession.reset()
 			clearSelection()
 			setSelected(null)
 			setResume(null)
@@ -169,6 +185,7 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 	function jumpTo(index: number): void {
 		setStack(prev => jumpToCrumb(prev, index))
 		setFilter("")
+		searchSession.reset()
 		clearSelection()
 		setSelected(null)
 		setResume(null)
@@ -318,8 +335,9 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 				onBack={() => {
 					setSelected(null)
 				}}
-				// A filtered level is a search's result: no subdirectories to add to it.
-				source={nameSearchKey(filter).length === 0 ? { kind: "linked", dir: current.dir, link } : undefined}
+				link={link}
+				// A search's results: no subdirectories to add to them.
+				source={searching ? undefined : { kind: "linked", dir: current.dir, link }}
 				downloadEnabled={link.enableDownload}
 				linkScope={linkScope}
 				saveItem={saveable ? selected.entry.file : undefined}
@@ -336,6 +354,18 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 					size: formatBytes(Number(sizeInfo.data.size))
 				})
 			: null
+	// The list's pane: the search's results while the field holds a query, else the level's listing.
+	const pane = searching
+		? search.status === "error"
+			? "error"
+			: search.status === "results"
+				? "ready"
+				: "loading"
+		: listing.status === "pending"
+			? "loading"
+			: listing.status === "error"
+				? "error"
+				: "ready"
 	const downloadNotice =
 		download.status !== "idle" && download.status !== "running" && download.forUuid === current.uuid ? download : null
 
@@ -420,10 +450,12 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 					onChange={value => {
 						setFilter(value)
 						clearSelection()
+						searchSession.search(searchScope, value, sort)
 					}}
 					onClear={() => {
 						setFilter("")
 						clearSelection()
+						searchSession.reset()
 					}}
 					onFocusList={() => {
 						listRef.current?.focusCursor()
@@ -434,7 +466,7 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 					<div className={viewMode === "list" ? "sm:hidden" : undefined}>
 						<SortMenu
 							value={sort}
-							onChange={setSort}
+							onChange={changeSort}
 						/>
 					</div>
 					<ViewModeToggle
@@ -446,27 +478,46 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 				</div>
 			</div>
 
+			{searching && search.status === "listing" ? (
+				<div className="flex shrink-0 flex-col gap-1.5">
+					<p className="text-xs text-muted-foreground">{t("searchingSubdirectories")}</p>
+					<Progress
+						aria-label={t("searchingSubdirectories")}
+						value={search.total !== null && search.total > 0 ? Math.round((search.loaded / search.total) * 100) : null}
+					/>
+				</div>
+			) : searching && search.status === "results" && search.total > search.entries.length ? (
+				<p className="shrink-0 text-xs text-muted-foreground">
+					{t("drive:driveSearchShowingOf", { shown: search.entries.length, total: search.total })}
+				</p>
+			) : null}
+
 			{/* Never below the header and a few rows. Size containment keeps the rows' own height out of the page's: the
 			    floor is all the list asks of it. */}
 			<div className="flex min-h-60 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-background contain-size">
-				{listing.status === "pending" ? (
+				{pane === "loading" ? (
 					<LoadingState size="md" />
-				) : listing.status === "error" ? (
+				) : pane === "error" ? (
 					<div className="flex flex-1 overflow-y-auto">
 						<PublicLinkError
 							onRetry={() => {
-								void listing.refetch()
+								if (searching) {
+									searchSession.search(searchScope, filter, sort)
+								} else {
+									void listing.refetch()
+								}
 							}}
 						/>
 					</div>
 				) : visible.length === 0 ? (
 					<div className="flex flex-1 items-center justify-center overflow-y-auto p-6 text-center text-sm text-muted-foreground">
-						{filter.trim().length > 0 ? t("noMatches") : t("emptyDirectory")}
+						{searching ? t("noMatches") : t("emptyDirectory")}
 					</div>
 				) : (
 					<BrowseList
-						// Remounted per level and per view, which lays its rows out anew.
-						key={`${current.uuid}:${viewMode}`}
+						// Remounted per level, per view and between the listing and a search's results, which lays its rows
+						// out anew.
+						key={`${current.uuid}:${viewMode}:${searching ? "search" : "listing"}`}
 						ref={listRef}
 						resume={resume}
 						onResumed={() => {
@@ -476,7 +527,7 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 						selection={selection}
 						onSelectionChange={setSelection}
 						sort={sort}
-						onSortChange={setSort}
+						onSortChange={changeSort}
 						viewMode={viewMode}
 						linkScope={linkScope}
 						downloadable={link.enableDownload}

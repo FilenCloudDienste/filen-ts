@@ -148,6 +148,7 @@ import {
 	type SearchQueryResult,
 	type SequencedSnapshotDTO
 } from "@/workers/searchEngine"
+import { createLinkedSearch, type LinkedSearchRange, type LinkedSearchRequest } from "@/workers/linkedSearch"
 import { createListBatcher } from "@/workers/archiveListPacker"
 import { createArchiveReaders, readerClosed, settleEntryReport } from "@/workers/archiveReaders"
 import { readAheadBudget, type EntryReadPlan } from "@/lib/sdk/archiveListing"
@@ -249,6 +250,11 @@ let clientConfig: JsClientConfig = {}
 // Single instance for this worker's lifetime — the cache-backed search's own handle registry, token
 // supersession, and configure-once guard (searchEngine.ts).
 const searchEngine = createSearchEngine()
+
+// The public directory link's search: one recursive listing held for the page (linkedSearch.ts).
+const linkedSearch = createLinkedSearch((dir, link, onProgress) =>
+	withLinkedUnauth(unauth => unauth.listLinkedDirRecursive(dir, link, onProgress))
+)
 
 // Every transfer's stop and pause, keyed by its id. Upload, download and drive job ids are all random
 // uuids, so one map serves every direction.
@@ -2608,18 +2614,63 @@ const api = {
 	// The callback the wasm listing wants is a plain progress reporter (download of the encrypted
 	// listing itself); the viewer needs no progress here, so a no-op is passed — the method resolves
 	// with the decrypted dirs+files in one shot.
+	// A directory the search's held listing covers is read from it, with no request.
 	listLinkedDirAnon(dir: AnyLinkedDir, link: DirPublicLink): Promise<LinkedDirsAndFiles> {
+		const held = linkedSearch.children(dir, link)
+
+		if (held !== null) {
+			return Promise.resolve(held)
+		}
+
 		return withLinkedUnauth(unauth =>
 			unauth.listLinkedDir(dir, link, () => {
 				// no progress surface for a listing
 			})
 		)
 	},
-	// A slideshow's "include subdirectories" list of a public directory link: every dir, only slideable files.
+	// A slideshow's "include subdirectories" list of a public directory link: every dir, only slideable files. Derived
+	// from the search's held listing when it covers the directory.
 	async listSlideshowLinked(dir: AnyLinkedDir, link: DirPublicLink): Promise<LinkedDirsAndFiles> {
+		const held = linkedSearch.subtree(dir, link, isSlideable)
+
+		if (held !== null) {
+			return held
+		}
+
 		const result = await withLinkedUnauth(unauth => unauth.listLinkedDirRecursive(dir, link, () => undefined))
 
 		return { dirs: result.dirs, files: result.files.filter(file => isSlideable(narrowItem(file))) }
+	},
+	// The search of a public directory link (workers/linkedSearch.ts): open lists `dir`'s subtree once and holds it, its
+	// download reported through `onProgress` (the page's Comlink.proxy, released once the listing is in); range reads a
+	// window of a query's matches; close frees the listing (the page leaving the link).
+	async searchLinkedOpen(
+		dir: AnyLinkedDir,
+		link: DirPublicLink,
+		onProgress: (downloadedBytes: number, totalBytes: number | null) => void
+	): Promise<void> {
+		const report = throttle((downloadedBytes: number, totalBytes: number | undefined) => {
+			try {
+				onProgress(downloadedBytes, totalBytes ?? null)
+			} catch (e) {
+				log.warn("linked-search", "progress report failed", e)
+			}
+		}, PROGRESS_THROTTLE_MS)
+
+		try {
+			await linkedSearch.open(dir, link, (downloadedBytes, totalBytes) => {
+				report(downloadedBytes, totalBytes)
+			})
+		} finally {
+			report.flush()
+			;(onProgress as Partial<Comlink.ProxyMethods>)[Comlink.releaseProxy]?.()
+		}
+	},
+	searchLinkedRange(request: LinkedSearchRequest): LinkedSearchRange {
+		return linkedSearch.range(request)
+	},
+	searchLinkedClose(): void {
+		linkedSearch.close()
 	},
 	getLinkedDirSizeAnon(dir: AnyLinkedDirWithContext): Promise<DirSizeResponse> {
 		return withLinkedUnauth(unauth => unauth.getDirSize(dir))

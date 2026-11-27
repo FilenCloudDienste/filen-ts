@@ -8,7 +8,7 @@ import type {
 	LinkedDirsAndFiles,
 	NonRootLinkedItem
 } from "@filen/sdk-rs"
-import { copyJobGlyph, driveItemName, matchesNameSearch, nameSearchKey, type CopyJobGlyph } from "@filen/shared"
+import { copyJobGlyph, driveItemName, type CopyJobGlyph } from "@filen/shared"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { sortByDriveItem, type DriveSortBy } from "@/features/drive/lib/sort"
 
@@ -28,8 +28,11 @@ export interface BrowseCrumb {
 
 // A listing row, pre-narrowed to a DriveItem so the SAME icon/name/size/date helpers the authed drive
 // listing uses render it with no per-row branching. The raw SDK handle is kept alongside: `dir` for a
-// deeper listing, `file` as the AnyFile a download/preview op wants.
-export type BrowseEntry = { kind: "dir"; item: DriveItem; dir: LinkedDir } | { kind: "file"; item: DriveItem; file: SdkFile }
+// deeper listing, `file` as the AnyFile a download/preview op wants. A search result also carries its `trail`: the
+// directories from the one searched (not included) down to its own, empty for one of the searched directory itself.
+export type BrowseEntry =
+	| { kind: "dir"; item: DriveItem; dir: LinkedDir; trail?: readonly LinkedDir[] }
+	| { kind: "file"; item: DriveItem; file: SdkFile; trail?: readonly LinkedDir[] }
 
 // Name ascending, the drive's own default. Directories always precede files regardless (see sortEntries).
 export const DEFAULT_PUBLIC_SORT: DriveSortBy = "nameAsc"
@@ -74,16 +77,33 @@ export function entryName(entry: BrowseEntry): string {
 	return driveItemName(entry.item)
 }
 
-// Case- and composition-insensitive substring filter over the current level's already-fetched entries — no server round
-// trip (old-web parity). A blank/whitespace query returns the list unchanged.
-export function filterEntries(entries: readonly BrowseEntry[], query: string): BrowseEntry[] {
-	const key = nameSearchKey(query)
+// A linked directory's or file's name as its narrowed item reads it (driveItemName), without narrowing it.
+export function linkedItemName(item: LinkedDir | SdkFile): string {
+	const { meta, uuid } = "inner" in item ? item.inner : item
 
-	if (key.length === 0) {
-		return [...entries]
-	}
+	return meta.type === "decoded" ? meta.data.name : uuid
+}
 
-	return entries.filter(entry => matchesNameSearch(entryName(entry), key))
+// A search result's directory path from the directory searched, "/"-joined; null for a listing's entry and for a result
+// in the directory searched itself.
+export function entryPath(entry: BrowseEntry): string | null {
+	return entry.trail === undefined || entry.trail.length === 0 ? null : entry.trail.map(linkedItemName).join("/")
+}
+
+// Search results as display entries, narrowed as a listing's are.
+export function toSearchEntries(hits: readonly { item: LinkedDir | SdkFile; trail: readonly LinkedDir[] }[]): BrowseEntry[] {
+	return hits.map(({ item, trail }) =>
+		"inner" in item
+			? { kind: "dir", item: narrowItem(item.inner), dir: item, trail }
+			: { kind: "file", item: narrowItem(item), file: item, trail }
+	)
+}
+
+// A search result's directory opened: the crumbs down its trail onto it.
+export function enterResultCrumbs(stack: readonly BrowseCrumb[], entry: Extract<BrowseEntry, { kind: "dir" }>): BrowseCrumb[] {
+	const below = (entry.trail ?? []).map(dir => ({ uuid: dir.inner.uuid, name: linkedItemName(dir), dir }))
+
+	return enterCrumb([...stack, ...below], entry)
 }
 
 // The drive listing's own order (@/features/drive/lib/sort): directories before files, the chosen field

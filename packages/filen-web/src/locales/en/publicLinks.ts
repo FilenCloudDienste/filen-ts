@@ -125,12 +125,14 @@ export const publicLinks = {
 	preparingDownload: "Preparing download…",
 	/** Directory view — accessible label of the breadcrumb navigation landmark (the shared directory's levels) */
 	publicLinksBreadcrumbLabel: "Location in the shared directory",
-	/** Directory view — filter box placeholder */
+	/** Directory view — search box placeholder: searches the directory on screen and every subdirectory below it */
 	filterPlaceholder: "Search this directory",
 	/** Directory view — empty directory */
 	emptyDirectory: "This directory is empty",
 	/** Directory view — no items match the active filter */
 	noMatches: "No items match your search",
+	/** Directory view — under the search box while the first search lists every subdirectory of the directory on screen (a progress bar follows) */
+	searchingSubdirectories: "Searching all subdirectories…",
 	/** Directory view — row ⋯ and right-click menu entry on a subdirectory: downloads it as one zip */
 	downloadAsZip: "Download as ZIP",
 	/** Directory view — accessible name of the column header's checkbox that selects every item on screen */

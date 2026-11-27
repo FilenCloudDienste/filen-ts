@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest"
-import type { ChatParticipant, Dir, LinkedDirsAndFiles } from "@filen/sdk-rs"
+import type { ChatParticipant, Dir, DirPublicLink, LinkedDirsAndFiles, LinkedRootDir } from "@filen/sdk-rs"
 import { narrowItem } from "@/features/drive/lib/item"
 import { filterDriveItemsByLocalSearch } from "@/features/drive/components/directoryListing.logic"
-import { entryName, filterEntries, toBrowseEntries } from "@/features/publicLinks/lib/browse.logic"
+import { linkedItemName } from "@/features/publicLinks/lib/browse.logic"
+import { createLinkedSearch } from "@/workers/linkedSearch"
 import { filterContactsBySearch } from "@/features/contacts/components/contactsList.logic"
 import { filterNotesBySearch } from "@/features/notes/lib/sort"
 import { filterMentionParticipants } from "@/features/chats/lib/composer.logic"
@@ -42,7 +43,7 @@ describe("local name search across Unicode compositions", () => {
 		expect(filterDriveItemsByLocalSearch([composed, other], "ÜBERS".normalize("NFD"))).toEqual([composed])
 	})
 
-	it("filterEntries matches an NFD name with an NFC query", () => {
+	it("a directory link's search matches an NFD name with an NFC query", async () => {
 		const listing: LinkedDirsAndFiles = {
 			dirs: [
 				{ inner: { ...dirNamed("link-nfd", NFD_NAME) }, linkedTag: true },
@@ -50,8 +51,15 @@ describe("local name search across Unicode compositions", () => {
 			],
 			files: []
 		}
+		const root = { inner: { uuid: testUuid("parent") } } as LinkedRootDir
+		const link = { linkUuid: testUuid("link"), linkKey: "k", password: { type: "none" } } as DirPublicLink
+		const search = createLinkedSearch(() => Promise.resolve(listing))
 
-		expect(filterEntries(toBrowseEntries(listing), "Übersicht").map(entryName)).toEqual([NFD_NAME])
+		await search.open(root, link, () => undefined)
+
+		const result = search.range({ dirUuid: root.inner.uuid, link, name: "Übersicht", sort: "nameAsc", start: 0, end: 10 })
+
+		expect(result.hits.map(hit => linkedItemName(hit.item))).toEqual([NFD_NAME])
 	})
 
 	it("filterContactsBySearch matches a decomposed nickname with a composed query", () => {

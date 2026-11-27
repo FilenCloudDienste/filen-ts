@@ -22,6 +22,14 @@ const { startAnonDirZipDownload, startAnonFileDownload, startAnonItemsZipDownloa
 }))
 
 vi.mock("@/features/publicLinks/lib/download", () => ({ startAnonDirZipDownload, startAnonFileDownload, startAnonItemsZipDownload }))
+// A search's results: c.txt, in the level itself.
+vi.mock("@/lib/sdk/client", () => ({
+	sdkApi: {
+		searchLinkedOpen: () => Promise.resolve(),
+		searchLinkedRange: () => Promise.resolve({ total: 1, hits: [{ item: C_TXT, trail: [] }] }),
+		searchLinkedClose: () => Promise.resolve()
+	}
+}))
 vi.mock("@/features/publicLinks/queries/publicLink", () => ({
 	useLinkSaveable: () => saveable.current,
 	usePublicDirListing: () => ({ status: "success", data: LISTING, refetch: vi.fn() }),
@@ -228,13 +236,13 @@ describe("DirectoryBrowser — the list", () => {
 		expect(selectedNames()).toEqual([])
 	})
 
-	it("drops the selection when the filter changes and narrows the list to its matches", () => {
+	it("drops the selection when the query changes and lists the search's matches", async () => {
 		renderBrowser()
 
 		fireEvent.click(option("a.txt"), { detail: 1 })
 		fireEvent.change(screen.getByRole("searchbox", { name: "Search this directory" }), { target: { value: "c" } })
 
-		expect(screen.getAllByRole("option")).toHaveLength(1)
+		expect((await screen.findAllByRole("option")).map(rowName)).toEqual(["c.txt"])
 		expect(selectedNames()).toEqual([])
 	})
 

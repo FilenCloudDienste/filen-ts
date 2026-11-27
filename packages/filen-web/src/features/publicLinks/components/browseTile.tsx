@@ -4,10 +4,10 @@ import { cn } from "@filen/shared"
 import { ItemThumbnail } from "@/features/drive/components/itemThumbnail"
 import { showVideoBadge } from "@/features/drive/components/driveTile.logic"
 import { useFileKindVerdict } from "@/features/drive/hooks/useFileKindVerdict"
-import { TILE_CLASS, TILE_FACE_CLASS, TILE_NAME_CLASS } from "@/features/drive/lib/listingCells"
+import { TILE_CLASS, TILE_FACE_CLASS, TILE_NAME_CLASS, TILE_SUBLINE_CLASS } from "@/features/drive/lib/listingCells"
 import { CONTEXT_TREE_MENU_FAMILY, DROPDOWN_TREE_MENU_FAMILY } from "@/features/drive/components/directoryTreeSubmenu"
 import { BrowseEntryMenuItems, SelectionBox, type BrowseCellProps } from "@/features/publicLinks/components/browseRow"
-import { browseEntryActions, entryName } from "@/features/publicLinks/lib/browse.logic"
+import { browseEntryActions, entryName, entryPath } from "@/features/publicLinks/lib/browse.logic"
 import { useTouchLongPress } from "@/lib/useTouchLongPress"
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu, DropdownMenuContent } from "@/components/ui/dropdown-menu"
@@ -40,6 +40,7 @@ export function BrowseTile({
 		}
 	})
 	const actions = browseEntryActions(entry.kind, downloadable, saveable)
+	const path = entryPath(entry)
 
 	return (
 		<ContextMenu>
@@ -121,6 +122,15 @@ export function BrowseTile({
 							</DropdownMenu>
 						</div>
 						<span className={TILE_NAME_CLASS}>{entryName(entry)}</span>
+						{/* A search result's directory path, its second line. */}
+						{path !== null ? (
+							<span
+								className={cn(TILE_SUBLINE_CLASS, "text-muted-foreground")}
+								title={path}
+							>
+								{path}
+							</span>
+						) : null}
 					</div>
 				}
 			/>

@@ -14,6 +14,7 @@ import {
 import {
 	browseEntryActions,
 	entryName,
+	entryPath,
 	type BrowseEntry,
 	type BrowseEntryAction,
 	type SelectionCheck
@@ -88,6 +89,7 @@ export function BrowseRow({
 		}
 	})
 	const actions = browseEntryActions(entry.kind, downloadable, saveable)
+	const path = entryPath(entry)
 
 	return (
 		<ContextMenu>
@@ -145,6 +147,15 @@ export function BrowseRow({
 							iconClassName="size-6 shrink-0"
 						/>
 						<span className={LIST_NAME_CLASS}>{entryName(entry)}</span>
+						{/* A search result's directory path, as drive's search shows it. */}
+						{path !== null ? (
+							<span
+								className="hidden max-w-48 min-w-0 shrink truncate text-xs text-muted-foreground sm:block"
+								title={path}
+							>
+								{path}
+							</span>
+						) : null}
 						<span className={cn(LIST_SIZE_COLUMN_CLASS, "text-right text-xs text-muted-foreground tabular-nums")}>
 							{formatItemSize(entry.item)}
 						</span>

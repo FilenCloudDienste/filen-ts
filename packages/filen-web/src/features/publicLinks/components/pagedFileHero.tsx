@@ -1,7 +1,7 @@
 import { useEffect, useEffectEvent, useRef, useState } from "react"
 import { toast } from "sonner"
 import { isImeKeydown } from "@filen/shared/keymap"
-import type { AnyItemWithContext, LinkedDir } from "@filen/sdk-rs"
+import type { AnyItemWithContext, DirPublicLink, LinkedDir } from "@filen/sdk-rs"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { FileHero } from "@/features/publicLinks/components/fileHero"
 import { entryKey, toBrowseEntries } from "@/features/publicLinks/lib/browse.logic"
@@ -40,6 +40,7 @@ export function PagedFileHero({
 	onStep,
 	onPagerReplaced,
 	onBack,
+	link,
 	source,
 	downloadEnabled,
 	linkScope,
@@ -53,6 +54,7 @@ export function PagedFileHero({
 	// The pager's list swapped, at `entry`.
 	onPagerReplaced: (pager: BrowsePagerList, entry: FileEntry) => void
 	onBack: () => void
+	link: DirPublicLink
 	source: LinkedSource | undefined
 	downloadEnabled: boolean
 	linkScope: string
@@ -95,13 +97,14 @@ export function PagedFileHero({
 	const endedAtRef = useRef(Number.NEGATIVE_INFINITY)
 	// The file on screen as of the last commit, for a list that lands later.
 	const shownRef = useRef(uuid)
-	// A video from below the level finds its subtitles in its own directory's listing, asked once it is shown; the video
-	// plays meanwhile, and its subtitles come with the listing.
-	const deepDir = treeDirs !== null && slideKindOf(entry.item) === "video" ? (treeDirs.get(entry.file.parent) ?? null) : null
+	// A video from below the level (a slideshow's subdirectories, a search's results) finds its subtitles in its own
+	// directory's listing, asked once it is shown (the worker reads it from a search's held listing); the video plays
+	// meanwhile, and its subtitles come with the listing.
+	const deepDir = slideKindOf(entry.item) === "video" ? (treeDirs?.get(entry.file.parent) ?? entry.trail?.at(-1) ?? null) : null
 	const deepListing = usePublicDirListing({
 		levelUuid: deepDir === null ? null : entry.file.parent,
 		dir: deepDir,
-		link: deepDir === null ? null : (source?.link ?? null)
+		link: deepDir === null ? null : link
 	})
 	const shownSiblings =
 		deepDir === null

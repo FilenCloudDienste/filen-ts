@@ -39,6 +39,14 @@ vi.mock("@/features/publicLinks/queries/publicLink", () => ({
 	usePublicViewModeQuery: () => ({ data: "list", refetch: () => Promise.resolve() }),
 	usePublicFile: () => ({ status: "success", data: linkedFile.current, error: null, refetch: vi.fn() })
 }))
+// A search's results: the level's files, in the level itself.
+vi.mock("@/lib/sdk/client", () => ({
+	sdkApi: {
+		searchLinkedOpen: () => Promise.resolve(),
+		searchLinkedRange: () => Promise.resolve({ total: LISTING.files.length, hits: LISTING.files.map(item => ({ item, trail: [] })) }),
+		searchLinkedClose: () => Promise.resolve()
+	}
+}))
 vi.mock("@/features/publicLinks/lib/download", () => ({
 	startAnonDirZipDownload: vi.fn(),
 	startAnonFileDownload: vi.fn(),
@@ -351,10 +359,10 @@ describe("a public directory link's pager", () => {
 		expect(screen.getByRole("button", { name: /^Next file/ }).hasAttribute("disabled")).toBe(false)
 	})
 
-	it("offers no subdirectories over a filtered level", () => {
+	it("offers no subdirectories over a search's results", async () => {
 		render(createElement(DirectoryBrowser, { info: INFO, link: LINK }))
 		fireEvent.change(screen.getByRole("searchbox"), { target: { value: "." } })
-		fireEvent.doubleClick(screen.getByRole("option", { name: /^a\.jpg/ }))
+		fireEvent.doubleClick(await screen.findByRole("option", { name: /^a\.jpg/ }))
 
 		fireEvent.click(screen.getByRole("button", { name: /^Slideshow/ }))
 

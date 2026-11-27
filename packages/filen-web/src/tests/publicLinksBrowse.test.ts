@@ -5,7 +5,6 @@ import {
 	enterCrumb,
 	jumpToCrumb,
 	toBrowseEntries,
-	filterEntries,
 	sortEntries,
 	entryName,
 	entryKey,
@@ -92,20 +91,6 @@ describe("toBrowseEntries", () => {
 	})
 })
 
-describe("filterEntries", () => {
-	const entries = toBrowseEntries(listing)
-
-	it("returns everything for a blank query", () => {
-		expect(filterEntries(entries, "   ")).toHaveLength(4)
-	})
-
-	it("filters case-insensitively by name substring", () => {
-		const result = filterEntries(entries, "ap")
-
-		expect(result.map(entryName).sort()).toEqual(["Apple", "apricot.txt"])
-	})
-})
-
 describe("sortEntries", () => {
 	const entries = toBrowseEntries(listing)
 
@@ -160,28 +145,6 @@ describe("sortEntries", () => {
 		}
 
 		expect(sortEntries(forward, DEFAULT_PUBLIC_SORT).map(entryName).slice(2)).toEqual(["file9.txt", "file10.txt"])
-	})
-
-	// DirectoryBrowser sorts the whole level once and filters the sorted list per keystroke.
-	it("filtering the sorted list yields the same order as sorting the filtered list", () => {
-		const mixed = toBrowseEntries({
-			dirs: [...listing.dirs, makeDir("d0000000-0000-0000-0000-00000000000c", "apex")],
-			files: [
-				...listing.files,
-				makeFile("30000000-0000-0000-0000-000000000000", "Apricot.txt", 100n, 500n),
-				makeFile("20000000-0000-0000-0000-000000000000", "apricot.txt", 100n, 500n),
-				makeFile("10000000-0000-0000-0000-000000000000", "grape.txt", 100n, 500n)
-			]
-		})
-
-		for (const sort of [DEFAULT_PUBLIC_SORT, "nameDesc", "sizeAsc", "lastModifiedDesc"] as const) {
-			// Reversed input too: tied items (the dirs' equal timestamps) keep their input order either way.
-			for (const input of [mixed, [...mixed].reverse()]) {
-				for (const query of ["", "ap", "APR", "zzz"]) {
-					expect(filterEntries(sortEntries(input, sort), query)).toStrictEqual(sortEntries(filterEntries(input, query), sort))
-				}
-			}
-		}
 	})
 })
 
