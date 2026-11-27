@@ -305,7 +305,9 @@ describe("push loop — bounded drop at 3 non-retryable SDK rejections + reset o
 		s.executeNow()
 		await settled()
 		expect(queued("a")).toBe(false)
-		expect(toast.error).toHaveBeenCalledExactlyOnceWith("notes:noteSaveGaveUp")
+		await until(() => {
+			expect(toast.error).toHaveBeenCalledExactlyOnceWith("notes:noteSaveGaveUp")
+		})
 		s.cancel()
 	})
 
@@ -1029,6 +1031,28 @@ describe("push loop — failed pushes are sent again on a slow timer", () => {
 		expect(useNotesInflightStore.getState().failedNotes).toEqual({})
 		expect(vi.getTimerCount()).toBe(0)
 		s.cancel()
+	})
+
+	it("a hidden leader waits a moment before telling of an edit it gave up on", async () => {
+		vi.useFakeTimers()
+		vi.stubGlobal("document", { visibilityState: "hidden" })
+
+		const s = new Sync()
+
+		s.start()
+		await vi.advanceTimersByTimeAsync(0)
+		setNoteContent.mockRejectedValue(sdkError("Server"))
+		await s.enqueue(makeNote("a"), "typed")
+		await vi.advanceTimersByTimeAsync(3000)
+		await after(30_000)
+		await after(120_000)
+
+		expect(queued("a")).toBe(false)
+		expect(toast.error).not.toHaveBeenCalled()
+		await vi.advanceTimersByTimeAsync(1000)
+		expect(toast.error).toHaveBeenCalledExactlyOnceWith("notes:noteSaveGaveUp")
+		s.cancel()
+		vi.unstubAllGlobals()
 	})
 
 	it("marks the note failed while it waits, and clears it once the push lands", async () => {

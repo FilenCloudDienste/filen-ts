@@ -70,11 +70,73 @@ async function tabIsLive(tabId: string): Promise<boolean> {
 function noteName(note: Note): string {
 	return note.title !== undefined && note.title.length > 0 ? note.title : i18n.t("notes:noteUntitled")
 }
-// Every tab tells the user of an edit the outbox gave up on: the leader may be a hidden tab.
-function toastGaveUp(noteUuid: string, fallback?: Note): void {
-	const note = notesQueryFind(noteUuid) ?? fallback
 
-	toast.error(i18n.t("notes:noteSaveGaveUp", { name: note === undefined ? i18n.t("notes:noteUntitled") : noteName(note) }))
+// One tab tells the user of an edit the outbox gave up on, not every window: a visible tab claims the note's toast
+// at once (an exclusive lock named by the announcement's id, held a while so the others find it taken); a hidden
+// leader tries after a short wait, so a visible tab wins and the leader still tells a user with none visible.
+// Hidden followers stay quiet. Fixed names and a lock, no cross-tab messages beyond the failed-state broadcast.
+const GAVE_UP_CLAIM_PREFIX = "filen-web-notes-gave-up:"
+const GAVE_UP_CLAIM_HOLD_MS = 10_000
+const HIDDEN_LEADER_WAIT_MS = 1000
+
+function tabVisible(): boolean {
+	return typeof document === "undefined" || document.visibilityState === "visible"
+}
+
+function toastGaveUp({
+	claim,
+	noteUuid,
+	leader,
+	wanted,
+	fallback
+}: {
+	claim: string
+	noteUuid: string
+	leader: boolean
+	wanted: () => boolean
+	fallback?: Note
+}): void {
+	const visible = tabVisible()
+
+	if (!visible && !leader) {
+		return
+	}
+
+	const show = () => {
+		if (!wanted()) {
+			return
+		}
+
+		navigator.locks
+			.request(`${GAVE_UP_CLAIM_PREFIX}${claim}:${noteUuid}`, { ifAvailable: true }, lock => {
+				if (lock === null) {
+					return
+				}
+
+				const note = notesQueryFind(noteUuid) ?? fallback
+
+				toast.error(i18n.t("notes:noteSaveGaveUp", { name: note === undefined ? i18n.t("notes:noteUntitled") : noteName(note) }))
+
+				return new Promise<void>(resolve => {
+					AbortSignal.timeout(GAVE_UP_CLAIM_HOLD_MS).addEventListener(
+						"abort",
+						() => {
+							resolve()
+						},
+						{ once: true }
+					)
+				})
+			})
+			.catch((error: unknown) => {
+				log.warn("notes-sync", "gave-up toast claim failed", error)
+			})
+	}
+
+	if (visible) {
+		show()
+	} else {
+		setTimeout(show, HIDDEN_LEADER_WAIT_MS)
+	}
 }
 
 const SYNC_DEBOUNCE_MS = 3000
@@ -686,7 +748,7 @@ export class Sync {
 
 		// A follower that just asked for state learns the failed pushes too; nothing to tell while none failed.
 		if (this.failedNotes.size > 0) {
-			this.transport?.broadcastFailed?.({ failed: [...this.failedNotes], gaveUp: [] })
+			this.transport?.broadcastFailed?.({ failed: [...this.failedNotes], gaveUp: [], claim: "" })
 		}
 	}
 
@@ -705,20 +767,20 @@ export class Sync {
 		setFailedNotes(state.failed)
 
 		for (const noteUuid of state.gaveUp) {
-			toastGaveUp(noteUuid)
+			toastGaveUp({ claim: state.claim, noteUuid, leader: false, wanted: () => !isAborted(this.abortController.signal) })
 		}
 	}
 
 	// LEADER: the failed pushes into this tab's store, and to the other tabs when they changed or `gaveUp` has
 	// news.
-	private publishFailed(gaveUp: string[] = []): void {
+	private publishFailed(gaveUp: string[] = [], claim = ""): void {
 		const failed = [...this.failedNotes]
 		const before = useNotesInflightStore.getState().failedNotes
 
 		setFailedNotes(failed)
 
 		if (gaveUp.length > 0 || before !== useNotesInflightStore.getState().failedNotes) {
-			this.transport?.broadcastFailed?.({ failed, gaveUp })
+			this.transport?.broadcastFailed?.({ failed, gaveUp, claim: gaveUp.length > 0 ? claim : "" })
 		}
 	}
 
@@ -1019,6 +1081,7 @@ export class Sync {
 
 			// Given up on in this pass, told to the other tabs once it ends.
 			const gaveUp: string[] = []
+			const claim = crypto.randomUUID()
 
 			const results = await Promise.allSettled(
 				Object.entries(inflightContent).map(async ([noteUuid, contents]) => {
@@ -1159,7 +1222,13 @@ export class Sync {
 						// Never silent: the edit is queued nowhere any more. A logout stays silent.
 						if (!isAborted(signal)) {
 							gaveUp.push(noteUuid)
-							toastGaveUp(noteUuid, liveNote)
+							toastGaveUp({
+								claim,
+								noteUuid,
+								leader: true,
+								wanted: () => !isAborted(this.abortController.signal),
+								fallback: liveNote
+							})
 						}
 
 						return
@@ -1254,7 +1323,7 @@ export class Sync {
 				await this.flushToDisk(useNotesInflightStore.getState().inflightContent)
 				// Followers learn a note drained (spinner clears) only from this post-push broadcast.
 				this.broadcastState()
-				this.scheduleResend(gaveUp)
+				this.scheduleResend(gaveUp, claim)
 			}
 		})
 
@@ -1271,7 +1340,7 @@ export class Sync {
 	// 30 s, 2 min, 10 min, then every 10 min, from the last attempt. Reset by any push that lands and once
 	// nothing has failed; paused while offline (the reconnect trigger carries on). A rejected push is sent
 	// again too, until its rejection count gives up on it. Publishes the failed set either way.
-	private scheduleResend(gaveUp: string[] = []): void {
+	private scheduleResend(gaveUp: string[] = [], claim = ""): void {
 		this.pauseResend()
 
 		const queued = useNotesInflightStore.getState().inflightContent
@@ -1282,7 +1351,7 @@ export class Sync {
 			}
 		}
 
-		this.publishFailed(gaveUp)
+		this.publishFailed(gaveUp, claim)
 
 		if (this.failedNotes.size === 0) {
 			this.resendStep = 0

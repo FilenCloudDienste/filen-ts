@@ -52,10 +52,12 @@ export const inflightContentSchema = type({
 export type RemoteEnqueue = Omit<InflightEntry, "orphan"> & { answer?: true }
 
 // The leader's failed pushes, told to every tab: the notes waiting to be sent again, and the notes whose
-// edits it just gave up on (each tab says so).
+// edits it just gave up on, with the id of that announcement (empty when none): the tabs claim each note's toast
+// under it, so one tab says so (toastGaveUp).
 export const noteFailedStateSchema = type({
 	failed: "string[]",
-	gaveUp: "string[]"
+	gaveUp: "string[]",
+	claim: "string"
 })
 
 export type NoteFailedState = typeof noteFailedStateSchema.infer

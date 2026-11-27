@@ -289,36 +289,75 @@ describe("failed pushes reach every tab", () => {
 		await flushAsync()
 
 		expect(useNotesInflightStore.getState().failedNotes).toEqual({ a: true })
-		expect(transport.broadcastFailed).toHaveBeenLastCalledWith({ failed: ["a"], gaveUp: [] })
+		expect(transport.broadcastFailed).toHaveBeenLastCalledWith({ failed: ["a"], gaveUp: [], claim: "" })
 
 		transport.broadcastFailed.mockClear()
 		s.broadcastState()
 
-		expect(transport.broadcastFailed).toHaveBeenCalledExactlyOnceWith({ failed: ["a"], gaveUp: [] })
+		expect(transport.broadcastFailed).toHaveBeenCalledExactlyOnceWith({ failed: ["a"], gaveUp: [], claim: "" })
 
 		setNoteContent.mockResolvedValue(makeNote("a"))
 		s.executeNow()
 		await flushAsync()
 
 		expect(useNotesInflightStore.getState().failedNotes).toEqual({})
-		expect(transport.broadcastFailed).toHaveBeenLastCalledWith({ failed: [], gaveUp: [] })
+		expect(transport.broadcastFailed).toHaveBeenLastCalledWith({ failed: [], gaveUp: [], claim: "" })
 	})
 
-	it("a follower shows the leader's failed pushes and tells of an edit given up on", () => {
+	it("a follower shows the leader's failed pushes and tells of an edit given up on", async () => {
 		const s = newSync()
 
 		s.attachTransport(mockTransport())
 		s.startAsFollower()
 		s.applyLeaderState({ a: [{ timestamp: 1, content: "typed", note: makeNote("a") }] })
-		s.applyLeaderFailed({ failed: ["a"], gaveUp: [] })
+		s.applyLeaderFailed({ failed: ["a"], gaveUp: [], claim: "" })
 
 		expect(useNotesInflightStore.getState().failedNotes).toEqual({ a: true })
 		expect(toast.error).not.toHaveBeenCalled()
 
-		s.applyLeaderFailed({ failed: [], gaveUp: ["a"] })
+		s.applyLeaderFailed({ failed: [], gaveUp: ["a"], claim: "c1" })
 
 		expect(useNotesInflightStore.getState().failedNotes).toEqual({})
-		expect(toast.error).toHaveBeenCalledExactlyOnceWith("notes:noteSaveGaveUp")
+		await vi.waitFor(() => {
+			expect(toast.error).toHaveBeenCalledExactlyOnceWith("notes:noteSaveGaveUp")
+		})
+	})
+
+	describe("the gave-up toast shows in one tab", () => {
+		function follower(): Sync {
+			const s = newSync()
+
+			s.attachTransport(mockTransport())
+			s.startAsFollower()
+
+			return s
+		}
+
+		afterEach(() => {
+			vi.unstubAllGlobals()
+		})
+
+		it("a visible tab claims it, the others find it taken", async () => {
+			vi.stubGlobal("document", { visibilityState: "visible" })
+
+			for (const s of [follower(), follower(), follower()]) {
+				s.applyLeaderFailed({ failed: [], gaveUp: ["a"], claim: "once" })
+			}
+
+			await vi.waitFor(() => {
+				expect(toast.error).toHaveBeenCalledOnce()
+			})
+			await flushAsync()
+			expect(toast.error).toHaveBeenCalledOnce()
+		})
+
+		it("a hidden follower stays quiet", async () => {
+			vi.stubGlobal("document", { visibilityState: "hidden" })
+			follower().applyLeaderFailed({ failed: [], gaveUp: ["a"], claim: "quiet" })
+			await flushAsync()
+
+			expect(toast.error).not.toHaveBeenCalled()
+		})
 	})
 
 	it("a follower ignores a malformed payload", () => {
