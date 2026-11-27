@@ -155,6 +155,75 @@ describe("Composer — dropping files", () => {
 		expect(preflightAttachments).toHaveBeenCalledTimes(1)
 		expect(toastError).toHaveBeenCalledWith("Wait for the current attachment to finish uploading")
 	})
+
+	it("names the file whose upload failed", async () => {
+		uploadAttachment.mockImplementationOnce(() =>
+			Promise.resolve({ status: "error", dto: { species: "plain", label: "Network error", message: "Network error" } } as never)
+		)
+
+		await dropFile(renderComposer())
+
+		expect(toastError).toHaveBeenCalledWith("Couldn't attach clip.mp4", { description: "Network error" })
+	})
+})
+
+// Pasting files into the message field attaches them through the drop's gate; a paste with text stays a text paste.
+describe("Composer — pasting files", () => {
+	function paste(files: File[], text = ""): boolean {
+		const field = screen.getByRole("textbox")
+		let notPrevented = true
+
+		act(() => {
+			notPrevented = fireEvent.paste(field, {
+				clipboardData: { files, getData: (type: string) => (type === "text/plain" ? text : "") }
+			})
+		})
+
+		return notPrevented
+	}
+
+	const IMAGE = new File(["x"], "image.png", { type: "image/png" })
+
+	it("attaches a pasted image and keeps it out of the field", async () => {
+		uploadAttachment.mockImplementation(() => Promise.resolve({ status: "success", url: "https://filen.io/d/pasted" }))
+		renderComposer()
+
+		expect(paste([IMAGE])).toBe(false)
+
+		await act(async () => {
+			await Promise.resolve()
+		})
+
+		expect(preflightAttachments).toHaveBeenCalledWith([IMAGE])
+		expect(uploadAttachment).toHaveBeenCalledWith(IMAGE)
+	})
+
+	it("leaves a paste carrying text to the field, even with a picture of it beside", () => {
+		renderComposer()
+
+		expect(paste([IMAGE], "copied cells")).toBe(true)
+		expect(paste([], "plain text")).toBe(true)
+		expect(preflightAttachments).not.toHaveBeenCalled()
+	})
+
+	it("refuses a pasted file offline with the reason", () => {
+		state.isOnline = false
+		renderComposer()
+
+		expect(paste([IMAGE])).toBe(false)
+		expect(uploadAttachment).not.toHaveBeenCalled()
+		expect(toastError).toHaveBeenCalledWith("Unavailable while offline")
+	})
+
+	it("refuses a pasted file on a free account", () => {
+		state.subs = []
+		renderComposer()
+
+		paste([IMAGE])
+
+		expect(uploadAttachment).not.toHaveBeenCalled()
+		expect(toastError.mock.calls[0]?.[0]).toBe("Attachments require a Pro subscription")
+	})
 })
 
 const EDITED = mockChatMessage({

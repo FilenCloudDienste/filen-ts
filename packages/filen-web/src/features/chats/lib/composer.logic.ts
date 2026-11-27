@@ -55,6 +55,16 @@ export function appendAttachmentUrl(draft: string, url: string): string {
 	return trimmedEnd.length === 0 ? url : `${trimmedEnd} ${url}`
 }
 
+// The files a paste into the composer attaches. None when it also carries text: office apps and browsers put a
+// picture of the copied selection beside its text, and that paste is the text.
+export function pastedFiles(data: Pick<DataTransfer, "files" | "getData">): File[] {
+	if (data.files.length === 0 || data.getData("text/plain").length > 0) {
+		return []
+	}
+
+	return Array.from(data.files)
+}
+
 // Enter sends, Shift+Enter inserts a newline (the browser default). null for any other key or chord: Ctrl, Cmd
 // or Alt with Enter is some shortcut's, never a send.
 export function enterIntent(event: {

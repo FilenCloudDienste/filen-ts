@@ -375,6 +375,8 @@ export const chats = {
 	chatComposerAttachPremiumRequired: "Attachments require a Pro subscription",
 	/** Composer — toast when files are dropped on the composer while an earlier attachment is still uploading */
 	chatComposerAttachInProgress: "Wait for the current attachment to finish uploading",
+	/** Composer — toast title when attaching one file fails; the error is its description. {{name}} = the file's name */
+	chatComposerAttachFileFailed: "Couldn't attach {{name}}",
 	/** Composer attach menu — uploads a local file */
 	chatComposerAttachUpload: "Upload a file",
 	/** Composer attach menu — opens the Drive picker */

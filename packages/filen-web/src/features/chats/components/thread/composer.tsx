@@ -31,6 +31,7 @@ import {
 	applyMention,
 	applyEmoji,
 	lastEditableOwnMessage,
+	pastedFiles,
 	NEW_MODE,
 	type ComposerKeys,
 	type TriggerQuery
@@ -375,7 +376,7 @@ export function Composer({
 		})
 
 		if (outcome.status === "error") {
-			toast.error(errorLabel(outcome.dto))
+			toast.error(t("chatComposerAttachFileFailed", { name: file.name }), { description: errorLabel(outcome.dto) })
 			return
 		}
 
@@ -410,8 +411,23 @@ export function Composer({
 
 		// Prevented even when refused, so the browser never navigates to the dropped file.
 		event.preventDefault()
+		attachFromInput(Array.from(event.dataTransfer.files))
+	}
 
-		// Same gate as the attach menu trigger: a drop is the one path to an upload that bypasses it.
+	// A paste that carries text stays the field's own.
+	function onPaste(event: React.ClipboardEvent<HTMLTextAreaElement>): void {
+		const files = pastedFiles(event.clipboardData)
+
+		if (files.length === 0) {
+			return
+		}
+
+		event.preventDefault()
+		attachFromInput(files)
+	}
+
+	// Dropped or pasted files answer to the attach menu trigger's gate: both reach an upload without the menu.
+	function attachFromInput(files: File[]): void {
 		if (isAttachDisabled(uploadingCount, isOnline, isPro)) {
 			if (isOnline && uploadingCount === 0 && !isPro) {
 				toast.error(t("chatComposerAttachPremiumRequired"), {
@@ -426,7 +442,7 @@ export function Composer({
 			return
 		}
 
-		void attachLocalFiles(event.dataTransfer.files)
+		void attachLocalFiles(files)
 	}
 
 	async function submit(): Promise<void> {
@@ -773,6 +789,7 @@ export function Composer({
 						onChange={onChange}
 						onKeyDown={onKeyDown}
 						onKeyUp={syncCaret}
+						onPaste={onPaste}
 						onClick={syncCaret}
 						onSelect={syncCaret}
 						onBlur={() => {

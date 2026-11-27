@@ -44,7 +44,9 @@ export function AttachDriveDialog({ onClose, onAttached }: AttachDriveDialogProp
 		setAttachingUuid(null)
 
 		if (outcome.status === "error") {
-			toast.error(errorLabel(outcome.dto))
+			toast.error(t("chatComposerAttachFileFailed", { name: item.data.decryptedMeta?.name ?? "" }), {
+				description: errorLabel(outcome.dto)
+			})
 			return
 		}
 
