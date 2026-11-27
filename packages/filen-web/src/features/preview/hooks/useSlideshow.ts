@@ -646,7 +646,16 @@ export function useSlideshow(host: SlideshowHost): Slideshow {
 
 			setPaused(!paused)
 		},
-		go: step,
+		// The user's own step, never past a slot that cannot be left (that would ask to discard it): paused there.
+		go: delta => {
+			if (current !== null && !host.canLeave()) {
+				setPaused(true)
+
+				return
+			}
+
+			step(delta)
+		},
 		setMenuOpen: open => {
 			clock.setMenuOpen(open)
 		},

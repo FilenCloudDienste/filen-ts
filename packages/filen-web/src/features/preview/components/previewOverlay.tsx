@@ -489,18 +489,19 @@ export function PreviewOverlay({
 	// A question is up: the remote-change one, a menu action's dialog, or the unsaved-changes prompt an in-app intent
 	// opened. Nothing starts behind it.
 	const dialogOpen = remote.prompt !== null || pendingIntent !== null || menuDialogKind !== null
-	// A slideshow over the pager; it never steps away from a slot that cannot be left (requestOrRun's conditions).
+	// A slideshow over the pager; it never steps away from a slot that cannot be left (requestOrRun's conditions), nor
+	// from under a question about the file on screen, which it would then act on.
 	const slideshow = useSlideshow({
 		items,
 		index,
 		step: onStep,
-		canLeave: () => !dirty && !saving,
+		canLeave: () => !dirty && !saving && !dialogOpen,
 		cacheScope,
 		access
 	})
 	const slideshowPrefs = useSlideshowPrefs()
-	// Offered over at least two slides of the list.
-	const slideshowOffered = hasTwoSlides(items)
+	// Offered over at least two slides of the list; never in the trash, where Delete deletes for good.
+	const slideshowOffered = variant !== "trash" && hasTwoSlides(items)
 	// The list the overlay was opened with while a slideshow's subdirectories' list stands in for it.
 	const [openingItems, setOpeningItems] = useState<DriveItem[] | null>(null)
 	const [treeLoading, setTreeLoading] = useState(false)
@@ -1311,8 +1312,9 @@ export function PreviewOverlay({
 			return
 		}
 
-		// A chat's or a note's linked file has no menu (isLinkedEmbedItem), so no menu keys either.
-		if (isLinkedEmbedItem(driveItem) || saving || menuDialogKind !== null) {
+		// A chat's or a note's linked file has no menu (isLinkedEmbedItem), so no menu keys either; nor does a running
+		// slideshow, whose next slide would be the file a dialog opened now acts on.
+		if (isLinkedEmbedItem(driveItem) || saving || menuDialogKind !== null || slideshow.running) {
 			return
 		}
 

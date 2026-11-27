@@ -29,6 +29,23 @@ const tree = vi.hoisted(() => ({ fetch: vi.fn<(source: unknown, signal: AbortSig
 
 vi.mock("@/features/preview/lib/slideshowTree", () => ({ fetchSlideshowTree: tree.fetch }))
 
+// A dialog of the item menu held open from outside (one already up as the slideshow's timer fires).
+const heldDialog = vi.hoisted(() => ({ kind: null as string | null }))
+
+vi.mock("@/features/preview/hooks/usePreviewItemMenu", async () => {
+	const actual = await vi.importActual<typeof import("@/features/preview/hooks/usePreviewItemMenu")>(
+		"@/features/preview/hooks/usePreviewItemMenu"
+	)
+
+	return {
+		usePreviewItemMenu: (params: Parameters<typeof actual.usePreviewItemMenu>[0]) => {
+			const menu = actual.usePreviewItemMenu(params)
+
+			return heldDialog.kind === null ? menu : { ...menu, menuDialogKind: heldDialog.kind }
+		}
+	}
+})
+
 // The viewer: its file's name, a video element for a video, and a way to leave unsaved edits.
 vi.mock("@/features/preview/components/previewBody", () => ({
 	PreviewBody: ({ item, onDirtyChange }: { item: { data: { uuid: string } }; onDirtyChange: (dirty: boolean) => void }) =>
@@ -168,6 +185,7 @@ beforeEach(async () => {
 	await i18n.changeLanguage("en")
 	setSlideshowPrefs({ intervalSeconds: 5, shuffle: false, subfolders: false })
 	tree.fetch.mockReset()
+	heldDialog.kind = null
 })
 
 afterEach(() => {
@@ -493,5 +511,69 @@ describe("PreviewOverlay slideshow", () => {
 		expect(bar()).toBeNull()
 		expect(host.props.onClose).not.toHaveBeenCalled()
 		expect(startButton()).not.toBeNull()
+	})
+
+	it("no slideshow in the trash", async () => {
+		renderOverlay([A, B], 0, { variant: "trash" })
+
+		await screen.findByRole("button", { name: `viewer ${A.data.uuid}` })
+		expect(startButton()).toBeNull()
+
+		fireEvent.keyDown(popup(), withCode({ key: "s" }))
+		expect(bar()).toBeNull()
+	})
+
+	it("the item keys open nothing while it runs, and the show goes on", async () => {
+		const host = renderOverlay([A, B], 0)
+
+		const start = await screen.findByRole("button", { name: /^Slideshow/ })
+
+		vi.useFakeTimers()
+		fireEvent.click(start)
+
+		fireEvent.keyDown(popup(), withCode({ key: "Delete" }))
+		fireEvent.keyDown(popup(), withCode({ key: "F2" }))
+
+		expect(screen.queryByRole("alertdialog")).toBeNull()
+		expect(screen.getAllByRole("dialog")).toHaveLength(1)
+
+		// The slide never reports shown: it is due after the show timeout.
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(16_000)
+		})
+
+		expect(host.props.onStep).toHaveBeenCalledWith(1)
+	})
+
+	it("a dialog open as the slide is due pauses the show on the file it names", async () => {
+		const host = renderOverlay([A, B], 0)
+
+		const start = await screen.findByRole("button", { name: /^Slideshow/ })
+
+		vi.useFakeTimers()
+		fireEvent.click(start)
+
+		heldDialog.kind = "trash"
+		host.rerender()
+
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(16_000)
+		})
+
+		expect(host.props.onStep).not.toHaveBeenCalled()
+		expect(host.props.items[host.props.index]).toBe(A)
+		expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy()
+	})
+
+	it("the bar's next never leaves a dirty slot: the show pauses there", async () => {
+		const host = renderOverlay([A, B], 0)
+
+		fireEvent.click(await screen.findByRole("button", { name: "edit" }))
+		fireEvent.click(screen.getByRole("button", { name: /^Slideshow/ }))
+		fireEvent.click(screen.getByRole("button", { name: "Next file" }))
+
+		expect(host.props.onStep).not.toHaveBeenCalled()
+		expect(screen.queryByText("Unsaved changes")).toBeNull()
+		expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy()
 	})
 })
