@@ -1,10 +1,12 @@
-import type { DependencyList, RefCallback } from "react"
+import { useEffect, useRef, useState, type DependencyList, type RefCallback, type RefObject } from "react"
 import { useHotkeys, type HotkeyCallback, type Options } from "react-hotkeys-hook"
-import { isRecordingCombo, useComboFor } from "@/lib/keymap/registry"
+import { comboFor, isRecordingCombo, useComboFor } from "@/lib/keymap/registry"
 import { isImeKeydown, typedWithAltGraph, type ChordEvent } from "@filen/shared/keymap"
 import { useMenuAction } from "@/lib/keymap/desktopMenu"
 import { isAnyOverlayOpen } from "@/lib/keymap/dialogGuard"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
+import { registerLiveAction } from "@/lib/keymap/liveActions"
+import { useLatestRef } from "@/lib/useLatestRef"
 
 const IS_MAC = isMacPlatform()
 
@@ -109,5 +111,55 @@ export function useAction(id: string, handler: HotkeyCallback, options?: Options
 	// No dependency array: with one, react-hotkeys-hook memoises the handler on it and a stale closure runs from the key
 	// while the menu runs the fresh one. Without it the library calls the latest handler; a combo change re-subscribes
 	// through the key string. `_deps` is accepted and ignored until the call sites drop it.
-	return useHotkeys<HTMLElement>(combo, handler, merged)
+	const hotkeyRef = useHotkeys<HTMLElement>(combo, handler, merged)
+
+	const scopedTo = useLiveAction(id, handler, merged)
+	// One callback for the hook's life, as the library's own ref is: a new one per render would detach and reattach
+	// the listener on every commit.
+	const [ref] = useState<RefCallback<HTMLElement | null>>(() => (node: HTMLElement | null) => {
+		scopedTo.current = node
+
+		const detach = hotkeyRef(node)
+
+		return () => {
+			scopedTo.current = null
+			detach?.()
+		}
+	})
+
+	return ref
+}
+
+// The palette's half (liveActions.ts): the action is offered while mounted, enabled and, when scoped to an element,
+// while focus is inside it; a run passes the guard and the enabled check a key would. Returns the element the action
+// is scoped to, which the caller's ref fills.
+function useLiveAction(id: string, handler: HotkeyCallback, options: Options): RefObject<HTMLElement | null> {
+	const handlerRef = useLatestRef(handler)
+	const optionsRef = useLatestRef(options)
+	const scopedTo = useRef<HTMLElement | null>(null)
+
+	useEffect(
+		() =>
+			registerLiveAction({
+				id,
+				available: focus => {
+					const element = scopedTo.current
+
+					return optionsRef.current.enabled !== false && (element === null || (focus !== null && element.contains(focus)))
+				},
+				run: event => {
+					const { enabled, ignoreEventWhen } = optionsRef.current
+					const hotkeysEvent = { hotkey: comboFor(id) }
+
+					if (ignoreEventWhen?.(event) === true || (typeof enabled === "function" && !enabled(event, hotkeysEvent))) {
+						return
+					}
+
+					handlerRef.current(event, hotkeysEvent)
+				}
+			}),
+		[id, handlerRef, optionsRef]
+	)
+
+	return scopedTo
 }
