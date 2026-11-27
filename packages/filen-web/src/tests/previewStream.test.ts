@@ -640,3 +640,46 @@ describe("previewDelivered", () => {
 		expect(await previewDelivered("id-1", 10)).toBe(false)
 	})
 })
+
+describe("previewStreamHead", () => {
+	function serviceWorkerContainer() {
+		const container = new EventTarget()
+
+		vi.stubGlobal("navigator", { serviceWorker: container })
+
+		return (data: unknown): void => {
+			container.dispatchEvent(new MessageEvent("message", { data }))
+		}
+	}
+
+	it("hands over the head the worker posts for the id, whether it lands before or after the ask", async () => {
+		vi.resetModules()
+
+		const post = serviceWorkerContainer()
+		const { previewStreamHead, previewStreamUrl } = await import("@/features/preview/lib/previewStream")
+		const { SW_MSG_PREVIEW_HEAD } = await import("@/lib/sw/protocol")
+
+		registerWithSw.mockResolvedValue(undefined)
+		await previewStreamUrl(testFile(), "cat.gif", "image/gif", "id-1")
+
+		const waiting = previewStreamHead("id-1", new AbortController().signal)
+
+		post({ type: SW_MSG_PREVIEW_HEAD, id: "id-2", bytes: new Uint8Array([2]) })
+		post({ type: SW_MSG_PREVIEW_HEAD, id: "id-1", bytes: new Uint8Array([1]) })
+
+		expect([...((await waiting) ?? [])]).toEqual([1])
+		expect([...((await previewStreamHead("id-2", new AbortController().signal)) ?? [])]).toEqual([2])
+	})
+
+	it("answers null once aborted", async () => {
+		vi.resetModules()
+		serviceWorkerContainer()
+
+		const { previewStreamHead } = await import("@/features/preview/lib/previewStream")
+		const controller = new AbortController()
+		const waiting = previewStreamHead("id-1", controller.signal)
+
+		controller.abort()
+		expect(await waiting).toBeNull()
+	})
+})

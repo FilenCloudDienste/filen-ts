@@ -13,6 +13,9 @@ import {
 	SW_PROTOCOL_VERSION,
 	SW_MSG_STREAM_GONE,
 	SW_MSG_PREVIEW_DELIVERED,
+	SW_MSG_PREVIEW_HEAD,
+	SW_PREVIEW_HEAD_BYTES,
+	previewHeadPosted,
 	SW_STREAM_GONE_INTERVAL_MS,
 	SW_SKIP_WAITING_MESSAGE,
 	SW_MSG_BUILD,
@@ -43,6 +46,7 @@ import { PendingRegistry } from "@/lib/sw/pendingRegistry"
 import { GenerationGate } from "@/lib/sw/generationGate"
 import { DownloadReporter, type ReportedStream } from "@/lib/sw/downloadReporter"
 import { heldBackBody } from "@/lib/sw/heldBackBody"
+import { headTap } from "@/lib/sw/headTap"
 import { streamDownloadHeaders } from "@/lib/sw/streamDownloadHeaders"
 import { plainErrorDTO, toErrorDTO } from "@/lib/sdk/errors"
 import { contentDispositionAttachment } from "@/lib/filename"
@@ -406,7 +410,10 @@ function streamFileRange(
 	const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
 	// Only the whole file is the download; a ranged request is a probe or a seek.
 	const watched = reported && start === 0 && end === total - 1 ? watchedBody(readable) : null
-	const body = watched?.body ?? readable
+	const body =
+		headers.disposition === null
+			? withHead(event, id, watched?.body ?? readable, served, total, headers.contentType)
+			: (watched?.body ?? readable)
 
 	// Built BEFORE pumpToResponse counts the stream (see there).
 	const response = rangeResponse(body, served, total, headers)
@@ -740,7 +747,7 @@ function handlePortPreview(event: FetchEvent, id: string, pending: PendingPortPr
 	}
 
 	const done = Promise.withResolvers<boolean>()
-	const body = portBody(
+	const read = portBody(
 		pending.reader,
 		served.start,
 		served.end,
@@ -756,6 +763,7 @@ function handlePortPreview(event: FetchEvent, id: string, pending: PendingPortPr
 		},
 		pending.ends
 	)
+	const body = inline ? withHead(event, id, read, served, total, pending.contentType) : read
 	// Built BEFORE the stream is counted (see pumpToResponse).
 	const response = rangeResponse(
 		body,
@@ -828,6 +836,33 @@ function postToWindows(message: { type: string; id: string }): Promise<void> {
 			}
 		})
 		.catch(() => undefined)
+}
+
+// An inline body from byte 0 of a type that may animate, handing its head to the window that asked
+// (SW_MSG_PREVIEW_HEAD) as it passes: the page needs no read of its own to tell a still from an animation.
+function withHead(
+	event: FetchEvent,
+	id: string,
+	body: ReadableStream<Uint8Array>,
+	served: { start: number; end: number },
+	total: number,
+	contentType: string
+): ReadableStream<Uint8Array> {
+	const limit = Math.min(SW_PREVIEW_HEAD_BYTES, total)
+	const clientId = event.clientId
+
+	if (served.start !== 0 || served.end + 1 < limit || clientId === "" || !previewHeadPosted(contentType)) {
+		return body
+	}
+
+	return headTap(body, limit, bytes => {
+		self.clients
+			.get(clientId)
+			.then(client => {
+				client?.postMessage({ type: SW_MSG_PREVIEW_HEAD, id, bytes }, [bytes.buffer])
+			})
+			.catch(() => undefined)
+	})
 }
 
 // An inline response for preview `id` enqueued the file's last byte (SW_MSG_PREVIEW_DELIVERED).

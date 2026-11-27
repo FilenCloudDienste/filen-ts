@@ -7,6 +7,7 @@ import { controllerIsCurrent } from "@/lib/sw/register"
 import {
 	SW_DOWNLOAD_PREFIX,
 	SW_MSG_PREVIEW_DELIVERED,
+	SW_MSG_PREVIEW_HEAD,
 	SW_MSG_PREVIEW_STATUS,
 	SW_MSG_REGISTER_PORT_PREVIEW,
 	SW_MSG_REGISTER_PREVIEW,
@@ -497,7 +498,87 @@ function expectDelivery(id: string): void {
 			typeof data.id === "string"
 		) {
 			markDelivered(data.id)
+		} else if (
+			typeof data === "object" &&
+			data !== null &&
+			"type" in data &&
+			data.type === SW_MSG_PREVIEW_HEAD &&
+			"id" in data &&
+			typeof data.id === "string" &&
+			"bytes" in data &&
+			data.bytes instanceof Uint8Array
+		) {
+			keepHead(data.id, data.bytes)
 		}
+	})
+}
+
+// Heads the worker posted (SW_MSG_PREVIEW_HEAD) that nothing has asked for yet, oldest first: bounded, a head is up to
+// SW_PREVIEW_HEAD_BYTES.
+const heads = new Map<string, Uint8Array>()
+const MAX_HEADS = 4
+const headWaiters = new Map<string, Set<(head: Uint8Array) => void>>()
+
+function keepHead(id: string, head: Uint8Array): void {
+	const waiters = headWaiters.get(id)
+
+	if (waiters !== undefined) {
+		headWaiters.delete(id)
+
+		for (const waiter of waiters) {
+			waiter(head)
+		}
+
+		return
+	}
+
+	heads.delete(id)
+	heads.set(id, head)
+
+	if (heads.size > MAX_HEADS) {
+		const oldest = heads.keys().next().value
+
+		if (oldest !== undefined) {
+			heads.delete(oldest)
+		}
+	}
+}
+
+// The head of preview `id`'s next inline response from byte 0 (or of one that already passed and nothing took), as the
+// worker read it for that response: no read of its own. Only a type previewHeadPosted names has one. Null once
+// `signal` aborts.
+export function previewStreamHead(id: string, signal: AbortSignal): Promise<Uint8Array | null> {
+	const kept = heads.get(id)
+
+	if (kept !== undefined) {
+		heads.delete(id)
+
+		return Promise.resolve(kept)
+	}
+
+	if (signal.aborted) {
+		return Promise.resolve(null)
+	}
+
+	return new Promise(resolve => {
+		const waiters = headWaiters.get(id) ?? new Set<(head: Uint8Array) => void>()
+		const aborted = () => {
+			waiters.delete(arrived)
+
+			if (waiters.size === 0 && headWaiters.get(id) === waiters) {
+				headWaiters.delete(id)
+			}
+
+			resolve(null)
+		}
+		const arrived = (head: Uint8Array) => {
+			signal.removeEventListener("abort", aborted)
+			resolve(head)
+		}
+
+		waiters.add(arrived)
+		headWaiters.set(id, waiters)
+		signal.addEventListener("abort", aborted, { once: true })
 	})
 }
 

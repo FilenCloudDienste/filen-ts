@@ -5,6 +5,13 @@ import { AnimatableImage } from "@/features/preview/components/animatedImagePlay
 import { ownedFileItem } from "@/tests/fixtures/sdk"
 import { i18n } from "@/lib/i18n"
 
+const { previewStreamHead } = vi.hoisted(() => ({ previewStreamHead: vi.fn() }))
+
+vi.mock("@/features/preview/lib/previewStream", () => ({
+	previewStreamHead,
+	previewStreamIdOf: (url: string) => url.slice(url.lastIndexOf("/") + 1)
+}))
+
 // An animated image in the preview: the player takes over from the plain <img> once ImageDecoder has its first frame,
 // plays, pauses, steps and scrubs frames, honours the loop count, and leaves everything as it was where ImageDecoder
 // is missing or the file is a still.
@@ -58,15 +65,15 @@ class FakeImageDecoder {
 
 const item = ownedFileItem("cat.gif", "image/gif", { size: 64n })
 
-function renderImage() {
+function renderImage(url = "/sw/download/cat-gif") {
 	return render(
 		<AnimatableImage
 			item={item}
-			url="/preview/stream/cat.gif"
+			url={url}
 			alt="cat"
 		>
 			<img
-				src="/preview/stream/cat.gif"
+				src={url}
 				alt="cat"
 			/>
 		</AnimatableImage>
@@ -84,6 +91,7 @@ beforeEach(() => {
 	Object.assign(state, { frameCount: 3, repetitionCount: Number.POSITIVE_INFINITY, animated: true, decoded: [], closed: 0 })
 	drawn.length = 0
 	vi.stubGlobal("ImageDecoder", FakeImageDecoder)
+	previewStreamHead.mockImplementation(() => Promise.resolve(animatedGif()))
 	vi.stubGlobal(
 		"fetch",
 		vi.fn(() => Promise.resolve(new Response(animatedGif())))
@@ -112,6 +120,37 @@ describe("AnimatableImage", () => {
 		await flush()
 
 		expect(screen.getByRole("img", { name: "cat" }).tagName).toBe("IMG")
+		expect(fetch).not.toHaveBeenCalled()
+	})
+
+	it("reads a still's head from its <img> response and fetches nothing", async () => {
+		const gif = animatedGif()
+
+		// One image: the second is cut out.
+		previewStreamHead.mockImplementation(() => Promise.resolve(new Uint8Array([...gif.subarray(0, 36), ...gif.subarray(-1)])))
+		renderImage("/sw/download/still-gif")
+		await flush()
+
+		expect(previewStreamHead).toHaveBeenCalledWith("still-gif", expect.any(AbortSignal))
+		expect(screen.getByRole("img", { name: "cat" }).tagName).toBe("IMG")
+		expect(fetch).not.toHaveBeenCalled()
+
+		// A revisit the browser answers from memory posts no head: the verdict is kept.
+		cleanup()
+		previewStreamHead.mockClear()
+		renderImage("/sw/download/still-gif")
+		await flush()
+
+		expect(previewStreamHead).not.toHaveBeenCalled()
+		expect(fetch).not.toHaveBeenCalled()
+	})
+
+	it("keeps the plain image for a URL that is no service worker stream", async () => {
+		renderImage("/other/cat.gif")
+		await flush()
+
+		expect(screen.getByRole("img", { name: "cat" }).tagName).toBe("IMG")
+		expect(previewStreamHead).not.toHaveBeenCalled()
 		expect(fetch).not.toHaveBeenCalled()
 	})
 

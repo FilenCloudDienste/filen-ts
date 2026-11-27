@@ -1,11 +1,10 @@
 import { animatedImageType } from "@/features/preview/lib/animatedImage.logic"
+import { previewStreamHead, previewStreamIdOf } from "@/features/preview/lib/previewStream"
+import { SW_DOWNLOAD_PREFIX } from "@/lib/sw/protocol"
 
-// Opens an animated image for the preview's player: WebCodecs' ImageDecoder over the bytes already held, or over the
-// one download of the image's stream, read until its head says whether it animates. A still image (or a type this
+// Opens an animated image for the preview's player: WebCodecs' ImageDecoder over the bytes already held, or over a
+// download of the image's stream once the head its <img> read says it animates. A still image (or a type this
 // browser's ImageDecoder does not take) is left to the plain <img>.
-
-// Where every header the animation sniff reads sits.
-const HEAD_BYTES = 64 * 1024
 
 export interface AnimationSource {
 	readonly decoder: ImageDecoder
@@ -30,55 +29,10 @@ function decoderSupports(type: string): Promise<boolean> {
 	return answer
 }
 
-interface Head {
-	readonly bytes: Uint8Array
-	readonly done: boolean
-}
-
-async function readHead(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<Head> {
-	const chunks: Uint8Array[] = []
-	let length = 0
-
-	while (length < HEAD_BYTES) {
-		const { done, value } = await reader.read()
-
-		if (done) {
-			return { bytes: concat(chunks, length), done: true }
-		}
-
-		chunks.push(value)
-		length += value.byteLength
-	}
-
-	return { bytes: concat(chunks, length), done: false }
-}
-
-function concat(chunks: readonly Uint8Array[], length: number): Uint8Array {
-	if (chunks.length === 1 && chunks[0] !== undefined) {
-		return chunks[0]
-	}
-
-	const out = new Uint8Array(length)
-	let at = 0
-
-	for (const chunk of chunks) {
-		out.set(chunk, at)
-		at += chunk.byteLength
-	}
-
-	return out
-}
-
-// The head first, then the rest of the response as the decoder pulls it.
-function resumedStream(head: Head, reader: ReadableStreamDefaultReader<Uint8Array>): ReadableStream<Uint8Array> {
+// The response's body as the decoder pulls it, through a reader this keeps: a decoder that declines or fails leaves
+// the download to be stopped here, whether or not closing it cancels its stream.
+function relayed(reader: ReadableStreamDefaultReader<Uint8Array>): ReadableStream<Uint8Array> {
 	return new ReadableStream<Uint8Array>({
-		start: controller => {
-			controller.enqueue(head.bytes)
-
-			if (head.done) {
-				controller.close()
-			}
-		},
 		pull: async controller => {
 			const { done, value } = await reader.read()
 
@@ -92,6 +46,24 @@ function resumedStream(head: Head, reader: ReadableStreamDefaultReader<Uint8Arra
 			await reader.cancel(reason)
 		}
 	})
+}
+
+// The animation type of each stream id whose head was read, so a revisit the browser answers from its memory cache
+// (no response, so no head) still knows. Bounded; a type string or null each.
+const verdicts = new Map<string, string | null>()
+const MAX_VERDICTS = 64
+
+function rememberVerdict(id: string, type: string | null): void {
+	verdicts.delete(id)
+	verdicts.set(id, type)
+
+	if (verdicts.size > MAX_VERDICTS) {
+		const oldest = verdicts.keys().next().value
+
+		if (oldest !== undefined) {
+			verdicts.delete(oldest)
+		}
+	}
 }
 
 async function startDecoder(data: ImageBufferSource, type: string, signal: AbortSignal): Promise<AnimationSource | null> {
@@ -133,9 +105,11 @@ async function startDecoder(data: ImageBufferSource, type: string, signal: Abort
 	}
 }
 
-// `held`: the file's whole bytes when already in memory (the decoder copies them). `url`: the image's same-origin
-// stream URL otherwise; a blob: URL is never fetched (the CSP's connect-src refuses it). Aborting `signal` closes
-// the decoder and stops the download; after a resolution the caller owns both and closes the decoder itself.
+// `held`: the file's whole bytes when already in memory (the decoder copies them). `url`: the image's service worker
+// stream URL otherwise, whose head the worker hands over from the <img>'s own response (previewStreamHead): a still
+// costs no read beyond the <img>'s, and only an animation is fetched again, for the decoder. A blob: URL is never
+// fetched (the CSP's connect-src refuses it). Aborting `signal` closes the decoder and stops the download; after a
+// resolution the caller owns both and closes the decoder itself.
 export async function openAnimation(
 	held: Uint8Array | undefined,
 	url: string,
@@ -148,7 +122,25 @@ export async function openAnimation(
 		return type === null || !(await decoderSupports(type)) || signal.aborted ? null : await startDecoder(held, type, signal)
 	}
 
-	if (url.startsWith("blob:")) {
+	if (!url.startsWith(SW_DOWNLOAD_PREFIX)) {
+		return null
+	}
+
+	const id = previewStreamIdOf(url)
+	let type = verdicts.get(id)
+
+	if (type === undefined) {
+		const head = await previewStreamHead(id, signal)
+
+		if (head === null) {
+			return null
+		}
+
+		type = animatedImageType(head, totalSize)
+		rememberVerdict(id, type)
+	}
+
+	if (type === null || !(await decoderSupports(type)) || signal.aborted) {
 		return null
 	}
 
@@ -162,17 +154,7 @@ export async function openAnimation(
 	}
 
 	const reader = body.getReader()
-	const head = await readHead(reader)
-	const type = animatedImageType(head.bytes, totalSize)
-
-	if (type === null || !(await decoderSupports(type)) || signal.aborted) {
-		await reader.cancel().catch(() => undefined)
-
-		return null
-	}
-
-	// A decoder that declines (or fails) stops the download here too, whether or not closing it cancels its stream.
-	const source = await startDecoder(resumedStream(head, reader), type, signal).catch(async (error: unknown) => {
+	const source = await startDecoder(relayed(reader), type, signal).catch(async (error: unknown) => {
 		await reader.cancel().catch(() => undefined)
 
 		throw error

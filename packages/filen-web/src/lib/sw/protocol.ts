@@ -4,7 +4,7 @@ import type { ErrorDTO } from "@/lib/sdk/errors"
 // `/__sw/version` (bump on any change to sw.ts's runtime behavior, never on app/feature versioning)
 // and the message types + route prefixes it understands. Imported by both sw.ts and register.ts;
 // that import is the only edge between them.
-export const SW_PROTOCOL_VERSION = 20
+export const SW_PROTOCOL_VERSION = 21
 
 // Shared so the page side (register.ts's applyUpdate) can't drift from sw.ts's message listener with
 // a typo'd literal. The waiting worker activates on it unconditionally: the page first waits for the
@@ -100,6 +100,16 @@ export const SW_STREAM_GONE_INTERVAL_MS = 2_000
 // error. An image that fails after it had every byte failed in its decoder, not on the network, and no retry of the
 // same bytes changes that. The id is the URL's own path segment, nothing secret.
 export const SW_MSG_PREVIEW_DELIVERED = "FILEN_SW_PREVIEW_DELIVERED"
+// SW → the requesting window, `{ type, id, bytes }`: the first SW_PREVIEW_HEAD_BYTES (or the whole file, if shorter)
+// of an inline response from byte 0 for preview `id` of a type that may animate (previewHeadPosted), as the response
+// read them. The page tells a still from an animation by them without a read of its own.
+export const SW_MSG_PREVIEW_HEAD = "FILEN_SW_PREVIEW_HEAD"
+export const SW_PREVIEW_HEAD_BYTES = 64 * 1024
+const PREVIEW_HEAD_TYPES: ReadonlySet<string> = new Set(["image/gif", "image/png", "image/apng", "image/webp", "image/avif"])
+
+export function previewHeadPosted(contentType: string): boolean {
+	return PREVIEW_HEAD_TYPES.has(contentType.toLowerCase().trim())
+}
 // Ack error a registration answers with when the worker holds no session Client. An idle worker is
 // terminated and restarts with empty module globals, so the handed-over Client is gone while the page's
 // handoff memo still believes otherwise — the page heals on this by re-handing the session over and

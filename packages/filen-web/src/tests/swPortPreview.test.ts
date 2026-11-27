@@ -5,6 +5,8 @@ import {
 	SW_DOWNLOAD_PREFIX,
 	SW_ERROR_SUPERSEDED,
 	SW_MSG_PREVIEW_DELIVERED,
+	SW_MSG_PREVIEW_HEAD,
+	SW_PREVIEW_HEAD_BYTES,
 	SW_MSG_PREVIEW_STATUS,
 	SW_MSG_REGISTER_PORT_PREVIEW,
 	SW_MSG_RELEASE_PREVIEW,
@@ -40,7 +42,8 @@ async function loadSw(): Promise<void> {
 		skipWaiting: () => Promise.resolve(),
 		clients: {
 			claim: () => Promise.resolve(),
-			matchAll: () => Promise.resolve([{ postMessage: (data: unknown) => posted.push(data) }])
+			matchAll: () => Promise.resolve([{ postMessage: (data: unknown) => posted.push(data) }]),
+			get: (id: string) => Promise.resolve(id === "window-1" ? { postMessage: (data: unknown) => posted.push(data) } : undefined)
 		}
 	})
 	vi.resetModules()
@@ -105,10 +108,11 @@ async function registerPort(
 	return { ack, lifetime, reads }
 }
 
-function get(id: string, range?: string): { response: Response; settled: Promise<unknown> } {
+function get(id: string, range?: string, clientId = ""): { response: Response; settled: Promise<unknown> } {
 	const answered: { response?: Response; settled: Promise<unknown> } = { settled: Promise.resolve() }
 
 	listeners.get("fetch")?.({
+		clientId,
 		request: {
 			url: `https://app.test${SW_DOWNLOAD_PREFIX}${id}`,
 			method: "GET",
@@ -729,8 +733,33 @@ describe("sw.ts preview status", () => {
 })
 
 describe("sw.ts version", () => {
+	it("posts an animatable image's head to the window that read it, as the response passed it", async () => {
+		const size = SW_PREVIEW_HEAD_BYTES * 2
+		const isHead = (data: unknown): data is { type: string; id: string; bytes: Uint8Array } =>
+			(data as { type?: unknown }).type === SW_MSG_PREVIEW_HEAD
+
+		await registerPort("gif", size, "image/gif")
+		await registerPort("clip", size, "video/mp4")
+
+		const image = get("gif", undefined, "window-1")
+
+		expect(await bodyOf(image.response)).toEqual(expected(0, size - 1))
+		await image.settled
+
+		const heads = posted.filter(isHead)
+
+		expect(heads.map(head => head.id)).toEqual(["gif"])
+		expect(Array.from(heads[0]?.bytes ?? [])).toEqual(expected(0, SW_PREVIEW_HEAD_BYTES - 1))
+
+		// A video's body and a ranged read past byte 0 hand nothing.
+		posted = []
+		await bodyOf(get("clip", undefined, "window-1").response)
+		await bodyOf(get("gif", `bytes=10-${String(size - 1)}`, "window-1").response)
+		expect(posted.filter(isHead)).toEqual([])
+	})
+
 	it("reports its protocol version", async () => {
-		expect(SW_PROTOCOL_VERSION).toBe(20)
+		expect(SW_PROTOCOL_VERSION).toBe(21)
 
 		let response: Response | null = null
 
@@ -741,6 +770,6 @@ describe("sw.ts version", () => {
 			}
 		})
 
-		expect(await (response as Response | null)?.json()).toMatchObject({ v: 20 })
+		expect(await (response as Response | null)?.json()).toMatchObject({ v: 21 })
 	})
 })
