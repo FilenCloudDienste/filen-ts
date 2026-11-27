@@ -14,7 +14,8 @@ import { isRecordingCombo, useBindings } from "@/lib/keymap/registry"
 import { useLatestRef } from "@/lib/useLatestRef"
 import { isImeKeydown } from "@filen/shared/keymap"
 import { useObjectUrl } from "@/lib/useObjectUrl"
-import { ImageKeyGroupContext, ImageShownContext } from "@/features/preview/lib/imageDisplay"
+import { ImageKeyGroupContext, ImagePlaceholderContext, ImageShownContext } from "@/features/preview/lib/imageDisplay"
+import { ImagePlaceholder } from "@/features/preview/components/previewErrorState"
 
 // What the zoom hands the picture it wraps: its pointer and double-click handlers, and its fit and transform.
 interface ZoomBinding {
@@ -256,6 +257,8 @@ export function ZoomableImage({
 	const [natural, setNatural] = useState<Size | null>(null)
 	const [image, setImage] = useState<HTMLImageElement | null>(null)
 	const shown = use(ImageShownContext)
+	// Behind the picture until it has loaded: a large one streams in over it.
+	const placeholder = natural === null ? use(ImagePlaceholderContext) : null
 
 	// Stepping past a streamed image before it has loaded stops its download.
 	useReleaseOnUnmount(image)
@@ -265,8 +268,9 @@ export function ZoomableImage({
 	return (
 		<div
 			ref={containerRef}
-			className={CONTAINER_CLASS}
+			className={placeholder === null ? CONTAINER_CLASS : `${CONTAINER_CLASS} relative isolate`}
 		>
+			{placeholder === null ? null : <ImagePlaceholder url={placeholder} />}
 			<img
 				ref={element => {
 					setImage(element)

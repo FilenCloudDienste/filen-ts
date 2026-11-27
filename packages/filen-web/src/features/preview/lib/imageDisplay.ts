@@ -18,3 +18,7 @@ export interface ImageKeyGroup {
 }
 
 export const ImageKeyGroupContext = createContext<ImageKeyGroup | null>(null)
+
+// The file's grid thumbnail while it is already held in memory (never generated for this): an image viewer shows it
+// blurred until its own picture is in.
+export const ImagePlaceholderContext = createContext<string | null>(null)

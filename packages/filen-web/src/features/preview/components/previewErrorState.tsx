@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from "react"
+import { use, type ComponentProps, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { cn, driveItemName } from "@filen/shared"
 import { DownloadIcon } from "lucide-react"
@@ -9,6 +9,7 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useIsOnline } from "@/lib/useIsOnline"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import { usePreviewDownload } from "@/features/preview/lib/accessMode"
+import { ImagePlaceholderContext } from "@/features/preview/lib/imageDisplay"
 import { ItemIcon } from "@/features/drive/components/itemIcon"
 import { formatItemSize } from "@/features/drive/lib/format"
 import type { DriveItem } from "@/features/drive/lib/item"
@@ -114,12 +115,41 @@ export function PreviewNotTextState({ item, onShowAnyway }: { item: DriveItem; o
 	)
 }
 
-// The viewer-sized spinner, inheriting the overlay's foreground color.
+// The viewer-sized spinner, inheriting the overlay's foreground color; over the file's thumbnail, blurred, where an
+// image viewer has one in memory.
 export function PreviewLoading() {
-	return (
+	const placeholder = use(ImagePlaceholderContext)
+	const spinner = (
 		<LoadingState
 			size="lg"
 			className="text-inherit"
+		/>
+	)
+
+	if (placeholder === null) {
+		return spinner
+	}
+
+	return (
+		<div className="relative isolate size-full overflow-hidden">
+			<ImagePlaceholder url={placeholder} />
+			{spinner}
+		</div>
+	)
+}
+
+// The blurred thumbnail behind a picture still loading. Decorative; one already evicted from the cache shows nothing.
+export function ImagePlaceholder({ url }: { url: string }) {
+	return (
+		<img
+			src={url}
+			alt=""
+			aria-hidden="true"
+			draggable={false}
+			className="pointer-events-none absolute inset-0 -z-10 size-full scale-105 object-contain blur-xl select-none"
+			onError={event => {
+				event.currentTarget.hidden = true
+			}}
 		/>
 	)
 }

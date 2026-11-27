@@ -10,7 +10,8 @@ import { transformHeicBytes } from "@/features/preview/lib/rasterDecode"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { usePreviewAccessMode } from "@/features/preview/lib/accessMode"
 import { useRawPreview } from "@/features/preview/hooks/useRawPreview"
-import { getThumbnailUrl } from "@/features/drive/lib/thumbnails"
+import { getThumbnailUrl, peekThumbnailUrl } from "@/features/drive/lib/thumbnails"
+import { ImagePlaceholderContext } from "@/features/preview/lib/imageDisplay"
 // side-effect: registers the generators getThumbnailUrl needs, as useThumbnail.ts does.
 import "@/features/drive/lib/thumbGenerators"
 import { PreviewErrorState, PreviewGate, PreviewLoading } from "@/features/preview/components/previewErrorState"
@@ -205,7 +206,7 @@ function RawThumbnailFallback({ item, alt }: { item: DriveItem; alt: string }) {
 
 // Camera RAW: no browser decodes the container, so the page shows the JPEG the camera embedded in it,
 // extracted by the SDK (useRawPreview). Never the SW route and never a whole-file download.
-export function RawImageViewer({ item, alt }: ImageViewerProps) {
+function RawImageRoute({ item, alt }: ImageViewerProps) {
 	return (
 		<PreviewGate result={useRawPreview(item)}>
 			{ready =>
@@ -295,7 +296,7 @@ function DecodedRoute({
 // decode of a few hundred bytes) rather than take the decoded route an unknown answer reads as. The route is then
 // picked once per file: a probe that refines the device profile while it is open changes the next open, never this one
 // (which would drop the decoded picture, its zoom, and download it again).
-export function ImageViewer({ item, alt, imageRef, pageSourceRef }: ImageViewerProps) {
+function ImageRoute({ item, alt, imageRef, pageSourceRef }: ImageViewerProps) {
 	const profile = useDeviceProfile()
 	const uuid = item.data.uuid
 	const probe = pendingImageProbe(item, profile)
@@ -373,5 +374,22 @@ export function ImageViewer({ item, alt, imageRef, pageSourceRef }: ImageViewerP
 		</NativeSizeGate>
 	) : (
 		native
+	)
+}
+
+// The viewers, over the grid thumbnail while it is in memory: it shows blurred until the picture is in.
+export function ImageViewer(props: ImageViewerProps) {
+	return (
+		<ImagePlaceholderContext value={peekThumbnailUrl(props.item.data.uuid)}>
+			<ImageRoute {...props} />
+		</ImagePlaceholderContext>
+	)
+}
+
+export function RawImageViewer(props: ImageViewerProps) {
+	return (
+		<ImagePlaceholderContext value={peekThumbnailUrl(props.item.data.uuid)}>
+			<RawImageRoute {...props} />
+		</ImagePlaceholderContext>
 	)
 }
