@@ -1199,6 +1199,33 @@ describe("notes.addParticipants (bulk)", () => {
 		expect(updatedEntries.find((n: Note) => n.uuid === "note-bulk")?.participants).toHaveLength(2)
 	})
 
+	it("writes the participants added before a failure to the cache, then rethrows", async () => {
+		const addNoteParticipantMock = vi
+			.fn()
+			.mockImplementationOnce((n: Note, contact: { userId: bigint; email: string }) =>
+				Promise.resolve({
+					...n,
+					participants: [...n.participants, makeParticipant({ userId: contact.userId, email: contact.email })]
+				})
+			)
+			.mockRejectedValueOnce(new Error("add failed"))
+
+		mockGetSdkClients.mockResolvedValue({ authedSdkClient: { addNoteParticipant: addNoteParticipantMock } })
+
+		const note = makeNote({ participants: [], uuid: "note-partial" })
+		const contacts = [makeContact(55n, "a@test.com"), makeContact(66n, "b@test.com")]
+
+		await expect(notes.addParticipants({ note, contacts, permissionsWrite: true })).rejects.toThrow("add failed")
+
+		expect(mockNotesWithContentQueryUpdate).toHaveBeenCalledTimes(1)
+
+		const callArgs = mockNotesWithContentQueryUpdate.mock.calls[0]
+		if (!callArgs) throw new Error("expected a call")
+		const { updater } = callArgs[0]
+
+		expect(updater([note]).find((n: Note) => n.uuid === "note-partial")?.participants).toHaveLength(1)
+	})
+
 	it("returns the note untouched (no SDK, no cache) when all contacts already exist", async () => {
 		const participant = makeParticipant({ userId: 42n })
 		const note = makeNote({ participants: [participant] })

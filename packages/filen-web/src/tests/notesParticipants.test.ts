@@ -93,6 +93,21 @@ describe("addNoteParticipants — sequential ordering", () => {
 	})
 })
 
+describe("addNoteParticipants — partial failure", () => {
+	it("upserts the participants added before the failure, then returns the error", async () => {
+		const note = mockNote({ participants: [] })
+		testQueryClient.setQueryData(NOTES_QUERY_KEY, [note])
+		const afterA = mockNote({ participants: [mockNoteParticipant({ userId: 10n })] })
+		addNoteParticipantOp.mockResolvedValueOnce(afterA)
+		addNoteParticipantOp.mockRejectedValueOnce(new Error("fail"))
+
+		const outcome = await addNoteParticipants(note, [mockPlainContact({ userId: 10n }), mockPlainContact({ userId: 20n })])
+
+		expect(outcome.status).toBe("error")
+		expect(notesQueryGet()).toEqual([afterA])
+	})
+})
+
 describe("removeNoteParticipant", () => {
 	it("is a no-op (no worker call) when the participant isn't on the note", async () => {
 		const note = mockNote({ participants: [] })

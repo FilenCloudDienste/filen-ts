@@ -28,6 +28,11 @@ export async function addNoteParticipants(note: Note, contacts: readonly Contact
 		const outcome = await attemptOp(sdkApi.addNoteParticipant(updated, contact, true))
 
 		if (outcome.status === "error") {
+			// Keep the participants already added; a retry then skips them.
+			if (updated !== note) {
+				notesQueryUpsert(updated)
+			}
+
 			return outcome
 		}
 

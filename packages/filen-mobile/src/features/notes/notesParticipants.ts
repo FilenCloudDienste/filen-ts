@@ -79,18 +79,23 @@ export async function addParticipants({
 	// "base note + their own contact" from the same stale note, so the last write clobbered the rest.
 	let updated = note
 
-	for (const contact of toAdd) {
-		updated = wrapSdkNote(
-			await authedSdkClient.addNoteParticipant(
-				updated,
-				contact,
-				permissionsWrite,
-				toSignalOpts(signal)
+	try {
+		for (const contact of toAdd) {
+			updated = wrapSdkNote(
+				await authedSdkClient.addNoteParticipant(
+					updated,
+					contact,
+					permissionsWrite,
+					toSignalOpts(signal)
+				)
 			)
-		)
+		}
+	} finally {
+		// Also on a partial failure: keep the participants already added; a retry then skips them.
+		if (updated !== note) {
+			notesQueryReplace(updated)
+		}
 	}
-
-	notesQueryReplace(updated)
 
 	return updated
 }
