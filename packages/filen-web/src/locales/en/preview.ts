@@ -146,8 +146,8 @@ export const preview = {
 	previewNotText: "This file isn't text.",
 	/** Preview overlay button — beside "This file isn't text.": shows the file's bytes as text anyway, without editing */
 	previewShowAnyway: "Show anyway (read-only)",
-	/** Preview overlay body — a streamed image/video/audio failed mid-playback and the file is too large to safely retry buffered */
-	previewStreamFailed: "This preview failed and the file is too large to retry.",
+	/** Preview overlay body — a streamed image/video/audio stopped loading (too large to load whole instead); shown above "Try again" and "Download" */
+	previewStreamFailed: "This preview stopped loading. Try again, or download the file.",
 	/** Preview overlay body — a large image this browser cannot stream right now (no inline type it may be served as, or the page has no service worker yet), and too large to load whole */
 	previewTooLargeToShowHere: "This file is too large to show here.",
 	/** Preview overlay body — a HEIC/HEIF image could not be converted for preview (corrupt or unsupported file) */

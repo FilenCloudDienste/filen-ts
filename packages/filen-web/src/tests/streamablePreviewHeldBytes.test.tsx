@@ -58,7 +58,12 @@ vi.mock("@/features/preview/hooks/usePreviewBytes", async () => {
 import "@/lib/i18n"
 import { StreamablePreview } from "@/features/preview/components/streamablePreview"
 import { clearPreviewCache, loadPreviewBytes } from "@/features/preview/lib/previewCache"
-import { PreviewAccessModeProvider, PreviewByteOriginProvider, previewCacheScope } from "@/features/preview/lib/accessMode"
+import {
+	PreviewAccessModeProvider,
+	PreviewByteOriginProvider,
+	PreviewDownloadableProvider,
+	previewCacheScope
+} from "@/features/preview/lib/accessMode"
 import type { ByteOrigin, EntryAccessKind } from "@/lib/sdk/byteOrigin"
 import { narrowItem } from "@/features/drive/lib/item"
 import { PREVIEW_MAX_BYTES } from "@/features/drive/lib/preview.logic"
@@ -191,6 +196,20 @@ describe("StreamablePreview", () => {
 			expect(screen.getByText("This file is too large to show here.")).toBeTruthy()
 			expect(streamUrl).not.toHaveBeenCalled()
 			expect(bytesRead).not.toHaveBeenCalled()
+		})
+
+		it("offers Try again and Download when its stream fails", () => {
+			const refetch = vi.fn()
+			const onDownload = vi.fn()
+
+			streamUrl.mockReturnValueOnce({ status: "error", refetch } as never)
+			render(createElement(PreviewDownloadableProvider, { downloadable: true, onDownload, children: preview("failed", big) }))
+
+			expect(screen.getByText("This preview stopped loading. Try again, or download the file.")).toBeTruthy()
+			screen.getByRole("button", { name: "Download" }).click()
+			expect(onDownload).toHaveBeenCalledTimes(1)
+			screen.getByRole("button", { name: "Try again" }).click()
+			expect(refetch).toHaveBeenCalledTimes(1)
 		})
 
 		it("still buffers at the cap", () => {

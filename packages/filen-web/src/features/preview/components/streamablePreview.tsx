@@ -18,7 +18,13 @@ import { usePreviewCacheScope, usePreviewOrigin } from "@/features/preview/lib/a
 import { getPreviewBytes } from "@/features/preview/lib/previewCache"
 import { originRanged } from "@/lib/sdk/byteOrigin"
 import { useObjectUrl } from "@/lib/useObjectUrl"
-import { PreviewErrorState, PreviewGate, PreviewLoading, PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
+import {
+	PreviewDownloadButton,
+	PreviewErrorState,
+	PreviewGate,
+	PreviewLoading,
+	PreviewUnsupportedState
+} from "@/features/preview/components/previewErrorState"
 
 // Renders the image for a resolved URL; `onError` takes the <img> that failed. It is set on the streamed path, and on
 // the buffered one only where a decode failure has somewhere to go (onDecodeFailure): otherwise the blob path keeps
@@ -83,6 +89,7 @@ function StreamedPreview({
 					setCapExceeded(false)
 					result.refetch()
 				}}
+				action={<PreviewDownloadButton />}
 			/>
 		)
 	}
