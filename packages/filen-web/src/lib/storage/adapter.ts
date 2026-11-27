@@ -307,6 +307,16 @@ export async function kvClear(): Promise<void> {
 				continue
 			}
 
+			// The notes search index lives beside the kv table: a straggler write (or a leader without the reset)
+			// would otherwise keep decrypted note text.
+			try {
+				await api.noteIndexClear()
+			} catch (e) {
+				if (!isMissingStorageMethod(e)) {
+					throw e
+				}
+			}
+
 			if (prefixDelete) {
 				try {
 					await api.kvDeletePrefix("")

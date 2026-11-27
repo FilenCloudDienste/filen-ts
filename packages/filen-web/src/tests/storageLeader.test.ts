@@ -7,7 +7,8 @@ const worker = vi.hoisted(() => ({
 	terminate: vi.fn(),
 	release: vi.fn(),
 	open: { current: (): Promise<void> => Promise.resolve() },
-	kvGets: [] as string[]
+	kvGets: [] as string[],
+	noteIndexPuts: [] as unknown[][]
 }))
 
 vi.mock("@/workers/db.worker.ts?worker", () => ({
@@ -27,6 +28,11 @@ vi.mock("comlink", () => {
 				worker.kvGets.push(key)
 
 				return Promise.resolve("from-leader")
+			},
+			noteIndexPut: (...args: unknown[]) => {
+				worker.noteIndexPuts.push(args)
+
+				return Promise.resolve()
 			},
 			kvPrefixBytes: (prefixes: string[]) => Promise.resolve(prefixes.map(prefix => prefix.length)),
 			// A full VACUUM on a large database, well past the default RPC timeout.
@@ -183,6 +189,7 @@ beforeEach(() => {
 	worker.release.mockClear()
 	worker.open.current = () => Promise.resolve()
 	worker.kvGets.length = 0
+	worker.noteIndexPuts.length = 0
 	vi.stubGlobal("navigator", { locks })
 	vi.stubGlobal("BroadcastChannel", FakeChannel)
 })
@@ -358,6 +365,15 @@ describe("follower RPC", () => {
 		const api = await follower()
 
 		await expect(api.kvPrefixBytes(["rq.", "audio.v1.tags."])).resolves.toEqual([3, 14])
+	})
+
+	it("runs a follower's search index write on the leader's worker", async () => {
+		const api = await follower()
+		const rows = [{ uuid: "a", edited: "1", text: "note text" }]
+
+		await api.noteIndexPut("account", rows)
+
+		expect(worker.noteIndexPuts).toEqual([["account", rows]])
 	})
 
 	it("reaches dumpLogs on the leader", async () => {

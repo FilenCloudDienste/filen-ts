@@ -85,6 +85,12 @@ const STORAGE_METHODS = [
 	"kvPrefixBytes",
 	"vacuum",
 	"wipe",
+	"noteIndexStamps",
+	"noteIndexPut",
+	"noteIndexDelete",
+	"noteIndexPrune",
+	"noteIndexSearch",
+	"noteIndexClear",
 	"dumpLogs"
 ] as const satisfies readonly (keyof StorageApi)[]
 

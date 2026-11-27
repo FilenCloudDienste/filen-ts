@@ -4,6 +4,15 @@ import sqlite3InitModule, { type SAHPoolUtil, type SqlValue } from "@sqlite.org/
 import { opfsUnavailableError } from "@/lib/storage/errors"
 import { isLockConflictError, isNotFoundError } from "@/lib/storage/opfs"
 import { log, type LogEntry } from "@/lib/log"
+import {
+	noteIndexClear,
+	noteIndexDelete,
+	noteIndexPrune,
+	noteIndexPut,
+	noteIndexSearch,
+	noteIndexStamps,
+	type NoteIndexRow
+} from "@/workers/noteIndex"
 
 // Narrow local interface — sqlite-wasm's own typings are inconsistent here (see the SAH pool / oo1
 // overload set in the installed `.d.mts`): an `OpfsSAHPoolDb` instance (which extends the base
@@ -382,6 +391,22 @@ const api = {
 		}
 
 		return deleted
+	},
+	// The notes full-text index (noteIndex.ts). Every call but the clear names the account it is for.
+	noteIndexStamps: (account: string): [string, string][] => noteIndexStamps(requireDb(), account),
+	noteIndexPut: (account: string, rows: NoteIndexRow[]): void => {
+		noteIndexPut(requireDb(), account, rows)
+	},
+	noteIndexDelete: (account: string, uuids: string[]): void => {
+		noteIndexDelete(requireDb(), account, uuids)
+	},
+	noteIndexPrune: (account: string, keep: string[]): void => {
+		noteIndexPrune(requireDb(), account, keep)
+	},
+	noteIndexSearch: (account: string, match: string, limit: number): [string, string][] =>
+		noteIndexSearch(requireDb(), account, match, limit),
+	noteIndexClear: (): void => {
+		noteIndexClear(requireDb())
 	},
 	// This realm's log ring (lib/log.ts), pulled by the page's Logs view and export (features/settings/lib/logs.ts),
 	// from a follower tab through the leader's worker.
