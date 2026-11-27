@@ -5,6 +5,7 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { createDirectory } from "@/features/drive/lib/actions"
 import { notifyIfNameIsHidden } from "@/features/drive/lib/hiddenNameNotice"
 import { InputDialog } from "@/components/dialogs/inputDialog"
+import { useNameFieldCheck } from "@/features/drive/hooks/useNameFieldCheck"
 
 export interface NewDirectoryDialogProps {
 	open: boolean
@@ -18,6 +19,8 @@ export interface NewDirectoryDialogProps {
 export function NewDirectoryDialog({ open, onOpenChange, parentUuid, hiddenNotice }: NewDirectoryDialogProps) {
 	const { t } = useTranslation("drive")
 	const [pending, setPending] = useState(false)
+	const [value, setValue] = useState("")
+	const check = useNameFieldCheck({ parentUuid, name: value })
 
 	async function handleSubmit(name: string): Promise<void> {
 		setPending(true)
@@ -49,8 +52,16 @@ export function NewDirectoryDialog({ open, onOpenChange, parentUuid, hiddenNotic
 			label={t("driveNewDirectoryLabel")}
 			placeholder={t("driveNewDirectoryPlaceholder")}
 			submitLabel={t("driveNewDirectorySubmit")}
-			validate={name => name.trim().length > 0}
-			onOpenChange={onOpenChange}
+			validate={name => name.trim().length > 0 && !check.blocked(name)}
+			errorFor={() => check.error}
+			onValueChange={setValue}
+			onOpenChange={next => {
+				if (!next) {
+					setValue("")
+				}
+
+				onOpenChange(next)
+			}}
 			onSubmit={value => {
 				void handleSubmit(value)
 			}}

@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { singleOrCountKey } from "@/lib/i18n"
 import { type DriveItem } from "@/features/drive/lib/item"
@@ -14,6 +15,7 @@ import { ExtractDestinationDialog } from "@/features/drive/components/extractDes
 import { NewPlaylistWithTracksDialog } from "@/features/audio/components/newPlaylistWithTracksDialog"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { InputDialog } from "@/components/dialogs/inputDialog"
+import { useNameFieldCheck } from "@/features/drive/hooks/useNameFieldCheck"
 
 // The per-item dialogs every item surface (drive listing, photos, the preview's header menu) mounts
 // identically; each surface keeps its own async handlers and pending state.
@@ -27,6 +29,9 @@ export interface RenameItemDialogProps {
 
 export function RenameItemDialog({ item, pending, onSubmit, onClose }: RenameItemDialogProps) {
 	const { t } = useTranslation("drive")
+	const initialName = item.data.decryptedMeta?.name ?? ""
+	const [value, setValue] = useState(initialName)
+	const check = useNameFieldCheck({ parentUuid: item.data.parent, name: value, self: item })
 
 	return (
 		<InputDialog
@@ -35,9 +40,12 @@ export function RenameItemDialog({ item, pending, onSubmit, onClose }: RenameIte
 			title={t("driveActionRename")}
 			body={t("driveRenameDialogBody")}
 			label={t("driveNewDirectoryLabel")}
-			initialValue={item.data.decryptedMeta?.name ?? ""}
+			initialValue={initialName}
 			submitLabel={t("driveActionRename")}
-			validate={value => value.trim().length > 0}
+			validate={next => next.trim().length > 0 && !check.blocked(next)}
+			errorFor={() => check.error}
+			warningFor={() => check.warning}
+			onValueChange={setValue}
 			onOpenChange={open => {
 				if (!open) {
 					onClose()

@@ -1,6 +1,6 @@
 import { useState, type ComponentProps, type SubmitEvent } from "react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Field, FieldError, FieldLabel } from "@/components/ui/field"
+import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { SecretInput } from "@/components/ui/secretInput"
 import { Button } from "@/components/ui/button"
@@ -42,6 +42,8 @@ interface InputDialogProps {
 	// Why the value can't be submitted, shown under the field; null while there is nothing to say (an
 	// empty field only disables the submit). Omitted shows nothing.
 	errorFor?: ((value: string) => string | null) | undefined
+	// A note under the field that does not block the submit (a rename changing a file's type); not shown with an error.
+	warningFor?: ((value: string) => string | null) | undefined
 	onOpenChange: (open: boolean) => void
 	onSubmit: (value: string) => void
 	// Every edit of the value, for a caller that keeps what was typed.
@@ -74,6 +76,7 @@ function InputDialog({
 	secondaryAction,
 	validate,
 	errorFor,
+	warningFor,
 	onOpenChange,
 	onSubmit,
 	onValueChange
@@ -96,6 +99,7 @@ function InputDialog({
 
 	const valid = validate(value)
 	const error = errorFor?.(value) ?? null
+	const warning = error === null ? (warningFor?.(value) ?? null) : null
 
 	const handleOpenChange = pendingGuardedOpenChange(pending, onOpenChange)
 
@@ -119,7 +123,7 @@ function InputDialog({
 		readOnly: pending,
 		className: pending ? "opacity-50" : undefined,
 		"aria-invalid": error !== null ? true : undefined,
-		"aria-describedby": error !== null ? "input-dialog-error" : undefined,
+		"aria-describedby": error !== null ? "input-dialog-error" : warning !== null ? "input-dialog-warning" : undefined,
 		onChange: e => {
 			setValue(e.target.value)
 			onValueChange?.(e.target.value)
@@ -171,6 +175,7 @@ function InputDialog({
 							/>
 						)}
 						{error !== null ? <FieldError id="input-dialog-error">{error}</FieldError> : null}
+						{warning !== null ? <FieldDescription id="input-dialog-warning">{warning}</FieldDescription> : null}
 					</Field>
 					<DialogFooter>
 						{secondaryAction === undefined ? null : (

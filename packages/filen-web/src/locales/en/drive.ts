@@ -1253,5 +1253,14 @@ export const drive = {
 	/** Name conflict dialog — checkbox: the choice made applies to every remaining clash; {{count}} = remaining clashes */
 	driveConflictApplyToAll_other: "Do this for all {{count}} remaining conflicts",
 
+	// ── Name field checks (rename, new directory) ───────────────────────────
+	/** Rename and New directory dialogs — the name is used by another file there */
+	driveNameTakenByFile: "A file with this name already exists here.",
+	/** Rename and New directory dialogs — the name is used by another directory there */
+	driveNameTakenByDirectory: "A directory with this name already exists here.",
+	/** Rename dialog — soft warning when the new name changes a file's extension; {{from}} and {{to}} = old and new extension, e.g. ".txt" (empty shown as "none") */
+	driveRenameExtensionChange: "This changes the file type from {{from}} to {{to}}. The file may not open the same way.",
+	/** Rename dialog — how a missing extension is named in driveRenameExtensionChange */
+	driveRenameExtensionNone: "none",
 	...driveDownloadAs
 } as const
