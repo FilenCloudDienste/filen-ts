@@ -16,6 +16,7 @@ import { CONTEXT_TREE_MENU_FAMILY } from "@/features/drive/components/directoryT
 import { TransferSubmenu } from "@/features/drive/components/transferSubmenu"
 import { BulkExtractSubmenu, CompressSubmenu } from "@/features/drive/components/archiveSubmenus"
 import { DownloadAsSubmenu } from "@/features/drive/components/downloadAsSubmenu"
+import { AddToPlaylistSubmenu } from "@/features/drive/components/addToPlaylistSubmenu"
 import { DriveContextMenuContent, type ItemDestination } from "@/features/drive/components/itemMenu"
 import { DRIVE_ITEM_SHORTCUTS, type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
 import { MenuKbd } from "@/lib/keymap/kbdHints"
@@ -82,6 +83,20 @@ export function DriveBulkContextMenuContent({ variant, selectedItems, onBulkActi
 							family={CONTEXT_TREE_MENU_FAMILY}
 							disabled={offlineDisabled}
 							items={selectedItems}
+						/>
+					)
+				}
+
+				if (descriptor.id === "addToPlaylist") {
+					return (
+						<AddToPlaylistSubmenu
+							key={descriptor.id}
+							family={CONTEXT_TREE_MENU_FAMILY}
+							disabled={offlineDisabled}
+							items={selectedItems}
+							onNewPlaylist={() => {
+								onBulkAction("addToNewPlaylist")
+							}}
 						/>
 					)
 				}

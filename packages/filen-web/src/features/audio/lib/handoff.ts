@@ -19,6 +19,11 @@ export function isAudioItem(item: DriveItem): boolean {
 	return previewType(item) === "audio" && withinFormatCap(item)
 }
 
+// A song a playlist can take from a drive selection: what the handoff would queue, never an undecryptable file.
+export function isPlaylistSong(item: DriveItem): boolean {
+	return !item.data.undecryptable && isAudioItem(item)
+}
+
 // Builds the playable queue track for a file item. `base.data` on the file arm is a structural superset
 // of the SDK File union member, so it is assignable to AnyFile with no adapter (identical reasoning to
 // features/drive/lib/download's narrowToAnyFile — replicated locally to keep this module worker-free).

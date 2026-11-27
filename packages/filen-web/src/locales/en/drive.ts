@@ -418,6 +418,12 @@ export const drive = {
 	driveActionUnshare: "Unshare",
 	/** Trash toolbar — permanently delete every item currently in the trash; also the empty-trash confirm dialog's confirm button */
 	driveActionEmptyTrash: "Empty trash",
+	/** Item menu (only when the item or selection holds a playable song) — submenu adding the song(s) to one of the user's playlists; other items are skipped */
+	driveActionAddToPlaylist: "Add to playlist",
+	/** Add to playlist submenu — last entry: create a playlist (opens its name dialog) and add the song(s) to it */
+	driveAddToNewPlaylist: "New playlist…",
+	/** Add to playlist submenu — shown when the playlists list could not be loaded */
+	driveAddToPlaylistLoadError: "Couldn't load playlists",
 
 	// ── Rename dialog ────────────────────────────────────────────────────────
 	/** Rename dialog — body under the title (driveActionRename doubles as both the dialog title and its submit button, matching the new-directory dialog's own title/submit pairing) */

@@ -225,6 +225,7 @@ export function usePreviewItemMenu({
 			case "compress":
 			case "extract":
 			case "extractTo":
+			case "addToNewPlaylist":
 				return (
 					<ItemDialog
 						kind={menuDialogKind}

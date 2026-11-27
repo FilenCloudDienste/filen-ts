@@ -15,9 +15,19 @@ import { runBulkActivity } from "@/lib/activity/activity"
 // link — can never be bulk-dispatched, so they have no place here). "share"/"unshare" are both
 // bulk-dispatchable (the contact picker / unshare confirm each take the whole selection), unlike the
 // other link/access kinds. "compress" opens the options dialog, "extractTo" the extract destination
-// picker (bulk extract has no options dialog).
+// picker (bulk extract has no options dialog), "addToNewPlaylist" the new-playlist name dialog.
 export type BulkDialogActionKind =
-	"move" | "copy" | "compress" | "extractTo" | "share" | "unshare" | "trash" | "delete" | "restoreSelected" | "disableLink"
+	| "move"
+	| "copy"
+	| "compress"
+	| "extractTo"
+	| "share"
+	| "unshare"
+	| "trash"
+	| "delete"
+	| "restoreSelected"
+	| "disableLink"
+	| "addToNewPlaylist"
 
 export type BulkActionDescriptor = ActionDescriptor<
 	DriveKey,
@@ -33,6 +43,7 @@ export type BulkActionDescriptor = ActionDescriptor<
 	| "delete"
 	| "download"
 	| "downloadAs"
+	| "addToPlaylist"
 	| "disableLink",
 	BulkDialogActionKind
 >
@@ -113,6 +124,12 @@ export function driveBulkActions(variant: DriveVariant, flags: DriveSelectionFla
 		if (flags.everyDownloadAs) {
 			descriptors.push({ id: "downloadAs", ...ACTION_DEFS.downloadAs, run: "direct" })
 		}
+	}
+
+	// Only when a playable song is picked: the rest of the selection (directories, other files, undecryptable ones)
+	// is skipped by the add, so an undecryptable item doesn't hide it. A submenu (addToPlaylistSubmenu.tsx).
+	if (flags.includesPlaylistSong) {
+		descriptors.push({ id: "addToPlaylist", ...ACTION_DEFS.addToPlaylist, run: "direct" })
 	}
 
 	// Trash is NOT gated by undecryptable (pure uuid, same as restore/delete above) and is never
@@ -200,6 +217,7 @@ const OFFLINE_GATED_BULK_IDS: ReadonlySet<BulkActionDescriptor["id"]> = new Set(
 	"delete",
 	"download",
 	"downloadAs",
+	"addToPlaylist",
 	"disableLink"
 ])
 
@@ -230,8 +248,8 @@ export function runBulkDescriptor(
 		return
 	}
 
-	// A submenu on every surface (downloadAsSubmenu.tsx): its entries start the export.
-	if (descriptor.id === "downloadAs") {
+	// Submenus on every surface (downloadAsSubmenu.tsx, addToPlaylistSubmenu.tsx): their entries run the action.
+	if (descriptor.id === "downloadAs" || descriptor.id === "addToPlaylist") {
 		return
 	}
 

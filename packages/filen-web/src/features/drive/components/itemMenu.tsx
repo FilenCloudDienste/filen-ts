@@ -35,6 +35,7 @@ import {
 import { TransferSubmenu } from "@/features/drive/components/transferSubmenu"
 import { CompressSubmenu, ExtractSubmenu } from "@/features/drive/components/archiveSubmenus"
 import { DownloadAsSubmenu } from "@/features/drive/components/downloadAsSubmenu"
+import { AddToPlaylistSubmenu } from "@/features/drive/components/addToPlaylistSubmenu"
 import { DirectoryDestinationEntries, type DestinationActions } from "@/features/drive/components/destinationMenu"
 import { ContextMenuContent } from "@/components/ui/context-menu"
 import { DropdownMenuContent } from "@/components/ui/dropdown-menu"
@@ -200,6 +201,15 @@ function ItemMenuEntries({
 							family={family}
 							disabled={descriptor.enabled === false}
 							items={[item]}
+						/>
+					) : descriptor.id === "addToPlaylist" ? (
+						<AddToPlaylistSubmenu
+							family={family}
+							disabled={descriptor.enabled === false}
+							items={[item]}
+							onNewPlaylist={() => {
+								onItemAction("addToNewPlaylist", item)
+							}}
 						/>
 					) : descriptor.id === "extract" ? (
 						<ExtractSubmenu

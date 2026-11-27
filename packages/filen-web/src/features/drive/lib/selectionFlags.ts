@@ -2,6 +2,7 @@ import { driveItemName } from "@filen/shared"
 import { isDirectoryItem, isSharedRootDriveItem, type DriveItem } from "@/features/drive/lib/item"
 import { isArchiveCandidateName } from "@/features/drive/lib/archiveFormats"
 import { downloadAsSource } from "@/features/drive/lib/downloadAs.logic"
+import { isPlaylistSong } from "@/features/audio/lib/handoff"
 
 // Aggregated flags for a Drive multi-selection, computed in a single pass — the bulk-action bar's
 // only source of gating truth (directoryListing.tsx computes this once per render from
@@ -29,6 +30,8 @@ export interface DriveSelectionFlags {
 	// True iff every selected item is a document or spreadsheet the item menus export (downloadAsSource) — the bulk
 	// Download as gate.
 	everyDownloadAs: boolean
+	// True iff any selected item is a playable song (isPlaylistSong) — the bulk Add to playlist gate.
+	includesPlaylistSong: boolean
 }
 
 // Returned by reference (not rebuilt) for an empty selection, mirroring mobile's EMPTY_DRIVE_FLAGS —
@@ -41,7 +44,8 @@ const EMPTY_DRIVE_SELECTION_FLAGS: DriveSelectionFlags = Object.freeze({
 	includesUndecryptable: false,
 	everySharedRoot: false,
 	everyArchive: false,
-	everyDownloadAs: false
+	everyDownloadAs: false,
+	includesPlaylistSong: false
 })
 
 // The set a "select all" builds — every item except the undecryptable ones. Bulk actions gate
@@ -65,6 +69,7 @@ export function aggregateDriveSelectionFlags(items: readonly DriveItem[]): Drive
 	let everySharedRoot = true
 	let everyArchive = true
 	let everyDownloadAs = true
+	let includesPlaylistSong = false
 
 	for (const item of items) {
 		if (item.data.favorited) {
@@ -95,6 +100,10 @@ export function aggregateDriveSelectionFlags(items: readonly DriveItem[]): Drive
 		if (everyDownloadAs && downloadAsSource(item) === null) {
 			everyDownloadAs = false
 		}
+
+		if (!includesPlaylistSong && isPlaylistSong(item)) {
+			includesPlaylistSong = true
+		}
 	}
 
 	return {
@@ -105,6 +114,7 @@ export function aggregateDriveSelectionFlags(items: readonly DriveItem[]): Drive
 		includesUndecryptable,
 		everySharedRoot,
 		everyArchive,
-		everyDownloadAs
+		everyDownloadAs,
+		includesPlaylistSong
 	}
 }

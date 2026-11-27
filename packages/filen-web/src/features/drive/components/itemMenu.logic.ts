@@ -7,6 +7,7 @@ import { resolveDriveNavigationTarget } from "@/features/drive/lib/navigate"
 import { canOpenAsText, canPreview, previewType } from "@/features/drive/lib/preview.logic"
 import { canExtractItem } from "@/features/drive/lib/archiveTargets"
 import { downloadAsSource } from "@/features/drive/lib/downloadAs.logic"
+import { isPlaylistSong } from "@/features/audio/lib/handoff"
 import { type DriveItemLinkStatus } from "@/features/drive/queries/drive"
 import { type ActionDescriptor } from "@/lib/actionDescriptor"
 import { type DriveKey } from "@/lib/i18n"
@@ -16,7 +17,8 @@ import { type DriveKey } from "@/lib/i18n"
 // trigger), so it deliberately isn't part of this union — directoryListing.tsx's own ActiveDialog
 // kind widens this with that one extra literal.
 // "openAsText" is no dialog: the host opens the preview overlay in its read-only text mode.
-// "compress" and "extract" open the options dialogs, "extractTo" the extract destination picker.
+// "compress" and "extract" open the options dialogs, "extractTo" the extract destination picker,
+// "addToNewPlaylist" the new-playlist name dialog that then adds the song(s).
 export type ItemActionDialogKind =
 	| "rename"
 	| "move"
@@ -33,6 +35,7 @@ export type ItemActionDialogKind =
 	| "compress"
 	| "extract"
 	| "extractTo"
+	| "addToNewPlaylist"
 
 export type ItemActionId =
 	| "open"
@@ -50,6 +53,7 @@ export type ItemActionId =
 	| "openContainingDirectory"
 	| "download"
 	| "downloadAs"
+	| "addToPlaylist"
 	| "publicLink"
 	| "copyLink"
 	| "share"
@@ -167,6 +171,9 @@ const EXTRACT: ItemActionDescriptor = { id: "extract", ...ACTION_DEFS.extract, r
 // A document or spreadsheet exported to another format from the saved file, beside Download (it reads exactly
 // what Download reads). A submenu of formats in the item menus (downloadAsSubmenu.tsx).
 const DOWNLOAD_AS: ItemActionDescriptor = { id: "downloadAs", ...ACTION_DEFS.downloadAs, run: "direct" }
+// A playable song (isPlaylistSong) into one of the user's playlists, after Download and Download as. A submenu in the
+// item menus (addToPlaylistSubmenu.tsx); its New playlist… entry opens the "addToNewPlaylist" dialog.
+const ADD_TO_PLAYLIST: ItemActionDescriptor = { id: "addToPlaylist", ...ACTION_DEFS.addToPlaylist, run: "direct" }
 // In Open's place for a file nothing recognises (canOpenAsText), which Open never covers.
 const OPEN_AS_TEXT: ItemActionDescriptor = { id: "openAsText", ...ACTION_DEFS.openAsText, run: "dialog", dialogKind: "openAsText" }
 
@@ -306,6 +313,10 @@ function itemActionsFor(item: DriveItem, variant: DriveVariant, searchHit: boole
 		actions.push(DOWNLOAD_AS)
 	}
 
+	if (isPlaylistSong(item)) {
+		actions.push(ADD_TO_PLAYLIST)
+	}
+
 	// An item the caller can't mutate still copies: it sits with the read actions, right after Download.
 	if (!ownerMutable) {
 		actions.push(COPY, COMPRESS)
@@ -376,7 +387,8 @@ const OFFLINE_GATED_IDS: ReadonlySet<ItemActionId> = new Set([
 	"downloadAs",
 	"copy",
 	"compress",
-	"extract"
+	"extract",
+	"addToPlaylist"
 ])
 
 export function applyOfflineGate(actions: ItemActionDescriptor[], isOnline: boolean): ItemActionDescriptor[] {

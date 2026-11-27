@@ -16,6 +16,7 @@ import { useIsOnline } from "@/lib/useIsOnline"
 import { DROPDOWN_TREE_MENU_FAMILY } from "@/features/drive/components/directoryTreeSubmenu"
 import { BulkExtractMenuEntries, CompressMenuEntries } from "@/features/drive/components/archiveSubmenus"
 import { DownloadAsEntries } from "@/features/drive/components/downloadAsSubmenu"
+import { AddToPlaylistEntries } from "@/features/drive/components/addToPlaylistSubmenu"
 import { BulkActionButton, BulkActionMenuButton, SelectionActionBar } from "@/components/selectionActionBar"
 
 export interface BulkActionBarProps {
@@ -64,6 +65,26 @@ export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkAc
 							<DownloadAsEntries
 								family={DROPDOWN_TREE_MENU_FAMILY}
 								items={selectedItems}
+							/>
+						</BulkActionMenuButton>
+					)
+				}
+
+				if (descriptor.id === "addToPlaylist") {
+					return (
+						<BulkActionMenuButton
+							key={descriptor.id}
+							icon={descriptor.icon}
+							label={t(descriptor.labelKey)}
+							disabled={disabled}
+							disabledReason={disabledReason}
+						>
+							<AddToPlaylistEntries
+								family={DROPDOWN_TREE_MENU_FAMILY}
+								items={selectedItems}
+								onNewPlaylist={() => {
+									onDialogAction("addToNewPlaylist")
+								}}
 							/>
 						</BulkActionMenuButton>
 					)

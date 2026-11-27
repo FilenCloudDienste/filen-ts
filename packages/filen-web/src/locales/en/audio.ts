@@ -185,6 +185,12 @@ export const audio = {
 	tracksAddedToast_one: "Added {{count}} track",
 	/** Toast after successfully adding tracks, plural */
 	tracksAddedToast_other: "Added {{count}} tracks",
+	/** Toast after adding tracks when some picked items were not added (not songs, or already in the playlist), singular */
+	tracksAddedSkippedToast_one: "Added {{count}} track, {{skipped}} skipped",
+	/** Toast after adding tracks when some picked items were not added (not songs, or already in the playlist), plural */
+	tracksAddedSkippedToast_other: "Added {{count}} tracks, {{skipped}} skipped",
+	/** Toast when none of the picked items were added: the songs among them are already in the playlist */
+	tracksNoneAddedToast: "Nothing new to add",
 
 	// ── Activity toasts (lib/activity) ──────────────────────────────────────
 	// The running line of an action and how it ended, in the toast that shows it. `Named` names the one

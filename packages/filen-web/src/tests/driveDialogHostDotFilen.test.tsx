@@ -10,7 +10,7 @@ import type { Dir, UuidStr } from "@filen/sdk-rs"
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }))
 vi.mock("@tanstack/react-router", () => ({ useRouterState: () => "/drive/trash" }))
-vi.mock("@/lib/dotFilen", () => ({ knownDotFilenUuid: () => null }))
+vi.mock("@/lib/dotFilen", () => ({ knownDotFilenUuid: () => null, onDotFilenSubdirForgotten: () => undefined }))
 vi.mock("@/features/preview/components/previewOverlay", () => ({ PreviewOverlay: () => null }))
 
 import "@/lib/i18n"

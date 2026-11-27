@@ -13,6 +13,7 @@ import {
 	InfoIcon,
 	Link2OffIcon,
 	LinkIcon,
+	ListMusicIcon,
 	PackageOpenIcon,
 	PaletteIcon,
 	PencilIcon,
@@ -53,6 +54,8 @@ export const ACTION_DEFS = {
 	download: { labelKey: "driveActionDownload", icon: DownloadIcon },
 	// A submenu of export formats (downloadAsSubmenu.tsx), offered beside Download.
 	downloadAs: { labelKey: "driveActionDownloadAs", icon: FileDownIcon },
+	// A submenu of the user's playlists (addToPlaylistSubmenu.tsx), offered only where a playable song is picked.
+	addToPlaylist: { labelKey: "driveActionAddToPlaylist", icon: ListMusicIcon },
 	publicLink: { labelKey: "driveActionPublicLink", icon: LinkIcon },
 	copyLink: { labelKey: "driveActionCopyLink", icon: CopyIcon },
 	share: { labelKey: "driveActionShare", icon: UsersIcon },

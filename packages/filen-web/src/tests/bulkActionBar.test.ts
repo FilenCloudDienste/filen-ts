@@ -126,6 +126,7 @@ function flags(overrides: Partial<DriveSelectionFlags> = {}): DriveSelectionFlag
 		everySharedRoot: false,
 		everyArchive: false,
 		everyDownloadAs: false,
+		includesPlaylistSong: false,
 		...overrides
 	}
 }
@@ -507,7 +508,8 @@ describe("isBulkActionOfflineDisabled", () => {
 		flags({ includesUndecryptable: true }),
 		flags({ everySharedRoot: true }),
 		flags({ includesFavorited: true, everySharedRoot: true }),
-		flags({ everyArchive: true })
+		flags({ everyArchive: true }),
+		flags({ includesPlaylistSong: true })
 	]
 	const everyBulkId = [
 		...new Set(VARIANTS.flatMap(variant => FLAG_COMBINATIONS.flatMap(f => driveBulkActions(variant, f).map(d => d.id))))

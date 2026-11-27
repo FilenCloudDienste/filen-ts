@@ -923,6 +923,8 @@ describe("applyOfflineGate", () => {
 		download: "gated",
 		// Exports read the file over the network as Download does.
 		downloadAs: "gated",
+		// Every pick writes a playlist file; the submenu's trigger greys out.
+		addToPlaylist: "gated",
 		copy: "gated",
 		// Presets and quick extracts start SDK jobs at once; the submenus' triggers grey out.
 		compress: "gated",
@@ -948,7 +950,8 @@ describe("applyOfflineGate", () => {
 		() => fileItem({ meta: { type: "encrypted", data: "ciphertext" } }),
 		() => unknownFileItem(),
 		() => unknownFileItem("backup.zip"),
-		() => unknownFileItem("report.docx")
+		() => unknownFileItem("report.docx"),
+		() => unknownFileItem("song.mp3")
 	]
 	const EVERY_DESCRIPTOR = VARIANTS.flatMap(variant =>
 		ITEMS.flatMap(item => [true, false].flatMap(searchHit => driveItemActions(item(), variant, { searchHit, open: true })))

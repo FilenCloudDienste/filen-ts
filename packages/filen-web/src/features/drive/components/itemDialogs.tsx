@@ -11,6 +11,7 @@ import { ContactPickerDialog } from "@/features/drive/components/contactPickerDi
 import { CompressDialog } from "@/features/drive/components/compressDialog"
 import { ExtractDialog } from "@/features/drive/components/extractDialog"
 import { ExtractDestinationDialog } from "@/features/drive/components/extractDestinationDialog"
+import { NewPlaylistWithTracksDialog } from "@/features/audio/components/newPlaylistWithTracksDialog"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 
@@ -76,7 +77,7 @@ export function TrashConfirmDialog({ count, pending, onConfirm, onClose }: Trash
 }
 
 // The kinds whose dialog owns its whole action (own state, own calls), so a surface only mounts it.
-export type ItemDialogKind = "copy" | "versions" | "info" | "link" | "share" | "compress" | "extract" | "extractTo"
+export type ItemDialogKind = "copy" | "versions" | "info" | "link" | "share" | "compress" | "extract" | "extractTo" | "addToNewPlaylist"
 
 export interface ItemDialogProps {
 	kind: ItemDialogKind
@@ -175,6 +176,13 @@ export function ItemDialog({
 					items={items}
 					variant={variant}
 					initialPath={startPath}
+					onClose={onClose}
+				/>
+			)
+		case "addToNewPlaylist":
+			return (
+				<NewPlaylistWithTracksDialog
+					items={items}
 					onClose={onClose}
 				/>
 			)
