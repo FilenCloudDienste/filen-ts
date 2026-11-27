@@ -115,7 +115,9 @@ vi.mock("@/lib/appUpdate", () => ({ recoverIfNewerBuild: vi.fn() }))
 vi.mock("@/lib/nativeImageSupport", () => ({ supportsNativeImage: supportsNativeImageMock }))
 vi.mock("@/features/drive/lib/thumbRaster", () => ({ thumbnailRaster: thumbnailRasterMock }))
 
-import { LINK_THUMBNAIL_SOURCE } from "@/features/publicLinks/lib/thumbnails"
+import { linkThumbnailSource } from "@/features/publicLinks/lib/thumbnails"
+
+const LINK_THUMBNAIL_SOURCE = linkThumbnailSource("scope")
 
 const CATEGORIES: ThumbGeneratorCategory[] = ["sdk", "video", "pdf", "svg", "raster", "psd", "illustrator", "eps"]
 
@@ -184,7 +186,7 @@ beforeEach(() => {
 	sdk.makeLinkedSdkThumbnailFromFileAnon.mockResolvedValue(THUMB)
 })
 
-describe("LINK_THUMBNAIL_SOURCE", () => {
+describe("linkThumbnailSource", () => {
 	it("produces every category the drive does, each with a generator", () => {
 		for (const category of CATEGORIES) {
 			expect(LINK_THUMBNAIL_SOURCE.produces(category)).toBe(true)
@@ -205,13 +207,36 @@ describe("LINK_THUMBNAIL_SOURCE", () => {
 		expectNoSessionRead()
 	})
 
-	it("reads an svg whole through the public-link client, reusing no bytes of the drive's previews", async () => {
+	it("reads an svg whole through the public-link client, looking only at this link's held previews", async () => {
 		sdk.downloadLinkedFileBytesAnon.mockRejectedValue(new Error("network"))
 
 		await expect(generator("svg")(fileItem("logo.svg", "image/svg+xml", 1024), live())).resolves.toEqual({ type: "failed" })
 		expect(sdk.downloadLinkedFileBytesAnon).toHaveBeenCalledOnce()
-		expect(getPreviewBytesMock.mock.calls.every(([scope]) => scope === null)).toBe(true)
+		expect(getPreviewBytesMock.mock.calls.map(([scope]) => scope)).toEqual(["anon:scope"])
 		expectNoSessionRead()
+	})
+
+	it("thumbnails a file from the bytes a preview of this link holds, downloading nothing", async () => {
+		const jxl = Uint8Array.from([0xff, 0x0a, 0x6a, 0x17, 0x03, 0x00])
+		const item = fileItem("photo.jxl", "image/jxl", jxl.length)
+
+		getPreviewBytesMock.mockImplementation((scope, uuid) => (scope === "anon:scope" && uuid === item.data.uuid ? jxl : undefined))
+		supportsNativeImageMock.mockResolvedValue(true)
+		thumbnailRasterMock.mockResolvedValue(new Uint8Array([9]))
+
+		await expect(generator("raster")(item, live())).resolves.toEqual({ type: "bytes", bytes: new Uint8Array([9]) })
+		expect(sdk.downloadLinkedFileBytesAnon).not.toHaveBeenCalled()
+		expect(sdk.readLinkedFileBytesRangeAnon).not.toHaveBeenCalled()
+		expectNoSessionRead()
+	})
+
+	it("keeps one source per link, reusing it while the link stays", () => {
+		expect(linkThumbnailSource("scope")).toBe(LINK_THUMBNAIL_SOURCE)
+
+		const other = linkThumbnailSource("other")
+
+		expect(other).not.toBe(LINK_THUMBNAIL_SOURCE)
+		expect(linkThumbnailSource("other")).toBe(other)
 	})
 
 	it("reads a JPEG XL through the public-link client", async () => {
@@ -262,7 +287,7 @@ describe("LINK_THUMBNAIL_SOURCE", () => {
 			reason: "unsupported"
 		})
 		expect(runContentSniffMock.mock.calls[0]?.[1]).toMatchObject({ kind: "linkedFile" })
-		expect(runContentSniffMock.mock.calls[0]?.[3]).toMatchObject({ access: "anon", scope: null })
+		expect(runContentSniffMock.mock.calls[0]?.[3]).toMatchObject({ access: "anon", scope: "anon:scope" })
 		expectNoSessionRead()
 	})
 

@@ -20,8 +20,10 @@ export function isLinkThumbTab(name: string): boolean {
 	return TAB_PATTERN.test(name)
 }
 
+// Only a write creates the tree, so a visit that stores nothing leaves no trace. Once wiped (sign-out, the Storage
+// page's clear) it stays gone for the tab: its later thumbnails live in memory only.
 export function linkThumbStore(tab: string): OpfsBlobStore {
-	return { dir: [...LINK_THUMB_DIR_ROOT, tab], ext: LINK_THUMB_EXT }
+	return { dir: [...LINK_THUMB_DIR_ROOT, tab], ext: LINK_THUMB_EXT, recreateWhenRemoved: false }
 }
 
 // Held by the tab for its whole life: a directory whose lock nobody holds belongs to a tab that is gone.

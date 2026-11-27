@@ -55,7 +55,8 @@ vi.mock("@/features/publicLinks/components/fileHero", () => ({
 
 import { DirectoryBrowser } from "@/features/publicLinks/components/directoryBrowser"
 import { invalidateThumbnail } from "@/features/drive/lib/thumbnails"
-import { LINK_THUMBNAIL_SOURCE } from "@/features/publicLinks/lib/thumbnails"
+import { linkThumbnailSource } from "@/features/publicLinks/lib/thumbnails"
+import { linkFingerprint } from "@/features/publicLinks/lib/queryKey.logic"
 import { registerAllActions } from "@/lib/keymap/actions"
 
 registerAllActions()
@@ -154,8 +155,8 @@ beforeEach(() => {
 	stored.writes = []
 	shown.listing = LISTING
 	// The service's url cache outlives a test: each starts with the photo's thumbnail not made yet.
-	invalidateThumbnail(PHOTO.uuid, LINK_THUMBNAIL_SOURCE.deps)
-	invalidateThumbnail(PDF.uuid, LINK_THUMBNAIL_SOURCE.deps)
+	invalidateThumbnail(PHOTO.uuid, linkThumbnailSource(linkFingerprint(LINK)).deps)
+	invalidateThumbnail(PDF.uuid, linkThumbnailSource(linkFingerprint(LINK)).deps)
 	downloadLinkedFileBytesAnon.mockRejectedValue(new Error("network"))
 	makeLinkedSdkThumbnailAnon.mockResolvedValue({ type: "thumbnail", bytes: new Uint8Array([1, 2, 3]), width: 1, height: 1 })
 })

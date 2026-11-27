@@ -19,15 +19,26 @@ const kv: RecordStoreKv = {
 // About a thousand writes between two checks of a store's record count.
 const WRITES_PER_SWEEP = 1024
 
-export const probeRecords = new RecordStore({
+// Each kind's options but its kv: the drive's stores and a public link's memory-only ones are the same stores.
+const PROBE_OPTIONS = {
 	prefix: PROBE_KV_PREFIX,
 	schema: probeRecordSchema,
 	maxRecords: PROBE_MAX_RECORDS,
 	memoryRecords: 1024,
 	writesPerSweep: WRITES_PER_SWEEP,
-	scope: "videos",
-	kv
-})
+	scope: "videos"
+}
+
+const FRAME_HINT_OPTIONS = {
+	prefix: FRAME_HINT_KV_PREFIX,
+	schema: frameHintSchema,
+	maxRecords: FRAME_HINT_MAX_RECORDS,
+	memoryRecords: 256,
+	writesPerSweep: WRITES_PER_SWEEP,
+	scope: "videos"
+}
+
+export const probeRecords = new RecordStore({ ...PROBE_OPTIONS, kv })
 
 export const artRecords = new RecordStore({
 	prefix: ART_KV_PREFIX,
@@ -39,17 +50,10 @@ export const artRecords = new RecordStore({
 	kv
 })
 
-export const frameHints = new RecordStore({
-	prefix: FRAME_HINT_KV_PREFIX,
-	schema: frameHintSchema,
-	maxRecords: FRAME_HINT_MAX_RECORDS,
-	memoryRecords: 256,
-	writesPerSweep: WRITES_PER_SWEEP,
-	scope: "videos",
-	kv
-})
+export const frameHints = new RecordStore({ ...FRAME_HINT_OPTIONS, kv })
 
-// Nothing on disk: what a store over it holds lives in the tab's memory alone.
+// Nothing on disk: what a store over it holds lives in the tab's memory alone. The prefix still names a record's
+// key in memory.
 const NO_KV: RecordStoreKv = {
 	kvGetJson: () => Promise.resolve(null),
 	kvSetJson: () => Promise.resolve(),
@@ -66,26 +70,6 @@ function memoryOnly<T extends StoredRecord>(store: RecordStore<T>): RecordStore<
 
 // A public link's keyframe reads keep their probes and frame hints for the tab only: what a visitor's reads said
 // about someone else's files is never written to kv, nor read from what the drive kept there.
-export const linkProbeRecords = memoryOnly(
-	new RecordStore({
-		prefix: PROBE_KV_PREFIX,
-		schema: probeRecordSchema,
-		maxRecords: PROBE_MAX_RECORDS,
-		memoryRecords: 1024,
-		writesPerSweep: WRITES_PER_SWEEP,
-		scope: "videos",
-		kv: NO_KV
-	})
-)
+export const linkProbeRecords = memoryOnly(new RecordStore({ ...PROBE_OPTIONS, kv: NO_KV }))
 
-export const linkFrameHints = memoryOnly(
-	new RecordStore({
-		prefix: FRAME_HINT_KV_PREFIX,
-		schema: frameHintSchema,
-		maxRecords: FRAME_HINT_MAX_RECORDS,
-		memoryRecords: 256,
-		writesPerSweep: WRITES_PER_SWEEP,
-		scope: "videos",
-		kv: NO_KV
-	})
-)
+export const linkFrameHints = memoryOnly(new RecordStore({ ...FRAME_HINT_OPTIONS, kv: NO_KV }))

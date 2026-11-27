@@ -80,9 +80,21 @@ async function openTabStore(): Promise<TabStore | null> {
 }
 
 // Removes every directory of a tab that is gone: written under a key nothing holds any more. Listed before the
-// locks are asked for, so a tab that started meanwhile already holds its lock by the time it is checked.
+// locks are asked for, so a tab that started meanwhile already holds its lock by the time it is checked. Creates
+// nothing: with no tree yet there is nothing to sweep, and this tab's first write creates it.
 async function sweepGoneTabs(own: string): Promise<void> {
-	const root = await opfsDirectory(LINK_THUMB_DIR_ROOT)
+	let root: FileSystemDirectoryHandle
+
+	try {
+		root = await opfsDirectory(LINK_THUMB_DIR_ROOT, false)
+	} catch (e) {
+		if (isNotFoundError(e)) {
+			return
+		}
+
+		throw e
+	}
+
 	const names: string[] = []
 
 	for await (const handle of root.values()) {
@@ -162,7 +174,8 @@ export async function deleteLinkThumbnail(uuid: string): Promise<void> {
 	}
 }
 
-// Sign-out and the Storage page's clear: every tab's sealed thumbnails. This tab keeps its key and writes on.
+// Sign-out and the Storage page's clear: every tab's sealed thumbnails, those of every other open link tab included
+// (they regenerate on demand). This tab keeps its key and writes on.
 export async function wipeLinkThumbnailStore(): Promise<void> {
 	const tab = opened === null ? null : await opened
 

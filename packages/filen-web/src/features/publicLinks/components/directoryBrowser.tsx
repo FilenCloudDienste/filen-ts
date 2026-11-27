@@ -478,6 +478,7 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 						sort={sort}
 						onSortChange={setSort}
 						viewMode={viewMode}
+						linkScope={linkScope}
 						downloadable={link.enableDownload}
 						downloadBusy={download.status === "running"}
 						saveable={saveable}

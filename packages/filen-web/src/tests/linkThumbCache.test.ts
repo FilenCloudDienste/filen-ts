@@ -227,7 +227,8 @@ describe("the tab's sealed store", () => {
 		expect(await second.readLinkThumbnail("u1")).toBeNull()
 		await settle()
 		expect(tabDirectories()).not.toContain(gone)
-		expect(tabDirectories()).toHaveLength(1)
+		// The new tab has read only: it has no directory of its own yet.
+		expect(tabDirectories()).toHaveLength(0)
 	})
 
 	it("leaves a tab that is still open alone", async () => {
@@ -243,6 +244,16 @@ describe("the tab's sealed store", () => {
 
 		expect(tabDirectories()).toContain(open)
 		expect(new Uint8Array((await (await first.readLinkThumbnail("u1"))?.arrayBuffer()) ?? new ArrayBuffer(0))).toEqual(BYTES)
+	})
+
+	it("leaves no trace of a visit that stores nothing", async () => {
+		const cache = await visit()
+
+		expect(await cache.readLinkThumbnail("u1")).toBeNull()
+		await cache.deleteLinkThumbnail("u1")
+		await settle()
+
+		expect(root.directories.has("linkThumbnails")).toBe(false)
 	})
 
 	it("removes what is no tab's at all", async () => {

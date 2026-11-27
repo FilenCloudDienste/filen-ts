@@ -27,7 +27,7 @@ import { useRovingItemRefs } from "@/features/drive/hooks/useRovingItemRefs"
 import { usePublicListboxNav } from "@/features/publicLinks/hooks/usePublicListboxNav"
 import { BrowseRow, SelectionBox } from "@/features/publicLinks/components/browseRow"
 import { BrowseTile } from "@/features/publicLinks/components/browseTile"
-import { LINK_THUMBNAIL_SOURCE } from "@/features/publicLinks/lib/thumbnails"
+import { linkThumbnailSource } from "@/features/publicLinks/lib/thumbnails"
 import {
 	DEFAULT_PUBLIC_SORT,
 	selectionCheck,
@@ -72,6 +72,8 @@ export interface BrowseListProps {
 	onSortChange: (next: DriveSortBy) => void
 	// Rows under drive's column header, or drive's tiles with their thumbnails.
 	viewMode: DriveViewMode
+	// The link's preview cache scope (linkFingerprint): thumbnails reuse the bytes its previews hold.
+	linkScope: string
 	downloadable: boolean
 	downloadBusy: boolean
 	saveable: boolean
@@ -96,6 +98,7 @@ export function BrowseList({
 	sort,
 	onSortChange,
 	viewMode,
+	linkScope,
 	downloadable,
 	downloadBusy,
 	saveable,
@@ -349,7 +352,7 @@ export function BrowseList({
 				className="min-h-0 flex-1 scrollbar-gutter-stable overflow-y-auto"
 				style={grid ? GRID_LISTBOX_STYLE : undefined}
 			>
-				<ThumbnailSourceContext value={LINK_THUMBNAIL_SOURCE}>
+				<ThumbnailSourceContext value={linkThumbnailSource(linkScope)}>
 					<ThumbnailRankContext value={rankThumbnail}>
 						<div
 							role="presentation"
