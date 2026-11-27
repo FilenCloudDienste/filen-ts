@@ -22,6 +22,7 @@ import { DriveJobCancelDialog } from "@/features/transfers/components/driveJobCa
 import { ExtractPasswordDialog } from "@/features/transfers/components/extractPasswordDialog"
 import { DownloadAsPasswordDialog } from "@/features/drive/components/downloadAsPasswordDialog"
 import { DotFilenGuardDialog } from "@/features/drive/components/dotFilenConfirmDialog"
+import { NameConflictDialog } from "@/features/drive/components/nameConflictDialog"
 import { JobReportDialog } from "@/features/transfers/components/jobReportDialog"
 import { allowNextUnload } from "@/lib/unloadGuard"
 import { onCachesClearedElsewhere } from "@/features/settings/lib/cacheReload"
@@ -166,6 +167,8 @@ function RootLayout() {
 						<DownloadAsPasswordDialog />
 						{/* Asked by a move of the root `.filen`, from a drop or a pasted cut that has no dialog of its own. */}
 						<DotFilenGuardDialog />
+						{/* Asked by an upload or a move whose names clash, from a drop or a paste that has no dialog of its own. */}
+						<NameConflictDialog />
 						<JobReportDialog />
 						{/* Opened from an activity's result toast. */}
 						<ActivityDetailsDialog />

@@ -1212,5 +1212,46 @@ export const drive = {
 	driveDragOutPreparing: "Still preparing…",
 	/** Toast action — downloads the dragged items into a directory the user picks instead */
 	driveDragOutDownloadTo: "Download to…",
+
+	// ── Name conflicts (upload, move) ────────────────────────────────────────
+	/** Name conflict dialog — title when one uploaded or moved item clashes; {{name}} = the item's name, {{destination}} = the directory it goes into */
+	driveConflictTitleSingle: "“{{name}}” already exists in {{destination}}",
+	/** Name conflict dialog — title when several items clash; {{count}} = clashing items, {{destination}} = the directory they go into */
+	driveConflictTitle_one: "{{count}} item already exists in {{destination}}",
+	/** Name conflict dialog — title when several items clash; {{count}} = clashing items, {{destination}} = the directory they go into */
+	driveConflictTitle_other: "{{count}} items already exist in {{destination}}",
+	/** Name conflict dialog — the clash being decided when there are several; {{name}} = its name, {{position}} of {{count}} */
+	driveConflictItem: "“{{name}}” ({{position}} of {{count}})",
+	/** Name conflict dialog — what holds the name: a file */
+	driveConflictExistingFile: "A file with this name is already there.",
+	/** Name conflict dialog — what holds the name: a directory */
+	driveConflictExistingDirectory: "A directory with this name is already there.",
+	/** Name conflict dialog — button: the item becomes the existing file's new version */
+	driveConflictReplace: "Replace",
+	/** Name conflict dialog — what Replace does while the account keeps file versions */
+	driveConflictReplaceVersioned: "Replace keeps the existing file as a previous version in Versions.",
+	/** Name conflict dialog — what Replace does while file versioning is off in the account settings */
+	driveConflictReplaceUnversioned: "Replace overwrites the existing file. File versioning is off, so no previous version is kept.",
+	/** Name conflict dialog — button: an uploaded directory's contents go into the existing directory */
+	driveConflictMerge: "Merge",
+	/** Name conflict dialog — what Merge does */
+	driveConflictMergeHint: "Merge adds its contents to the existing directory.",
+	/** Name conflict dialog — label of the choice for files a merged directory already holds */
+	driveConflictNestedLabel: "Files that already exist inside",
+	/** Name conflict dialog — nested choice: those files get a new version */
+	driveConflictNestedReplace: "Replace them",
+	/** Name conflict dialog — nested choice: those files are not uploaded */
+	driveConflictNestedSkip: "Skip them",
+	/** Name conflict dialog — nested choice: those files are uploaded under a numbered name, "name (1).ext" */
+	driveConflictNestedKeepBoth: "Keep both",
+	/** Name conflict dialog — button: the item is written under a numbered name, "name (1).ext" */
+	driveConflictKeepBoth: "Keep both",
+	/** Name conflict dialog — button: the item is left out */
+	driveConflictSkip: "Skip",
+	/** Name conflict dialog — checkbox: the choice made applies to every remaining clash; {{count}} = remaining clashes */
+	driveConflictApplyToAll_one: "Do this for the {{count}} remaining conflict",
+	/** Name conflict dialog — checkbox: the choice made applies to every remaining clash; {{count}} = remaining clashes */
+	driveConflictApplyToAll_other: "Do this for all {{count}} remaining conflicts",
+
 	...driveDownloadAs
 } as const

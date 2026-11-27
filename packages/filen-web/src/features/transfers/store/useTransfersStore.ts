@@ -600,6 +600,8 @@ export interface TransfersStore {
 	// Items a directory run could not start: a directory it failed to create and everything under it.
 	// `skippedBytes` is the size of the files among them, which the run was sized with.
 	failUploadBatchItems: (id: string, count: number, error?: ErrorDTO, skippedBytes?: number) => void
+	// Files the run was sized with that it leaves out (a merge skipping names its directory holds): no longer counted.
+	skipUploadBatchItems: (id: string, count: number, bytes: number) => void
 	cancelUploadBatches: (ids: ReadonlySet<string>) => void
 	endUploadBatch: (id: string) => void
 	removeUploadBatches: (ids: ReadonlySet<string>) => void
@@ -1409,6 +1411,22 @@ export const useTransfersStore = create<TransfersStore>((set, get) => ({
 					: { settledFiles: batch.settledFiles + count, failedBytes: batch.failedBytes + skippedBytes }),
 				...(batch.error === undefined && error !== undefined ? { error } : {})
 			}
+			const draft = new RowsDraft(state.transfers)
+
+			syncRunRow(draft, next)
+
+			return { uploadBatches: { ...state.uploadBatches, [id]: next }, ...draft.result() }
+		})
+	},
+	skipUploadBatchItems: (id, count, bytes) => {
+		set(state => {
+			const batch = state.uploadBatches[id]
+
+			if (batch === undefined) {
+				return state
+			}
+
+			const next: UploadBatch = { ...batch, files: batch.files - count, bytes: batch.bytes - bytes }
 			const draft = new RowsDraft(state.transfers)
 
 			syncRunRow(draft, next)

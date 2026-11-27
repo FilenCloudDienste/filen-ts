@@ -31,11 +31,15 @@ import {
 	defaultHeicUploadDeps,
 	heicUploadConversionEnabled,
 	isHeicUploadCandidate,
+	renameToJpg,
 	withConvertedHeic
 } from "@/features/drive/lib/heicUpload"
 import { warmUploadThumbnail } from "@/features/drive/lib/thumbGenerators"
 import { holdUploadEchoes } from "@/features/drive/lib/uploadEchoes"
 import { addAccountStorageUsed, ensureUploadQuota } from "@/features/drive/lib/quota"
+import { claimUploadName } from "@/features/drive/lib/uploadClaims"
+import { findNameConflicts, namesHeldIn, resolveNames, withClaims } from "@/features/drive/lib/nameConflicts"
+import { askNameConflicts } from "@/features/drive/lib/nameConflictAsk"
 
 // Injected collaborators so a single upload attempt is unit-testable without a worker or a query
 // client — mirrors runCreateDirectory's shape (features/drive/lib/createDirectory.ts). `store` needs `remove`
@@ -375,6 +379,8 @@ export interface UploadBatchControl {
 	isCancelled: (id: string) => boolean
 	// `skippedBytes`: the size of the files among the items, which the run was sized with.
 	fail: (id: string, count: number, error?: ErrorDTO, skippedBytes?: number) => void
+	// Files the run was sized with that a merge leaves out (their names taken).
+	skip?: (id: string, count: number, bytes: number) => void
 	// A directory run's top-level directory exists: its row's "Show in directory" opens it.
 	created: (id: string, item: DriveItem) => void
 	end: (id: string) => void
@@ -394,6 +400,9 @@ export const uploadBatchControl: UploadBatchControl = {
 	isCancelled: id => useTransfersStore.getState().uploadBatches[id]?.cancelled === true,
 	fail: (id, count, error, skippedBytes) => {
 		useTransfersStore.getState().failUploadBatchItems(id, count, error, skippedBytes)
+	},
+	skip: (id, count, bytes) => {
+		useTransfersStore.getState().skipUploadBatchItems(id, count, bytes)
 	},
 	created: (id, item) => {
 		useTransfersStore.getState().setItem(id, item)
@@ -434,25 +443,123 @@ export function newUploadBatchRef(parentUuid: string | null, directoryName?: str
 	}
 }
 
-// Fan out every file in parallel — no JS queue/semaphore: the SDK's own Tower layer throttles actual
-// upload concurrency (CLAUDE.md rule: never reimplement concurrency/retry limits in JS). Each file is
-// fully independent (its own transfer row, its own outcome), so one failing upload never blocks or
-// cancels the rest. The rows of the files that need no conversion land in one store write. Ends in one
-// summary toast.
+// A name a conflict gave an upload (Keep both): `from` is the name its check planned for it (a HEIC file's ".jpg"
+// once converted), `to` the one it uploads under.
+export interface UploadRename {
+	from: string
+	to: string
+}
+
+// `file` under the name its conflict gave it, while it still carries the name its check planned: a HEIC file whose
+// conversion failed uploads as it is, its check having been for the converted name. Blob parts are referenced, never
+// copied.
+export function withUploadName(file: File, rename: UploadRename | undefined): File {
+	if (rename?.from !== file.name) {
+		return file
+	}
+
+	return new File([file], rename.to, { type: file.type, lastModified: file.lastModified })
+}
+
+// One file of a batch: the name it uploads under, and the release of its name's claim (uploadClaims.ts).
+interface PlannedUpload {
+	file: File
+	rename?: UploadRename | undefined
+	release: () => void
+}
+
+// Uploads picked or dropped files into `parentUuid`. Their names are checked first against what the directory holds
+// (its listing from the cache, read once when none is current) and what other uploads of this tab are about to create
+// there, and against each other: the files clashing with nothing start at once, the others once the user answered the
+// conflict prompt for them (Replace makes a new version, Keep both a numbered name, Skip leaves one out). Without a
+// listing to check against (offline, none held) every file starts as picked.
 export async function startUploads(files: File[], parentUuid: string | null): Promise<void> {
 	if (files.length === 0) {
 		return
 	}
 
+	const convertHeic = await heicUploadConversionEnabled(defaultHeicUploadDeps, files)
+	const candidates = files.map(file => ({
+		name: convertHeic && isHeicUploadCandidate(file) ? renameToJpg(file.name) : file.name,
+		isDirectory: false
+	}))
+	const held = await namesHeldIn(parentUuid)
+	// Synchronous from the claims read to the claims made: no other check can pass in between.
+	const conflicts = held === null ? [] : findNameConflicts(candidates, withClaims(held, parentUuid))
+	const releases = candidates.map(candidate => claimUploadName(parentUuid, candidate.name, "file"))
+	const conflicting = new Set(conflicts.map(conflict => conflict.index))
+	const clean: PlannedUpload[] = []
+
+	for (const [index, file] of files.entries()) {
+		const release = releases[index]
+
+		if (release !== undefined && !conflicting.has(index)) {
+			clean.push({ file, release })
+		}
+	}
+
+	const resolved = async (): Promise<void> => {
+		if (held === null || conflicts.length === 0) {
+			return
+		}
+
+		const answer = await askNameConflicts({ operation: "upload", parentUuid, conflicts })
+		const names = resolveNames({ candidates, held, conflicts, answer })
+		const planned: PlannedUpload[] = []
+
+		for (const { index } of conflicts) {
+			const file = files[index]
+			const candidate = candidates[index]
+			const release = releases[index]
+			const name = names[index]
+
+			if (file === undefined || candidate === undefined || release === undefined || name === undefined) {
+				continue
+			}
+
+			if (name.action === "skip") {
+				release()
+			} else if (name.action === "rename") {
+				release()
+				planned.push({
+					file,
+					rename: { from: candidate.name, to: name.name },
+					release: claimUploadName(parentUuid, name.name, "file")
+				})
+			} else {
+				planned.push({ file, release })
+			}
+		}
+
+		await uploadBatch(planned, parentUuid, convertHeic)
+	}
+
+	await Promise.all([uploadBatch(clean, parentUuid, convertHeic), resolved()])
+}
+
+// Fan out every file in parallel — no JS queue/semaphore: the SDK's own Tower layer throttles actual
+// upload concurrency (CLAUDE.md rule: never reimplement concurrency/retry limits in JS). Each file is
+// fully independent (its own transfer row, its own outcome), so one failing upload never blocks or
+// cancels the rest. The rows of the files that need no conversion land in one store write. Ends in one
+// summary toast. Each file's claim is released once it settled.
+async function uploadBatch(planned: readonly PlannedUpload[], parentUuid: string | null, convertHeic: boolean): Promise<void> {
+	if (planned.length === 0) {
+		return
+	}
+
+	const files = planned.map(entry => withUploadName(entry.file, entry.rename))
 	const bytes = sumBytes(files.map(file => file.size))
 
 	// The whole selection or nothing: a partial start would leave an arbitrary subset uploaded. Sized
 	// before HEIC conversion, so the server stays the judge of a near-exact fit.
 	if (!(await ensureUploadQuota(bytes))) {
+		for (const entry of planned) {
+			entry.release()
+		}
+
 		return
 	}
 
-	const convertHeic = await heicUploadConversionEnabled(defaultHeicUploadDeps, files)
 	const batch = newUploadBatchRef(parentUuid)
 
 	uploadBatchControl.start(batch, { files: files.length, bytes: Number(bytes) })
@@ -466,19 +573,30 @@ export async function startUploads(files: File[], parentUuid: string | null): Pr
 	const outcomes = await Promise.all(
 		files.map(async (file, index): Promise<UploadOutcome> => {
 			const row = rows[index]
+			const entry = planned[index]
 
-			if (row !== undefined) {
-				return await runUpload(defaultUploadDeps, { parentUuid, file, batch, row, quotaStop })
-			}
-
-			return await withConvertedHeic(defaultHeicUploadDeps.convert, file, convertHeic, async prepared => {
-				// Cancelled from the listing while this one was still being prepared.
-				if (uploadBatchControl.isCancelled(batch.id)) {
-					return { status: "cancelled" }
+			try {
+				if (row !== undefined) {
+					return await runUpload(defaultUploadDeps, { parentUuid, file, batch, row, quotaStop })
 				}
 
-				return await runUpload(defaultUploadDeps, { parentUuid, file: prepared, batch, counted: file.size, quotaStop })
-			})
+				return await withConvertedHeic(defaultHeicUploadDeps.convert, file, convertHeic, async prepared => {
+					// Cancelled from the listing while this one was still being prepared.
+					if (uploadBatchControl.isCancelled(batch.id)) {
+						return { status: "cancelled" }
+					}
+
+					return await runUpload(defaultUploadDeps, {
+						parentUuid,
+						file: withUploadName(prepared, entry?.rename),
+						batch,
+						counted: file.size,
+						quotaStop
+					})
+				})
+			} finally {
+				entry?.release()
+			}
 		})
 	)
 

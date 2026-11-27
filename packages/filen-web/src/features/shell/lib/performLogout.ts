@@ -33,6 +33,7 @@ import { releaseVideoEditWorkers } from "@/features/preview/videoEdit/client"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 import { clearDirectoryTreeState } from "@/features/drive/store/useDirectoryTreeStore"
 import { discardListingPatches } from "@/features/drive/queries/drive"
+import { discardUploadClaims } from "@/features/drive/lib/uploadClaims"
 import { resetConversationHistory, withHistoryWritesHeld } from "@/features/assistant/store/conversationHistory"
 import { shutdownAssistant } from "@/features/assistant/store/assistantSession"
 import { confirmDiscardUnsavedPreview, usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
@@ -251,6 +252,7 @@ async function signOut(run: SignOutRun): Promise<boolean> {
 	void socketBridge.stop()
 	// Drive listing creates still queued, and patches kept for listing reads under way.
 	discardListingPatches()
+	discardUploadClaims()
 
 	await runLogout({
 		cancelQueries: () => queryClient.cancelQueries(),

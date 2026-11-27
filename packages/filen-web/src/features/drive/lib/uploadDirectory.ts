@@ -1,5 +1,5 @@
 import { toast } from "sonner"
-import { dirnameOf, pathSegmentDepth, sumBytes } from "@filen/shared"
+import { dirnameOf, nameCollisionKey, pathSegmentDepth, sumBytes } from "@filen/shared"
 import { PROGRESS_THROTTLE_MS, throttle } from "@/lib/throttle"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { toastTransferStarted } from "@/features/transfers/lib/transferStartToast"
@@ -8,6 +8,19 @@ import { log } from "@/lib/log"
 import { toastSummary } from "@/lib/actions/bulkToast"
 import { sdkApi } from "@/lib/sdk/client"
 import { runCreateDirectory, type CreateDirectoryDeps } from "@/features/drive/lib/createDirectory"
+import type { DriveItem } from "@/features/drive/lib/item"
+import { claimUploadName } from "@/features/drive/lib/uploadClaims"
+import { findNameConflicts, namesHeldIn, resolveNames, withClaims, type NestedPolicy } from "@/features/drive/lib/nameConflicts"
+import { askNameConflicts } from "@/features/drive/lib/nameConflictAsk"
+import {
+	defaultDirectoryMergeDeps,
+	nestedDirectoryDecision,
+	nestedFileDecision,
+	RunDirectories,
+	type DirectoryMergeDeps,
+	type NestedDirectoryDecision,
+	type RunDirectory
+} from "@/features/drive/lib/directoryMerge"
 import {
 	newQuotaStop,
 	reactToStorageRefusal,
@@ -16,12 +29,21 @@ import {
 	discardUploadRuns,
 	newUploadBatchRef,
 	uploadBatchControl,
+	withUploadName,
 	type RunUploadDeps,
+	type UploadRename,
 	type UploadBatchControl,
 	type UploadOutcome
 } from "@/features/drive/lib/upload"
 import { useTransfersStore, type UploadBatchRef, type UploadBatchTotals } from "@/features/transfers/store/useTransfersStore"
-import { defaultHeicUploadDeps, heicUploadConversionEnabled, withConvertedHeic, type HeicUploadDeps } from "@/features/drive/lib/heicUpload"
+import {
+	defaultHeicUploadDeps,
+	heicUploadConversionEnabled,
+	isHeicUploadName,
+	renameToJpg,
+	withConvertedHeic,
+	type HeicUploadDeps
+} from "@/features/drive/lib/heicUpload"
 import { batchListingPatches, driveListingQueryUpdate } from "@/features/drive/queries/drive"
 import { checkUploadQuota, quotaExceededMessage } from "@/features/drive/lib/quota"
 
@@ -41,6 +63,8 @@ import { checkUploadQuota, quotaExceededMessage } from "@/features/drive/lib/quo
 export interface CollectedFile {
 	file: File
 	relPath: string
+	// A top-level file's name from its conflict (Keep both).
+	rename?: UploadRename | undefined
 }
 
 export interface CollectedDirectoryUpload {
@@ -295,6 +319,8 @@ export interface RunDirectoryUploadDeps {
 	batchPatches?: <T>(run: () => Promise<T>) => Promise<T>
 	// Optional for the same DI reason: what follows a run the server refused for storage (reactToStorageRefusal).
 	onStorageRefusal?: () => void
+	// Optional for the same DI reason: the listing of a directory a merge writes into (directoryMerge.ts).
+	merge?: DirectoryMergeDeps
 }
 
 // The top-level segment of a picked path: the directory a file or sub-directory lands under in the
@@ -306,7 +332,8 @@ function topLevelOf(relPath: string): string | null {
 }
 
 // `directoryRuns`: runs startDirectoryUpload already started for top-level directories while they were
-// walked, by name.
+// walked, by name. `merges`: the top-level directories merged into the existing directory of their name, by name, with
+// that directory's row when a listing held it; below them, `nested` answers every name already taken (directoryMerge.ts).
 export async function runDirectoryUpload(
 	deps: RunDirectoryUploadDeps,
 	args: {
@@ -315,6 +342,8 @@ export async function runDirectoryUpload(
 		files: CollectedFile[]
 		skipped?: number
 		directoryRuns?: ReadonlyMap<string, UploadBatchRef>
+		merges?: ReadonlyMap<string, DriveItem | undefined>
+		nested?: NestedPolicy
 	}
 ): Promise<void> {
 	const { rootParentUuid, dirs, files, skipped = 0 } = args
@@ -323,19 +352,24 @@ export async function runDirectoryUpload(
 		return
 	}
 
-	// relPath -> its create, settling to the uuid runCreateDirectory returned (a created or
-	// idempotently matched directory), or undefined when this path, or an ancestor, failed. Each
-	// directory waits only for its own parent, and each file only for its own directory, so siblings
-	// are created concurrently and uploads start while the rest of the tree is still being created; the
-	// SDK throttles the real request concurrency. Registered in depth order so every parent's entry
-	// already exists when a child looks it up; a lookup miss can only be a path that was never
-	// collected, which resolves straight to failure.
-	const dirUuids = new Map<string, Promise<string | undefined>>()
+	const merges = args.merges ?? new Map<string, DriveItem | undefined>()
+	const policy = args.nested ?? "replace"
+	const runDirectories = new RunDirectories(deps.merge ?? defaultDirectoryMergeDeps)
+	const rootDirectory = runDirectories.fresh(rootParentUuid)
+	// relPath -> the remote directory it settled to: created, merged (listed, see directoryMerge.ts), null when it
+	// or an ancestor was skipped by the merge's policy, or undefined when it or an ancestor failed. Each directory
+	// waits only for its own parent, and each file only for its own directory, so siblings are created concurrently
+	// and uploads start while the rest of the tree is still being created; the SDK throttles the real request
+	// concurrency. Registered in depth order so every parent's entry already exists when a child looks it up; a
+	// lookup miss can only be a path that was never collected, which resolves straight to failure.
+	const dirResults = new Map<string, Promise<RunDirectory | null | undefined>>()
 	// Filen names are case-insensitive: two local paths differing only by case name the same remote
 	// directory, so the later create waits for the earlier and idempotently matches it instead of
-	// racing it. Keyed by the case-folded path, the value being the last create on that key.
+	// racing it. Keyed by the folded path, the value being the last create on that key.
 	const nameClaims = new Map<string, Promise<unknown>>()
 	const createdUuids: string[] = []
+	// Directories merged into without a create: their sizes move too.
+	const mergedUuids: string[] = []
 	let failedDirs = 0
 	const batches = deps.batches
 	// Each top-level directory's run, and one for the files picked at the top level. Started before anything
@@ -376,6 +410,34 @@ export async function runDirectoryUpload(
 		}
 	}
 
+	// Files the merge's policy leaves out leave their run's totals, a run's in one store write per tick.
+	const skips = new Map<string, UploadBatchTotals>()
+
+	function skipFile(run: UploadBatchRef | undefined, size: number): void {
+		const skip = batches?.skip
+
+		if (run === undefined || skip === undefined) {
+			return
+		}
+
+		if (skips.size === 0) {
+			queueMicrotask(() => {
+				for (const [id, totals] of skips) {
+					skip(id, totals.files, totals.bytes)
+				}
+
+				skips.clear()
+			})
+		}
+
+		const totals = skips.get(run.id) ?? { files: 0, bytes: 0 }
+
+		totals.files += 1
+		totals.bytes += size
+
+		skips.set(run.id, totals)
+	}
+
 	function directoryRunOf(relPath: string): UploadBatchRef | undefined {
 		return directoryRuns.get(topLevelOf(relPath) ?? relPath)
 	}
@@ -390,30 +452,35 @@ export async function runDirectoryUpload(
 		return run !== undefined && batches?.isCancelled(run.id) === true
 	}
 
-	function parentUuidOf(relPath: string): Promise<string | null | undefined> {
+	function parentOf(relPath: string): Promise<RunDirectory | null | undefined> {
 		const parentPath = dirnameOf(relPath)
 
-		return parentPath === null ? Promise.resolve(rootParentUuid) : (dirUuids.get(parentPath) ?? Promise.resolve(undefined))
+		return parentPath === null ? rootDirectory : (dirResults.get(parentPath) ?? Promise.resolve(undefined))
 	}
 
 	const orderedDirs = [...dirs].sort((a, b) => pathSegmentDepth(a) - pathSegmentDepth(b))
 
 	for (const relPath of orderedDirs) {
 		const name = basenameOf(relPath)
-		const claimKey = relPath.toLowerCase()
+		const claimKey = nameCollisionKey(relPath)
 		const earlierClaim = nameClaims.get(claimKey)
-
+		const topLevel = topLevelOf(relPath) === null
 		const run = directoryRunOf(relPath)
 
-		const created = (async (): Promise<string | undefined> => {
-			const parentUuid = await parentUuidOf(relPath)
+		const created = (async (): Promise<RunDirectory | null | undefined> => {
+			const parent = await parentOf(relPath)
 
 			// Cancelled from the listing: nothing more is created, and nothing under it counts as failed.
 			if (isCancelled(run)) {
 				return undefined
 			}
 
-			if (parentUuid === undefined) {
+			// Left out with the clash above it.
+			if (parent === null) {
+				return null
+			}
+
+			if (parent === undefined) {
 				failedDirs += 1
 
 				if (run !== undefined) {
@@ -425,7 +492,30 @@ export async function runDirectoryUpload(
 
 			await earlierClaim
 
-			const outcome = await runCreateDirectory(deps.createDirectory, parentUuid, name)
+			const decision: NestedDirectoryDecision = topLevel
+				? merges.has(name)
+					? { action: "merge", uuid: merges.get(name)?.data.uuid }
+					: { action: "create", name }
+				: nestedDirectoryDecision(parent, name, policy)
+
+			if (decision.action === "skip") {
+				return null
+			}
+
+			// A directory a listing named is written into as it is: no create.
+			if (decision.action === "merge" && decision.uuid !== undefined) {
+				const existing = merges.get(name)
+
+				if (topLevel && run !== undefined && existing !== undefined) {
+					batches?.created(run.id, existing)
+				}
+
+				mergedUuids.push(decision.uuid)
+
+				return await runDirectories.merged(decision.uuid)
+			}
+
+			const outcome = await runCreateDirectory(deps.createDirectory, parent.uuid, decision.action === "create" ? decision.name : name)
 
 			if (outcome.status === "error") {
 				failedDirs += 1
@@ -437,16 +527,18 @@ export async function runDirectoryUpload(
 				return undefined
 			}
 
-			createdUuids.push(outcome.item.data.uuid)
+			const uuid = outcome.item.data.uuid
 
-			if (run !== undefined && topLevelOf(relPath) === null) {
+			createdUuids.push(uuid)
+
+			if (run !== undefined && topLevel) {
 				batches?.created(run.id, outcome.item)
 			}
 
-			return outcome.item.data.uuid
+			return await (decision.action === "merge" ? runDirectories.merged(uuid) : runDirectories.fresh(uuid))
 		})()
 
-		dirUuids.set(relPath, created)
+		dirResults.set(relPath, created)
 		nameClaims.set(claimKey, created)
 	}
 
@@ -462,22 +554,29 @@ export async function runDirectoryUpload(
 	// them all until the tree exists, the files' creates being queued apart (queueListingCreate).
 	const batchPatches = deps.batchPatches ?? (run => run())
 	// A directory with no file under it is still awaited, so its outcome is counted.
-	const directoriesCreated = batchPatches(() => Promise.all(dirUuids.values()))
+	const directoriesCreated = batchPatches(() => Promise.all(dirResults.values()))
 
 	// Files fan out in parallel — no JS queue/semaphore, same rationale as startUploads: the SDK's own
 	// Tower layer throttles real upload concurrency, never reimplemented here.
 	const quotaStop = newQuotaStop()
 	const [fileOutcomes] = await Promise.all([
 		Promise.all(
-			files.map(async ({ file, relPath }): Promise<UploadOutcome["status"]> => {
+			files.map(async ({ file, relPath, rename }): Promise<UploadOutcome["status"] | "skipped"> => {
 				const run = fileRunOf(relPath)
-				const parentUuid = await parentUuidOf(relPath)
+				const parent = await parentOf(relPath)
 
 				if (isCancelled(run)) {
 					return "cancelled"
 				}
 
-				if (parentUuid === undefined) {
+				// Its directory was left out with the clash above it.
+				if (parent === null) {
+					skipFile(run, file.size)
+
+					return "skipped"
+				}
+
+				if (parent === undefined) {
 					if (run !== undefined) {
 						batches?.fail(run.id, 1, undefined, file.size)
 					}
@@ -485,23 +584,46 @@ export async function runDirectoryUpload(
 					return "error"
 				}
 
-				// renameToJpg only rewrites file.name; `relPath` is untouched and still resolved the parent above.
-				return await withConvertedHeic(deps.heic.convert, file, await convertHeic, async prepared => {
-					if (isCancelled(run)) {
-						return "cancelled"
+				const convert = await convertHeic
+				let uploadRename = rename
+				let release: (() => void) | undefined
+
+				// A top-level file's name was settled with its conflict, before the run.
+				if (dirnameOf(relPath) !== null) {
+					const planned = convert && isHeicUploadName(file.name) ? renameToJpg(file.name) : file.name
+					const decision = nestedFileDecision(parent, planned, policy)
+
+					if (decision.action === "skip") {
+						skipFile(run, file.size)
+
+						return "skipped"
 					}
 
-					return (
-						await runUpload(deps.upload, {
-							parentUuid,
-							file: prepared,
-							batch: run,
-							name: relPath,
-							quotaStop,
-							...(run === undefined ? {} : { counted: file.size })
-						})
-					).status
-				})
+					uploadRename = decision.name === planned ? undefined : { from: planned, to: decision.name }
+					release = claimUploadName(parent.uuid, decision.name, "file")
+				}
+
+				try {
+					// renameToJpg only rewrites file.name; `relPath` is untouched and still resolved the parent above.
+					return await withConvertedHeic(deps.heic.convert, file, convert, async prepared => {
+						if (isCancelled(run)) {
+							return "cancelled"
+						}
+
+						return (
+							await runUpload(deps.upload, {
+								parentUuid: parent.uuid,
+								file: withUploadName(prepared, uploadRename),
+								batch: run,
+								name: relPath,
+								quotaStop,
+								...(run === undefined ? {} : { counted: file.size })
+							})
+						).status
+					})
+				} finally {
+					release?.()
+				}
 			})
 		),
 		directoriesCreated
@@ -518,7 +640,7 @@ export async function runDirectoryUpload(
 	const uploadedFiles = fileOutcomes.filter(status => status === "success").length
 
 	if (createdUuids.length > 0 || uploadedFiles > 0) {
-		deps.upload.invalidateDirectorySizes?.(rootParentUuid, createdUuids)
+		deps.upload.invalidateDirectorySizes?.(rootParentUuid, mergedUuids.length === 0 ? createdUuids : [...createdUuids, ...mergedUuids])
 	}
 
 	const succeeded = createdUuids.length + uploadedFiles
@@ -583,6 +705,8 @@ function scanningRuns(input: DirectoryUploadInput, rootParentUuid: string | null
 export async function startDirectoryUpload(input: DirectoryUploadInput, rootParentUuid: string | null): Promise<void> {
 	const scanningToastId = toast.loading(i18n.t("transfers:transfersScanningDirectory"))
 	const scanning = scanningRuns(input, rootParentUuid)
+	// The top-level names are checked (and any conflict asked about) while the tree is walked.
+	const planning = planTopLevel(rootParentUuid, topLevelCandidates(input))
 	const found = new Map<string, UploadBatchTotals>()
 	const reportFound = throttle(() => {
 		useTransfersStore.getState().updateUploadBatchScans(found)
@@ -618,24 +742,51 @@ export async function startDirectoryUpload(input: DirectoryUploadInput, rootPare
 		reportFound.flush()
 		discardUploadRuns(new Set([...scanning.values()].map(run => run.id)))
 		toast.error(errorLabel(e), { id: scanningToastId })
+		void planning.then(plan => {
+			plan.release()
+		})
 
 		return
 	}
 
 	reportFound.flush()
 
+	const plan = await planning
+
+	try {
+		await uploadCollected({ collected, plan, scanning, scanningToastId, rootParentUuid })
+	} finally {
+		plan.release()
+	}
+}
+
+// The walked tree uploaded as its top-level conflicts were answered.
+async function uploadCollected({
+	collected: walked,
+	plan,
+	scanning,
+	scanningToastId,
+	rootParentUuid
+}: {
+	collected: CollectedDirectoryUpload
+	plan: TopLevelPlan
+	scanning: ReadonlyMap<string, UploadBatchRef>
+	scanningToastId: string | number
+	rootParentUuid: string | null
+}): Promise<void> {
+	let collected = walked
 	// A run cancelled while it was walked uploads nothing, and a directory the walk could not read (a skip
-	// the summary counts) has nothing to upload.
+	// the summary counts) has nothing to upload. A skipped one neither; a renamed one is a run of its new name.
 	const readable = new Set(collected.dirs.filter(path => topLevelOf(path) === null))
 	const directoryRuns = new Map<string, UploadBatchRef>()
-	const cancelled = new Set<string>()
+	const left = new Set(plan.skip)
 	const dropped = new Set<string>()
 
 	for (const [name, run] of scanning) {
 		if (uploadBatchControl.isCancelled(run.id)) {
-			cancelled.add(name)
+			left.add(name)
 			dropped.add(run.id)
-		} else if (readable.has(name)) {
+		} else if (readable.has(name) && !plan.skip.has(name) && !plan.directoryRenames.has(name)) {
 			directoryRuns.set(name, run)
 		} else {
 			dropped.add(run.id)
@@ -646,14 +797,16 @@ export async function startDirectoryUpload(input: DirectoryUploadInput, rootPare
 		discardUploadRuns(dropped)
 	}
 
-	if (cancelled.size > 0) {
-		collected = withoutTopLevel(collected, cancelled)
+	if (left.size > 0) {
+		collected = withoutTopLevel(collected, left)
+	}
 
-		if (collected.dirs.length === 0 && collected.files.length === 0) {
-			toast.dismiss(scanningToastId)
+	collected = renameTopLevel(collected, plan)
 
-			return
-		}
+	if (collected.dirs.length === 0 && collected.files.length === 0 && collected.skipped === 0) {
+		toast.dismiss(scanningToastId)
+
+		return
 	}
 
 	// Checked before any sub-directory is created, so a blocked upload leaves nothing behind.
@@ -674,7 +827,13 @@ export async function startDirectoryUpload(input: DirectoryUploadInput, rootPare
 		toastTransferStarted({ direction: "upload", name: topLevel[0] ?? "", count: topLevel.length, noun: "items" }, scanningToastId)
 	}
 
-	await runDirectoryUpload(defaultDirectoryUploadDeps, { rootParentUuid, ...collected, directoryRuns })
+	await runDirectoryUpload(defaultDirectoryUploadDeps, {
+		rootParentUuid,
+		...collected,
+		directoryRuns,
+		merges: plan.merges,
+		nested: plan.nested
+	})
 }
 
 // The collected tree without the top-level directories named in `names`.
@@ -685,5 +844,140 @@ function withoutTopLevel(collected: CollectedDirectoryUpload, names: ReadonlySet
 		dirs: collected.dirs.filter(kept),
 		files: collected.files.filter(entry => kept(entry.relPath)),
 		skipped: collected.skipped
+	}
+}
+
+// The collected tree under the names its top-level conflicts gave: a renamed directory's paths start with its new
+// name, a renamed file uploads under its new one.
+function renameTopLevel(collected: CollectedDirectoryUpload, plan: TopLevelPlan): CollectedDirectoryUpload {
+	if (plan.directoryRenames.size === 0 && plan.fileRenames.size === 0) {
+		return collected
+	}
+
+	const renamed = (relPath: string): string => {
+		const top = topLevelOf(relPath)
+		const to = plan.directoryRenames.get(top ?? relPath)
+
+		return to === undefined ? relPath : top === null ? to : `${to}${relPath.slice(top.length)}`
+	}
+
+	return {
+		dirs: collected.dirs.map(renamed),
+		files: collected.files.map(entry => {
+			const fileRename = topLevelOf(entry.relPath) === null ? plan.fileRenames.get(entry.relPath) : undefined
+
+			return fileRename === undefined ? { ...entry, relPath: renamed(entry.relPath) } : { ...entry, rename: fileRename }
+		}),
+		skipped: collected.skipped
+	}
+}
+
+// One top-level entry of a pick or a drop, as it will be named in the target: a HEIC file's converted name.
+interface TopLevelCandidate {
+	local: string
+	name: string
+	isDirectory: boolean
+}
+
+// A drop's entries as dropped; a picked directory's one top-level directory (every file's path starts with it).
+function topLevelCandidates(input: DirectoryUploadInput): { local: string; isDirectory: boolean }[] {
+	if (input.kind === "entries") {
+		return input.entries.map(entry => ({ local: entry.name, isDirectory: entry.isDirectory }))
+	}
+
+	const seen = new Map<string, boolean>()
+
+	for (const file of input.files) {
+		const top = topLevelOf(file.webkitRelativePath)
+
+		seen.set(top ?? file.webkitRelativePath, top !== null)
+	}
+
+	return [...seen].map(([local, isDirectory]) => ({ local, isDirectory }))
+}
+
+// What the top-level conflicts were answered with, by local name. `release` gives up the claims on the top-level names,
+// once the upload ended.
+interface TopLevelPlan {
+	readonly skip: ReadonlySet<string>
+	readonly directoryRenames: ReadonlyMap<string, string>
+	readonly fileRenames: ReadonlyMap<string, UploadRename>
+	readonly merges: ReadonlyMap<string, DriveItem | undefined>
+	readonly nested: NestedPolicy
+	readonly release: () => void
+}
+
+// Checks the top-level names against the target (startUploads' check) and asks about the conflicts. Never throws:
+// without a listing to check against, everything uploads as picked.
+async function planTopLevel(parentUuid: string | null, entries: { local: string; isDirectory: boolean }[]): Promise<TopLevelPlan> {
+	const convertHeic = entries.some(entry => !entry.isDirectory && isHeicUploadName(entry.local))
+		? await defaultHeicUploadDeps.readPreference().catch(() => false)
+		: false
+	const candidates: TopLevelCandidate[] = entries.map(entry => ({
+		...entry,
+		name: convertHeic && !entry.isDirectory && isHeicUploadName(entry.local) ? renameToJpg(entry.local) : entry.local
+	}))
+	const held = await namesHeldIn(parentUuid)
+	// Synchronous from the claims read to the claims made: no other check can pass in between.
+	const conflicts = held === null ? [] : findNameConflicts(candidates, withClaims(held, parentUuid))
+	const releases = candidates.map(candidate => claimUploadName(parentUuid, candidate.name, candidate.isDirectory ? "directory" : "file"))
+	const skip = new Set<string>()
+	const directoryRenames = new Map<string, string>()
+	const fileRenames = new Map<string, UploadRename>()
+	const merges = new Map<string, DriveItem | undefined>()
+	let nested: NestedPolicy = "replace"
+
+	if (held !== null && conflicts.length > 0) {
+		const answer = await askNameConflicts({ operation: "upload", parentUuid, conflicts })
+		const names = resolveNames({ candidates, held, conflicts, answer })
+
+		nested = answer?.nested ?? nested
+
+		for (const { index } of conflicts) {
+			const candidate = candidates[index]
+			const name = names[index]
+
+			if (candidate === undefined || name === undefined) {
+				continue
+			}
+
+			switch (name.action) {
+				case "skip":
+					skip.add(candidate.local)
+					releases[index]?.()
+
+					break
+				case "rename":
+					releases[index]?.()
+					releases.push(claimUploadName(parentUuid, name.name, candidate.isDirectory ? "directory" : "file"))
+
+					if (candidate.isDirectory) {
+						directoryRenames.set(candidate.local, name.name)
+					} else {
+						fileRenames.set(candidate.local, { from: candidate.name, to: name.name })
+					}
+
+					break
+				case "merge":
+					merges.set(candidate.local, held.get(nameCollisionKey(candidate.name))?.item)
+
+					break
+				case "keep":
+					break
+			}
+		}
+	}
+
+	return {
+		skip,
+		directoryRenames,
+		fileRenames,
+		merges,
+		nested,
+		release: () => {
+			for (const release of releases) {
+				release()
+			}
+		}
 	}
 }
