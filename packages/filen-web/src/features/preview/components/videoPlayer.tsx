@@ -84,7 +84,7 @@ function useVideoContinuity(video: HTMLVideoElement | null, positionKey: string)
 
 		// A video that ran to its end starts over next time.
 		function handlePause(): void {
-			setVideoPosition(positionKey, element.ended ? 0 : element.currentTime)
+			setVideoPosition(positionKey, element.ended ? 0 : element.currentTime, element.duration)
 		}
 
 		element.addEventListener("pause", handlePause)
@@ -93,7 +93,7 @@ function useVideoContinuity(video: HTMLVideoElement | null, positionKey: string)
 			element.removeEventListener("pause", handlePause)
 			// Stepping away mid-playback fires no pause. Read before the controller empties the element.
 			if (element.readyState >= HTMLMediaElement.HAVE_METADATA) {
-				setVideoPosition(positionKey, element.ended ? 0 : element.currentTime)
+				setVideoPosition(positionKey, element.ended ? 0 : element.currentTime, element.duration)
 			}
 		}
 	}, [video, positionKey])

@@ -613,6 +613,10 @@ export const preview = {
 	previewMediaNoSound: "No sound: this video's {{codec}} audio can't be played here.",
 	/** Video player — notice over a video that plays its sound without a picture because the browser can't decode its video; {{codec}} is the video format's name, e.g. HEVC */
 	previewMediaNoPicture: "No picture: this video's {{codec}} video can't be played here.",
+	/** Toast when a long video opens where an earlier session left it; {{time}} is the position, e.g. 12:34 */
+	videoResumedAt: "Resumed at {{time}}",
+	/** Action on the resumed toast: play the video from the beginning */
+	videoStartOver: "Start over",
 	/** Video player — accessible label of the button closing the no-sound/no-picture notice */
 	previewMediaNoticeDismiss: "Dismiss",
 	/** Video player — accessible label of the floating control bar */

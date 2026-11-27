@@ -1,6 +1,7 @@
 import { useEffect, useEffectEvent, useState, useSyncExternalStore } from "react"
 import type { AnyFile } from "@filen/sdk-rs"
-import { driveItemName } from "@filen/shared"
+import { toast } from "sonner"
+import { driveItemName, formatSecondsToMediaClock } from "@filen/shared"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { itemTypeExtension } from "@/features/drive/lib/preview.logic"
 import type { DriveItem } from "@/features/drive/lib/item"
@@ -19,7 +20,9 @@ import {
 } from "@/features/preview/lib/previewStream"
 import { getPreviewStreamId, previewCacheEpoch, setPreviewStreamId } from "@/features/preview/lib/previewCache"
 import { usePreviewAccessMode, usePreviewCacheScope, type PreviewAccessMode } from "@/features/preview/lib/accessMode"
-import { getVideoPosition } from "@/features/preview/lib/videoContinuity"
+import { bindVideoResume, videoStartTime } from "@/features/preview/lib/videoContinuity"
+import { seekMedia } from "@/lib/media/useMediaState"
+import { i18n } from "@/lib/i18n"
 import { takeLinkedTransportStreamProbe } from "@/features/preview/lib/transportStreamProbe"
 import { initialVideoRoute } from "@/features/preview/lib/previewPlayback.logic"
 import { recordProbeVerdict } from "@/features/drive/lib/contentVerdicts"
@@ -196,6 +199,14 @@ export function usePreviewVideo(item: DriveItem, video: HTMLVideoElement | null,
 		const file = narrowToAnyFile(current)
 		const name = driveItemName(current)
 		const contentType = allowedMediaContentType(current)
+		const stableUuid = "stableUUID" in file ? file.stableUUID : undefined
+
+		// Only the preview's own player (keyed by the file) remembers a video of the user's own across sessions.
+		if (access === "authed" && positionKey === uuid && stableUuid !== undefined) {
+			bindVideoResume(positionKey, { stableUuid, uuid: file.uuid, size: Number(file.size) })
+		}
+
+		const start = videoStartTime(positionKey)
 		const controller = new PreviewVideo({
 			file,
 			name,
@@ -204,14 +215,31 @@ export function usePreviewVideo(item: DriveItem, video: HTMLVideoElement | null,
 				contentType,
 				streamAvailable: isMediaStreamAvailable()
 			}),
-			startTime: getVideoPosition(positionKey) ?? 0,
+			startTime: start.seconds,
 			deps: previewVideoDeps({ file, name, contentType, access, cacheScope })
 		})
 
 		slot.set(controller)
 		controller.open(video)
 
+		const element = video
+		// Resumed where an earlier session left it: say so, with the way back to the start.
+		const resumedToast = start.resumed
+			? toast(i18n.t("preview:videoResumedAt", { time: formatSecondsToMediaClock(start.seconds) }), {
+					action: {
+						label: i18n.t("preview:videoStartOver"),
+						onClick: () => {
+							seekMedia(element, 0)
+						}
+					}
+				})
+			: null
+
 		return () => {
+			if (resumedToast !== null) {
+				toast.dismiss(resumedToast)
+			}
+
 			controller.dispose()
 			slot.clear(controller)
 		}
