@@ -129,26 +129,16 @@ test.describe("drive bulk actions", () => {
 		await expect(page.getByRole("menu")).toHaveCount(0)
 	})
 
-	test("the bulk Trash button opens the trash confirm; dismissing leaves the item selected and in place", async ({ page }) => {
+	test("the bulk Trash button trashes without a confirm", async ({ page }) => {
 		await bootTo(page)
 		const { listbox, hasItems } = await waitForListingSettled(page)
 		test.skip(!hasItems, "drive root has no items in this account — nothing to select")
 
+		// Read-only on the live account: the bar's Trash is checked to be offered and to run unconfirmed (the
+		// round trip below trashes for real).
 		await listbox.getByRole("option").first().click()
-		await page.getByRole("button", { name: "Trash", exact: true }).click()
-
-		// Scoped by title, never a bare role: a startup account reminder is an alertdialog too and can pop
-		// asynchronously, which would make an unscoped lookup a strict-mode violation rather than a useful
-		// failure. Base UI wires the accessible name from the dialog's own title (confirmDialog.tsx).
-		const dialog = page.getByRole("alertdialog", { name: "Move to trash?" })
-		await expect(dialog).toBeVisible()
-		await expect(dialog.getByRole("heading", { name: "Move to trash?", exact: true })).toBeVisible()
-
-		// Dismiss without ever pressing the dialog's own "Trash" confirm — this test never mutates the
-		// live account. The selection survives a cancelled confirm (only a HANDLED outcome prunes it).
-		await page.keyboard.press("Escape")
-		await expect(dialog).toHaveCount(0)
-		await expect(page.getByText("1 selected", { exact: true })).toBeVisible()
+		await expect(page.getByRole("button", { name: "Trash", exact: true })).toBeEnabled()
+		await expect(page.getByRole("alertdialog", { name: "Move to trash?" })).toHaveCount(0)
 	})
 
 	// The only test in this file that touches live account state — a fully-cleaning round trip (create
@@ -234,13 +224,9 @@ test.describe("drive bulk actions", () => {
 			await rowB.click({ modifiers: [MOD_KEY] })
 			await expect(page.getByText("2 selected", { exact: true })).toBeVisible()
 
+			// Unconfirmed (reversible from the toast's Undo): the rows leaving is the live write settling on the
+			// account-wide lease, hence the write budget.
 			await page.getByRole("button", { name: "Trash", exact: true }).click()
-			const trashConfirm = page.getByRole("alertdialog", { name: "Move to trash?" })
-			await expect(trashConfirm).toBeVisible()
-			await trashConfirm.getByRole("button", { name: "Trash", exact: true }).click()
-			// Several items close the confirm at once and run as an activity toast (runBulkDialogActivity), so
-			// the rows leaving is the live write settling on the account-wide lease: the write budget.
-			await expect(trashConfirm).toHaveCount(0)
 
 			await expect(rowA).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 			await expect(rowB).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
@@ -334,10 +320,6 @@ test.describe("drive bulk actions", () => {
 			await restoredRowB.click({ modifiers: [MOD_KEY] })
 			await expect(page.getByText("2 selected", { exact: true })).toBeVisible()
 			await page.getByRole("button", { name: "Trash", exact: true }).click()
-			const innerFinalTrashConfirm = page.getByRole("alertdialog", { name: "Move to trash?" })
-			await expect(innerFinalTrashConfirm).toBeVisible()
-			await innerFinalTrashConfirm.getByRole("button", { name: "Trash", exact: true }).click()
-			await expect(innerFinalTrashConfirm).toHaveCount(0)
 			await expect(restoredRowA).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 			await expect(restoredRowB).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
@@ -351,13 +333,9 @@ test.describe("drive bulk actions", () => {
 
 			await finalScratchRow.click()
 			await page.getByRole("button", { name: "Trash", exact: true }).click()
-			const scratchTrashConfirm = page.getByRole("alertdialog", { name: "Move to trash?" })
-			await expect(scratchTrashConfirm).toBeVisible()
-			await scratchTrashConfirm.getByRole("button", { name: "Trash", exact: true }).click()
-			await expect(scratchTrashConfirm).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			// On the live page, not after a reload: trashItems patches the row out only once the write
-			// succeeded (a rejection closes the confirm too, leaving the row), and a refetch already in flight
+			// succeeded (a rejection leaves the row), and a refetch already in flight
 			// replays that patch (queries/drive.ts's patchListing), so a stale read cannot resurrect it. A
 			// reload here unloads the page with the trash's lease release in flight, orphaning the lease and
 			// stalling the next write ~70s.

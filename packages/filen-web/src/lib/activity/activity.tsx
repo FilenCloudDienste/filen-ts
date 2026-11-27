@@ -39,6 +39,8 @@ export interface ActivityResult {
 	// Several failures, listed in a dialog the toast's Details opens.
 	failures?: ActivityFailure[]
 	retry?: () => void
+	// Reverses what succeeded (a trash's restore), offered while a clean result shows. A Try again takes its place.
+	undo?: () => void
 }
 
 interface ActivitySpec<R> {
@@ -59,7 +61,11 @@ function showResult(id: string, hidden: boolean, result: ActivityResult): void {
 		icon: TOAST_ICONS[result.tone],
 		description: result.description,
 		duration: result.tone === "success" ? RESULT_TOAST_MS : RESULT_TOAST_WITH_PROBLEMS_MS,
-		...(result.retry === undefined ? {} : { action: { label: i18n.t("common:tryAgain"), onClick: result.retry } }),
+		...(result.retry !== undefined
+			? { action: { label: i18n.t("common:tryAgain"), onClick: result.retry } }
+			: result.undo !== undefined
+				? { action: { label: i18n.t("common:undo"), onClick: result.undo } }
+				: {}),
 		...(failures === undefined
 			? {}
 			: {
@@ -140,12 +146,15 @@ export interface BulkActivitySpec<T> {
 	// What follows the run in the caller (pruning a selection), before its result shows.
 	onDone?: (outcome: BulkOutcome<T>) => void
 	showRunning?: boolean
+	// The way back from a run that fully succeeded, built from the items as they were before it (held by the caller, so
+	// undoing reads nothing). Null when nothing it did can be reversed (every item was already where it was sent).
+	undo?: (succeeded: T[]) => (() => void) | null
 }
 
 // A run over items, each settling on its own: the toast counts them as they settle, then says how many
-// succeeded and, for any that failed, why, with Try again re-running only the failed ones.
+// succeeded and, for any that failed, why, with Try again re-running only the failed ones, or, when none failed, Undo.
 export function runBulkActivity<T>(spec: BulkActivitySpec<T>): Promise<BulkOutcome<T>> {
-	const { items, keys, name, values, run, onDone, showRunning } = spec
+	const { items, keys, name, values, run, onDone, showRunning, undo } = spec
 	const label = text(runningLine(keys, items, name, values))
 
 	return runActivity({
@@ -177,6 +186,7 @@ export function runBulkActivity<T>(spec: BulkActivitySpec<T>): Promise<BulkOutco
 
 			const [onlyFailure] = summary.failures
 			const failedItems = outcome.failed.map(failure => failure.item)
+			const undoRun = failedItems.length === 0 ? (undo?.(outcome.succeeded) ?? null) : null
 
 			return {
 				tone: summary.tone,
@@ -189,7 +199,8 @@ export function runBulkActivity<T>(spec: BulkActivitySpec<T>): Promise<BulkOutco
 								void runBulkActivity({ ...spec, items: failedItems, showRunning: true })
 							}
 						}
-					: {})
+					: {}),
+				...(undoRun !== null ? { undo: undoRun } : {})
 			}
 		}
 	})

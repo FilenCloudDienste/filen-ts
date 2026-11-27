@@ -246,20 +246,15 @@ test.describe("context menus", () => {
 			await expect(trashMenu).toBeVisible()
 			await trashMenu.getByRole("menuitem", { name: menuItemName(labelFor("trash")) }).click()
 
-			// Scoped by title, never a bare role: a startup account reminder is an alertdialog too and can
-			// pop asynchronously, which would make this both a strict-mode hazard and an unreachable
-			// toHaveCount(0) below. Base UI wires the accessible name from the title (confirmDialog.tsx).
-			const trashConfirm = page.getByRole("alertdialog", { name: driveDict.driveTrashConfirmTitle })
-			await expect(trashConfirm).toBeVisible()
-			await trashConfirm.getByRole("button", { name: labelFor("trash"), exact: true }).click()
-			// The write budget, not the expect default: this dialog stays open and pending for the whole
-			// trash, so its close is the live write settling on the account-wide lease.
-			await expect(trashConfirm).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+			// Trash is reversible, so it runs at once, unconfirmed; its result toast offers Undo. The done toast
+			// on the write budget is the live write settling on the account-wide lease.
+			const trashDoneToast = toasts(page).filter({ hasText: driveDict.driveTrashDoneNamed.replace("{{name}}", dirName) })
+			await expect(trashDoneToast).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+			await expect(trashDoneToast.getByRole("button", { name: "Undo", exact: true })).toBeVisible()
 
-			// runBulkDialogActivity closes that confirm on a server-side rejection too, reporting it only as
-			// the activity's result toast — read it back so a rejected trash names itself here instead of
-			// surfacing as a bare row count below. A single-item bulk can only fail wholesale, so the
-			// rejection copy is fully determined.
+			// A rejection reports itself only as the activity's result toast — read it back so a rejected
+			// trash names itself here instead of surfacing as a bare row count below. A single-item bulk can
+			// only fail wholesale, so the rejection copy is fully determined.
 			const trashFailureToast = driveDict.driveTrashFailedNamed.replace("{{name}}", dirName)
 			await expect(toasts(page).filter({ hasText: trashFailureToast })).toHaveCount(0, { timeout: 5_000 })
 

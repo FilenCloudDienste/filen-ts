@@ -5,7 +5,8 @@ import type { ErrorDTO } from "@/lib/sdk/errors"
 import type { ActionOutcome } from "@/lib/actions/outcome"
 import type { BulkOutcome, BulkProgress } from "@/lib/actions/bulk"
 import { type ActivityKeys, type ActivityValues, activityKeys } from "@/lib/activity/activity.logic"
-import { runActivity, type BulkActivitySpec } from "@/lib/activity/activity"
+import { runActivity, runBulkActivity, type BulkActivitySpec } from "@/lib/activity/activity"
+import { archiveNotes, revertNoteDispositions, trashNotes } from "@/features/notes/lib/bulk"
 import { noteDisplayTitle } from "@/features/notes/lib/displayTitle"
 import { useNotesSelectionStore } from "@/features/notes/store/useNotesSelectionStore"
 
@@ -62,6 +63,32 @@ export function notesActivity(
 		},
 		...(values !== undefined ? { values } : {})
 	}
+}
+
+// The Undo of a trash or archive, for the notes it moved (one already there stayed put): each back as it was.
+function undoDisposition(moved: (note: Note) => boolean): (succeeded: Note[]) => (() => void) | null {
+	return succeeded => {
+		const notes = succeeded.filter(moved)
+
+		return notes.length === 0
+			? null
+			: () => {
+					void runBulkActivity(notesActivity(notes, NOTES_RESTORE, revertNoteDispositions))
+				}
+	}
+}
+
+export const undoNoteTrash = undoDisposition(note => !note.trash)
+
+export const undoNoteArchive = undoDisposition(note => !note.trash && !note.archive)
+
+// A trash or archive of notes, reversible from its toast's Undo, so never confirmed first.
+export function notesTrashActivity(notes: readonly Note[]): BulkActivitySpec<Note> {
+	return { ...notesActivity(notes, NOTES_TRASH, trashNotes), undo: undoNoteTrash }
+}
+
+export function notesArchiveActivity(notes: readonly Note[]): BulkActivitySpec<Note> {
+	return { ...notesActivity(notes, NOTES_ARCHIVE, archiveNotes), undo: undoNoteArchive }
 }
 
 // A creation's outcome, with the words for what failed: the create itself, or a step after it (the tag a

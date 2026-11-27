@@ -8,10 +8,9 @@ import { useDialogHost } from "@/lib/useDialogHost"
 import { setNoteTitle, deleteNote, leaveNote } from "@/features/notes/lib/actions"
 import { createNoteTag, renameNoteTag, deleteNoteTag } from "@/features/notes/lib/tags"
 import { createTagForNote, type CreatedTag } from "@/features/notes/lib/createTagForNote"
-import { trashNotes, deleteNotesPermanently, leaveNotes } from "@/features/notes/lib/bulk"
-import { NOTES_DELETE_PERMANENTLY, NOTES_LEAVE, NOTES_TRASH, notesActivity } from "@/features/notes/lib/activity"
+import { deleteNotesPermanently, leaveNotes } from "@/features/notes/lib/bulk"
+import { NOTES_DELETE_PERMANENTLY, NOTES_LEAVE, notesActivity } from "@/features/notes/lib/activity"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { runNoteDirectAction } from "@/features/notes/lib/noteDirectAction"
 import { type NoteActionDialogKind, type NoteTagDialogKind } from "@/features/notes/components/noteMenu.logic"
 import { type NoteBulkDialogActionKind } from "@/features/notes/components/notesBulkActionBar.logic"
 import { noteParticipantsPanel } from "@/features/notes/store/useNoteParticipantsPanel"
@@ -45,7 +44,7 @@ export interface NoteDialogHost {
 // One instance of whichever dialog is active at a time — the note-menu counterpart to drive's
 // useDriveDialogHost, covering the single-note kinds noteMenu.tsx dispatches (rename/delete/leave),
 // the tags submenu's inline "new tag" entry (createTag), the tag-row menu's own kinds, and the notes
-// bulk-action bar's confirm dialogs (trashSelected/deleteSelected/leaveSelected).
+// bulk-action bar's confirm dialogs (deleteSelected/leaveSelected).
 export function useNoteDialogHost(): NoteDialogHost {
 	const { t } = useTranslation(["notes", "common"])
 	const navigate = useNavigate()
@@ -114,12 +113,8 @@ export function useNoteDialogHost(): NoteDialogHost {
 		)
 	}
 
-	// Every bulk-dialog confirm (trashSelected/deleteSelected/leaveSelected) runs as an activity
+	// Every bulk-dialog confirm (deleteSelected/leaveSelected) runs as an activity
 	// (useDialogHost's runBulkDialogActivity) and prunes the succeeded notes from the selection.
-	async function handleTrashSelectedConfirm(notes: Note[]): Promise<void> {
-		await runBulkDialogActivity(notesActivity(notes, NOTES_TRASH, trashNotes))
-	}
-
 	async function handleDeleteSelectedConfirm(notes: Note[]): Promise<void> {
 		await runBulkDialogActivity(
 			notesActivity(notes, NOTES_DELETE_PERMANENTLY, (targets, onSettled) =>
@@ -237,28 +232,6 @@ export function useNoteDialogHost(): NoteDialogHost {
 						}}
 					/>
 				)
-			// The open note's Trash from the keyboard, confirmed; on confirm it runs exactly what the menu's Trash runs.
-			case "trash":
-				return (
-					<ConfirmDialog
-						open
-						pending={dialogPending}
-						title={t("notesTrashSelectedConfirmTitle")}
-						body={t("notesTrashSelectedConfirmBodySingle")}
-						confirmLabel={t("noteActionTrash")}
-						cancelLabel={t("common:cancel")}
-						destructive
-						onOpenChange={open => {
-							if (!open) {
-								closeActiveDialog()
-							}
-						}}
-						onConfirm={() => {
-							closeActiveDialog()
-							void runNoteDirectAction(activeDialog.note, "trash", t, undefined)
-						}}
-					/>
-				)
 			case "createTag":
 				return (
 					<InputDialog
@@ -347,35 +320,6 @@ export function useNoteDialogHost(): NoteDialogHost {
 					<HistoryDialog
 						note={activeDialog.note}
 						onClose={closeActiveDialog}
-					/>
-				)
-			case "trashSelected":
-				return (
-					<ConfirmDialog
-						open
-						pending={dialogPending}
-						title={t("notesTrashSelectedConfirmTitle")}
-						body={t(
-							singleOrCountKey(
-								activeDialog.notes.length,
-								"notesTrashSelectedConfirmBodySingle",
-								"notesTrashSelectedConfirmBody"
-							),
-							{
-								count: activeDialog.notes.length
-							}
-						)}
-						confirmLabel={t("noteActionTrash")}
-						cancelLabel={t("common:cancel")}
-						destructive
-						onOpenChange={open => {
-							if (!open) {
-								closeActiveDialog()
-							}
-						}}
-						onConfirm={() => {
-							void handleTrashSelectedConfirm(activeDialog.notes)
-						}}
 					/>
 				)
 			case "deleteSelected":

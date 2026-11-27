@@ -433,16 +433,6 @@ export const drive = {
 	/** Rename dialog — body under the title (driveActionRename doubles as both the dialog title and its submit button, matching the new-directory dialog's own title/submit pairing) */
 	driveRenameDialogBody: "Enter a new name.",
 
-	// ── Trash confirm ────────────────────────────────────────────────────────
-	/** Trash confirm dialog — title; the confirm button reuses driveActionTrash */
-	driveTrashConfirmTitle: "Move to trash?",
-	/** Trash confirm dialog — body for a single item */
-	driveTrashConfirmBodySingle: "Are you sure you want to move this item to the trash? You can restore it later.",
-	/** Trash confirm dialog — body for multiple items; {{count}} = items being trashed */
-	driveTrashConfirmBody_one: "Are you sure you want to move {{count}} item to the trash? You can restore it later.",
-	/** Trash confirm dialog — body for multiple items; {{count}} = items being trashed */
-	driveTrashConfirmBody_other: "Are you sure you want to move these {{count}} items to the trash? You can restore them later.",
-
 	// ── Permanent-delete confirm ─────────────────────────────────────────────
 	/** Delete-permanently confirm dialog — title; the confirm button reuses driveActionDeletePermanently */
 	driveDeletePermanentlyConfirmTitle: "Delete permanently?",
@@ -1056,6 +1046,28 @@ export const drive = {
 	driveMovePartial_one: "Moved {{count}} item to {{destination}}, {{failed}} failed",
 	/** Activity toast — moving to a directory ({{destination}}) partly failed; {{count}} succeeded, {{failed}} failed */
 	driveMovePartial_other: "Moved {{count}} items to {{destination}}, {{failed}} failed",
+	/** Activity toast — a move's Undo, taking the items back to the directories they came from, running; one item named ({{name}}) */
+	driveMoveBackRunningNamed: "Moving {{name}} back",
+	/** Activity toast — a move's Undo running; {{count}} items */
+	driveMoveBackRunning_one: "Moving {{count}} item back",
+	/** Activity toast — a move's Undo running; {{count}} items */
+	driveMoveBackRunning_other: "Moving {{count}} items back",
+	/** Activity toast — a move's Undo finished; one item named ({{name}}) */
+	driveMoveBackDoneNamed: "Moved {{name}} back",
+	/** Activity toast — a move's Undo finished; {{count}} items */
+	driveMoveBackDone_one: "Moved {{count}} item back",
+	/** Activity toast — a move's Undo finished; {{count}} items */
+	driveMoveBackDone_other: "Moved {{count}} items back",
+	/** Activity toast — a move's Undo failed for every item; one item named ({{name}}) */
+	driveMoveBackFailedNamed: "Couldn't move {{name}} back",
+	/** Activity toast — a move's Undo failed for every item; {{count}} items */
+	driveMoveBackFailed_one: "Couldn't move {{count}} item back",
+	/** Activity toast — a move's Undo failed for every item; {{count}} items */
+	driveMoveBackFailed_other: "Couldn't move {{count}} items back",
+	/** Activity toast — a move's Undo partly failed; {{count}} succeeded, {{failed}} failed */
+	driveMoveBackPartial_one: "Moved {{count}} item back, {{failed}} failed",
+	/** Activity toast — a move's Undo partly failed; {{count}} succeeded, {{failed}} failed */
+	driveMoveBackPartial_other: "Moved {{count}} items back, {{failed}} failed",
 	/** Activity toast — renaming several items at once running; one item named ({{name}}) */
 	driveRenameRunningNamed: "Renaming {{name}}",
 	/** Activity toast — renaming several items at once running; {{count}} items */

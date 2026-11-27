@@ -4,18 +4,9 @@ import type { Note, NoteTag, NoteType } from "@filen/sdk-rs"
 import { aggregateNoteSelectionFlags } from "@filen/shared"
 import { runBulkActivity, type BulkActivitySpec } from "@/lib/activity/activity"
 import { isNoteUndecryptable, tagDisplayName } from "@/features/notes/lib/sort"
-import {
-	setPinnedNotes,
-	setFavoritedNotes,
-	setTypeNotes,
-	duplicateNotes,
-	archiveNotes,
-	restoreNotes,
-	setTagOnNotes
-} from "@/features/notes/lib/bulk"
+import { setPinnedNotes, setFavoritedNotes, setTypeNotes, duplicateNotes, restoreNotes, setTagOnNotes } from "@/features/notes/lib/bulk"
 import { exportAllNotes, toastNotesExportOutcome } from "@/features/notes/lib/export"
 import {
-	NOTES_ARCHIVE,
 	NOTES_CHANGE_TYPE,
 	NOTES_DUPLICATE,
 	NOTES_FAVORITE,
@@ -25,7 +16,9 @@ import {
 	NOTES_UNFAVORITE,
 	NOTES_UNPIN,
 	NOTES_UNTAG,
-	notesActivity
+	notesActivity,
+	notesArchiveActivity,
+	notesTrashActivity
 } from "@/features/notes/lib/activity"
 import { useNotesSelectionStore } from "@/features/notes/store/useNotesSelectionStore"
 import { useNotesInflightStore } from "@/features/notes/store/useNotesInflight"
@@ -154,7 +147,10 @@ export function NotesBulkActionBar({ selectedNotes, allTags, currentUserId, onDi
 				void handleExportSelected()
 				return
 			case "archive":
-				void runSelectionActivity(notesActivity(selectedNotes, NOTES_ARCHIVE, archiveNotes))
+				void runSelectionActivity(notesArchiveActivity(selectedNotes))
+				return
+			case "trash":
+				void runSelectionActivity(notesTrashActivity(selectedNotes))
 				return
 			case "restore":
 				void runSelectionActivity(notesActivity(selectedNotes, NOTES_RESTORE, restoreNotes))

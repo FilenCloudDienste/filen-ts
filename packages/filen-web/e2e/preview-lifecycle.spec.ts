@@ -415,16 +415,9 @@ test("the preview header's own item menu: matches the row menu's set (no Downloa
 		await menuTrigger.click()
 		await expect(menu.getByRole("menuitem", { name: menuItemName("Favorite") })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
-		// Trash A from inside the preview — the confirm nests over the overlay (Base UI dialog stacking).
+		// Trash A from inside the preview: reversible, so it runs at once with Undo on its toast, no confirm.
 		await menu.getByRole("menuitem", { name: menuItemName("Trash") }).click()
-		// Scoped by title, as everywhere else here — a startup reminder can pop as a second alertdialog.
-		const trashConfirm = page.getByRole("alertdialog", { name: "Move to trash?" })
-		await expect(trashConfirm).toBeVisible()
-		await expect(trashConfirm.getByRole("heading", { name: "Move to trash?", exact: true })).toBeVisible()
-		// handleMenuTrash awaits trashItems before clearing the dialog (previewOverlay.tsx), so unlike the
-		// menu above, THIS close is the write settling — on the write budget for the same lease reason.
-		await trashConfirm.getByRole("button", { name: "Trash", exact: true }).click()
-		await expect(trashConfirm).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+		await expect(page.getByRole("alertdialog", { name: "Move to trash?" })).toHaveCount(0)
 
 		// The pager steps onto B IN PLACE rather than closing the whole preview — the frozen two-item
 		// snapshot now has one slot left, and A's removed index (0) clamps onto it.

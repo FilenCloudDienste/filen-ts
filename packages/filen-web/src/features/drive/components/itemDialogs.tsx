@@ -1,6 +1,5 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { singleOrCountKey } from "@/lib/i18n"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import type { ParentNaming } from "@/features/drive/lib/archiveTargets"
@@ -13,7 +12,6 @@ import { CompressDialog } from "@/features/drive/components/compressDialog"
 import { ExtractDialog } from "@/features/drive/components/extractDialog"
 import { ExtractDestinationDialog } from "@/features/drive/components/extractDestinationDialog"
 import { NewPlaylistWithTracksDialog } from "@/features/audio/components/newPlaylistWithTracksDialog"
-import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 import { useNameFieldCheck } from "@/features/drive/hooks/useNameFieldCheck"
 
@@ -52,34 +50,6 @@ export function RenameItemDialog({ item, pending, onSubmit, onClose }: RenameIte
 				}
 			}}
 			onSubmit={onSubmit}
-		/>
-	)
-}
-
-export interface TrashConfirmDialogProps {
-	count: number
-	pending: boolean
-	onConfirm: () => void
-	onClose: () => void
-}
-
-export function TrashConfirmDialog({ count, pending, onConfirm, onClose }: TrashConfirmDialogProps) {
-	const { t } = useTranslation(["drive", "common"])
-
-	return (
-		<ConfirmDialog
-			open
-			pending={pending}
-			title={t("driveTrashConfirmTitle")}
-			body={t(singleOrCountKey(count, "driveTrashConfirmBodySingle", "driveTrashConfirmBody"), { count })}
-			confirmLabel={t("driveActionTrash")}
-			cancelLabel={t("common:cancel")}
-			onOpenChange={open => {
-				if (!open) {
-					onClose()
-				}
-			}}
-			onConfirm={onConfirm}
 		/>
 	)
 }

@@ -9,6 +9,7 @@ import { confirmDotFilenOperation, includesRootDotFilen } from "@/features/drive
 import { type BulkOutcome } from "@/lib/actions/bulk"
 import { runBulkActivity, type BulkActivitySpec } from "@/lib/activity/activity"
 import { DRIVE_MOVE, driveActivity } from "@/features/drive/lib/activity"
+import { undoMove } from "@/features/drive/lib/undo"
 import { type CopyDestination } from "@/features/drive/lib/copy.logic"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { reconcileSelectedItems } from "@/features/drive/components/directoryListing.logic"
@@ -168,13 +169,14 @@ export function buildTreeDragSourceProps(resolveItem: () => DriveItem | undefine
 }
 
 // A move of items into a directory as an activity, named by where they go. `renames`: the names conflicts gave
-// (resolveMoveConflicts).
+// (resolveMoveConflicts). Its Undo moves them back.
 export function moveActivity(
 	items: readonly DriveItem[],
 	destination: CopyDestination,
 	renames?: ReadonlyMap<string, string>
 ): BulkActivitySpec<DriveItem> {
 	return driveActivity(items, DRIVE_MOVE, (targets, onSettled) => moveItems(targets, destination.uuid, onSettled, renames), {
+		undo: moved => undoMove(moved, destination.uuid),
 		// A destination whose name isn't cached (a tree level never listed) still reads as a sentence.
 		values: { destination: destination.name === "" ? i18n.t("drive:driveMoveDestinationFallback") : destination.name }
 	})

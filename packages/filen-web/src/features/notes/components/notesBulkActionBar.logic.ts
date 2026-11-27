@@ -5,11 +5,9 @@ import { type ActionDescriptor } from "@/lib/actionDescriptor"
 import { type NotesKey } from "@/lib/i18n"
 
 // Dialog kinds the notes bulk-action bar can ask useNoteDialogHost to open — disjoint from
-// NoteActionDialogKind (noteMenu.logic.ts) since none of these ever carry a single Note. Trash stays
-// direct/unconfirmed for a single note (noteMenuActions' TRASH) but IS confirmed in bulk (mobile's
-// own "(destructive, confirmed)" annotation on Trash/Delete/Leave selected) — the one place bulk and
-// single-item note dispositions diverge.
-export type NoteBulkDialogActionKind = "trashSelected" | "deleteSelected" | "leaveSelected"
+// NoteActionDialogKind (noteMenu.logic.ts) since none of these ever carry a single Note. Trash is reversible (its toast
+// offers Undo), so it runs unconfirmed, in bulk as for one note.
+export type NoteBulkDialogActionKind = "deleteSelected" | "leaveSelected"
 
 // "submenu" opens its own small popover (type picker / tri-state tag list).
 export type NoteBulkActionDescriptor = ActionDescriptor<
@@ -69,18 +67,8 @@ export function noteBulkActions(flags: NoteSelectionFlags): NoteBulkActionDescri
 		descriptors.push({ id: "restore", ...NOTE_ACTION_DEFS.restore, run: "direct" })
 	}
 
-	// Unlike the single-note menu's own (non-destructive) Trash entry, the bulk button IS
-	// destructive-styled — the confirm dialog this "dialog" run kind opens makes it a deliberate,
-	// confirmed disposition on every selected note at once, so it gets the same red treatment as bulk
-	// Delete/Leave rather than inheriting NOTE_ACTION_DEFS.trash's single-note styling.
 	if (availability.trash) {
-		descriptors.push({
-			id: "trash",
-			...NOTE_ACTION_DEFS.trash,
-			destructive: true,
-			run: "dialog",
-			dialogKind: "trashSelected"
-		})
+		descriptors.push({ id: "trash", ...NOTE_ACTION_DEFS.trash, run: "direct" })
 	}
 
 	if (availability.delete) {

@@ -10,15 +10,17 @@ import { type DriveItem } from "@/features/drive/lib/item"
 import { keepPreviewOpenOnNavigate, usePreviewDialogState } from "@/features/preview/hooks/usePreviewDialogState"
 import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
 import { PHOTOS_HIDDEN_ACTION_IDS, photosParentNaming } from "@/features/photos/lib/itemActions"
-import { ItemDialog, RenameItemDialog, TrashConfirmDialog } from "@/features/drive/components/itemDialogs"
+import { ItemDialog, RenameItemDialog } from "@/features/drive/components/itemDialogs"
+import { undoTrash } from "@/features/drive/lib/undo"
+import { runBulkActivity } from "@/lib/activity/activity"
 
 // The photos surface's own dialog kind — narrower than drive's ActiveDialogKind (no move/color/
 // unshare/delete/import/emptyTrash/restoreSelected/disableLink/extract: none of those ever reach a photos
 // item — see itemActions.ts's own doc comments on what's dropped and why). "preview" is the one addition
-// beyond the per-item menu's own eight kinds — opened directly by a tile click, never via
+// beyond the per-item menu's own seven kinds — opened directly by a tile click, never via
 // handleItemAction, mirroring useDriveDialogHost's identical split between menu-dispatched kinds and
 // its own dedicated openPreview entry point.
-type PhotosDialogKind = "rename" | "copy" | "trash" | "versions" | "info" | "link" | "share" | "compress" | "preview"
+type PhotosDialogKind = "rename" | "copy" | "versions" | "info" | "link" | "share" | "compress" | "preview"
 
 // The preview arm holds the frozen pager snapshot + position usePreviewDialogState folds events into
 // — a DriveItem[], since a reconciled rename re-narrows its item.
@@ -40,7 +42,7 @@ interface UsePhotosDialogHostParams {
 	selectedItems: PhotoItem[]
 }
 
-// The photos-scoped counterpart of drive's useDriveDialogHost, trimmed to the nine dialog kinds the
+// The photos-scoped counterpart of drive's useDriveDialogHost, trimmed to the eight dialog kinds the
 // photos menu/bar/grid ever dispatch. rename/trash route through this file's own PhotoItem-cache-
 // patching wrappers (features/photos/lib/actions.ts); copy/versions/info/link/share/compress/preview
 // reuse the EXACT same generic dialog components drive uses unchanged (the two that take the `variant`
@@ -52,7 +54,7 @@ export function usePhotosDialogHost({ rootUuids, selectedItems }: UsePhotosDialo
 	// Compress (its dialog and the preview's menu) reads directory names from what Photos holds and names a
 	// mix of directories after Photos.
 	const compressParentNaming = photosParentNaming(rootUuids, t("modulePhotos"))
-	const { activeDialog, setActiveDialog, dialogPending, isDialogOpen, closeActiveDialog, runDialogOutcome, runBulkDialogActivity } =
+	const { activeDialog, setActiveDialog, dialogPending, isDialogOpen, closeActiveDialog, runDialogOutcome } =
 		useDialogHost<ActivePhotosDialog>({ keepOpenOnNavigate: keepPreviewOpenOnNavigate })
 
 	// A removal from the preview patches no photos listing: a remote move can keep the photo under the
@@ -76,13 +78,16 @@ export function usePhotosDialogHost({ rootUuids, selectedItems }: UsePhotosDialo
 		if (
 			kind !== "rename" &&
 			kind !== "copy" &&
-			kind !== "trash" &&
 			kind !== "versions" &&
 			kind !== "info" &&
 			kind !== "link" &&
 			kind !== "share" &&
 			kind !== "compress"
 		) {
+			if (kind === "trash") {
+				trash([item])
+			}
+
 			return
 		}
 
@@ -90,7 +95,13 @@ export function usePhotosDialogHost({ rootUuids, selectedItems }: UsePhotosDialo
 	}
 
 	function handleBulkDialogAction(kind: DriveActionDialogKind, startPath?: readonly string[]): void {
-		if (kind !== "copy" && kind !== "trash" && kind !== "share" && kind !== "compress") {
+		if (kind === "trash") {
+			trash(selectedItems)
+
+			return
+		}
+
+		if (kind !== "copy" && kind !== "share" && kind !== "compress") {
 			return
 		}
 
@@ -106,10 +117,12 @@ export function usePhotosDialogHost({ rootUuids, selectedItems }: UsePhotosDialo
 		await runDialogOutcome(() => renamePhotoItem(rootUuids, item, value.trim()))
 	}
 
-	async function handleTrashConfirm(items: PhotoItem[]): Promise<void> {
-		await runBulkDialogActivity(
+	// Reversible, so it runs at once with Undo on its toast. A restored photo rejoins the grid with the restore's echo.
+	function trash(items: PhotoItem[]): void {
+		void runBulkActivity(
 			driveActivity(items, DRIVE_TRASH, (targets, onSettled) => trashPhotos(rootUuids, targets, onSettled), {
-				prune: prunePhotoSelection
+				prune: prunePhotoSelection,
+				undo: undoTrash
 			})
 		)
 	}
@@ -138,17 +151,6 @@ export function usePhotosDialogHost({ rootUuids, selectedItems }: UsePhotosDialo
 					/>
 				)
 			}
-			case "trash":
-				return (
-					<TrashConfirmDialog
-						count={activeDialog.items.length}
-						pending={dialogPending}
-						onClose={closeActiveDialog}
-						onConfirm={() => {
-							void handleTrashConfirm(activeDialog.items)
-						}}
-					/>
-				)
 			case "copy":
 			case "versions":
 			case "info":

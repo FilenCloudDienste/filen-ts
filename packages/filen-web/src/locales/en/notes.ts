@@ -417,14 +417,6 @@ export const notes = {
 	notesCommandToggleView: "Switch between notes and tags",
 	/** Keymap — where a notes shortcut works: only while a note's row in the sidebar list has keyboard focus */
 	notesHintFocusedRow: "With a note focused in the list",
-	/** Bulk trash confirm dialog — title; the confirm button reuses noteActionTrash */
-	notesTrashSelectedConfirmTitle: "Move to trash?",
-	/** Bulk trash confirm dialog — body; singular */
-	notesTrashSelectedConfirmBodySingle: "Are you sure you want to move this note to the trash? You can restore it later.",
-	/** Bulk trash confirm dialog — body; plural */
-	notesTrashSelectedConfirmBody_one: "Are you sure you want to move {{count}} note to the trash? You can restore it later.",
-	/** Bulk trash confirm dialog — body; plural */
-	notesTrashSelectedConfirmBody_other: "Are you sure you want to move these {{count}} notes to the trash? You can restore them later.",
 	/** Bulk delete-permanently confirm dialog — title; the confirm button reuses noteActionDeletePermanently */
 	notesDeleteSelectedConfirmTitle: "Delete permanently?",
 	/** Bulk delete-permanently confirm dialog — body; singular */

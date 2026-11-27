@@ -65,7 +65,8 @@ import {
 	trashNotes,
 	deleteNotesPermanently,
 	leaveNotes,
-	setTagOnNotes
+	setTagOnNotes,
+	revertNoteDispositions
 } from "@/features/notes/lib/bulk"
 import { testUuid } from "@/tests/support/uuid"
 
@@ -179,6 +180,34 @@ describe("archiveNotes / restoreNotes / trashNotes — partial-success aggregati
 		expect(trashNoteOp).toHaveBeenCalledExactlyOnceWith(note)
 		expect(outcome.succeeded).toEqual([note])
 		expect(notesQueryGet()).toEqual([{ ...note, trash: true }])
+	})
+})
+
+describe("revertNoteDispositions — a trash or archive's Undo", () => {
+	it("restores each note as it was before, re-archiving one trashed out of the archive", async () => {
+		setCurrentUser(1n)
+		const plain = mockNote({ uuid: testUuid("a"), ownerId: 1n })
+		const archived = mockNote({ uuid: testUuid("b"), ownerId: 1n, archive: true })
+		restoreNoteOp.mockImplementation((note: Note) => Promise.resolve({ ...note, trash: false, archive: false }))
+		archiveNoteOp.mockImplementation((note: Note) => Promise.resolve({ ...note, archive: true }))
+
+		const outcome = await revertNoteDispositions([plain, archived])
+
+		expect(outcome.succeeded).toEqual([plain, archived])
+		// Called although `before` reads as neither trashed nor archived.
+		expect(restoreNoteOp).toHaveBeenCalledTimes(2)
+		expect(archiveNoteOp).toHaveBeenCalledExactlyOnceWith({ ...archived, trash: false, archive: false })
+		expect(notesQueryGet()).toEqual(expect.arrayContaining([plain, archived]))
+	})
+
+	it("fails a note whose restore failed, without re-archiving it", async () => {
+		const archived = mockNote({ uuid: testUuid("c"), archive: true })
+		restoreNoteOp.mockRejectedValueOnce(new Error("nope"))
+
+		const outcome = await revertNoteDispositions([archived])
+
+		expect(outcome.failed).toHaveLength(1)
+		expect(archiveNoteOp).not.toHaveBeenCalled()
 	})
 })
 

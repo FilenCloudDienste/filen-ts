@@ -44,6 +44,8 @@ export const common = {
 	activityProgressCount: "{{settled}} of {{total}}",
 	/** Activity toast — button on a result with several failures, opening the list of what failed */
 	activityDetails: "Details",
+	/** Activity toast — button on a result that can be reversed (a trash, a move, a note archived), putting the items back as they were */
+	undo: "Undo",
 	/** Activity details dialog — line under the title, above the list of failed items and why each failed */
 	activityDetailsDescription: "These items failed:",
 	/** /no-coi error page — title shown when the page loaded without the required cross-origin isolation */

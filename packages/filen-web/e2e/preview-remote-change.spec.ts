@@ -125,7 +125,6 @@ test("an open editor follows saves made elsewhere, asks over unsaved edits, and 
 		await typeInto(page, " survived-trash")
 		await theirs.getByRole("button", { name: "More actions", exact: true }).click()
 		await other.getByRole("menuitem", { name: menuItemName("Trash") }).click()
-		await other.getByRole("alertdialog", { name: "Move to trash?" }).getByRole("button", { name: "Trash", exact: true }).click()
 
 		const deleted = page.getByRole("alertdialog", { name: "This file was deleted elsewhere" })
 

@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 
 // The notes' server writes as activity toasts: the per-note and tag menus' direct actions, note creation
-// (shown only while it runs), and the bulk confirm dialogs' hand-off. The writes themselves are stubbed;
+// (shown only while it runs), and the Undo of a trash or archive. The writes themselves are stubbed;
 // notesActions/notesTags/notesBulk tests cover them.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
-import { createElement, type ReactNode } from "react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { createElement } from "react"
 import type { ExternalToast } from "sonner"
 import type { Note } from "@filen/sdk-rs"
 import { mockNote, mockNoteTag, undecryptableNote } from "@/tests/fixtures/notes"
@@ -13,7 +13,7 @@ import { testUuid } from "@/tests/support/uuid"
 import { plainErrorDTO } from "@/lib/sdk/errors"
 import "@/lib/i18n"
 
-const { toast, actions, tags, trashNotes } = vi.hoisted(() => ({
+const { toast, actions, tags, trashNotes, archiveNotes, revertNoteDispositions } = vi.hoisted(() => ({
 	toast: Object.assign(
 		vi.fn<(title: string, options?: ExternalToast) => string>(() => "id"),
 		{
@@ -45,13 +45,21 @@ const { toast, actions, tags, trashNotes } = vi.hoisted(() => ({
 		renameNoteTag: vi.fn(),
 		deleteNoteTag: vi.fn()
 	},
-	trashNotes: vi.fn()
+	trashNotes: vi.fn(),
+	archiveNotes: vi.fn(),
+	revertNoteDispositions: vi.fn()
 }))
 
 vi.mock("sonner", () => ({ toast }))
 vi.mock("@/features/notes/lib/actions", () => actions)
 vi.mock("@/features/notes/lib/tags", () => tags)
-vi.mock("@/features/notes/lib/bulk", () => ({ trashNotes, deleteNotesPermanently: vi.fn(), leaveNotes: vi.fn() }))
+vi.mock("@/features/notes/lib/bulk", () => ({
+	trashNotes,
+	archiveNotes,
+	revertNoteDispositions,
+	deleteNotesPermanently: vi.fn(),
+	leaveNotes: vi.fn()
+}))
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
 vi.mock("@tanstack/react-router", () => ({
 	useNavigate: () => () => Promise.resolve(),
@@ -62,9 +70,8 @@ vi.mock("@tanstack/react-router", () => ({
 const { NoteDropdownMenuContent, TagContextMenuContent } = await import("@/features/notes/components/noteMenu")
 const { DropdownMenu, DropdownMenuTrigger } = await import("@/components/ui/dropdown-menu")
 const { ContextMenu, ContextMenuTrigger } = await import("@/components/ui/context-menu")
-const { noteActivityName } = await import("@/features/notes/lib/activity")
-const { useNoteDialogHost } = await import("@/features/notes/hooks/useNoteDialogHost")
-const { useNotesSelectionStore } = await import("@/features/notes/store/useNotesSelectionStore")
+const { noteActivityName, notesArchiveActivity, notesTrashActivity } = await import("@/features/notes/lib/activity")
+const { runBulkActivity } = await import("@/lib/activity/activity")
 
 const note = mockNote({ uuid: testUuid("n"), title: "Groceries" })
 const tag = mockNoteTag({ uuid: testUuid("t"), name: "Home" })
@@ -226,115 +233,73 @@ describe("tag menu", () => {
 	})
 })
 
-describe("bulk confirm dialogs", () => {
-	function Host({ notes }: { notes: Note[] }): ReactNode {
-		const host = useNoteDialogHost()
+// Trash and archive are reversible: they run unconfirmed and their result offers Undo, which puts back exactly the notes
+// the action moved, as they were before it.
+describe("trash and archive undo", () => {
+	function undoAction(): () => void {
+		const action = toast.success.mock.lastCall?.[1]?.action
 
-		return createElement(
-			"div",
-			null,
-			createElement(
-				"button",
-				{
-					type: "button",
-					onClick: () => {
-						host.openBulkDialog("trashSelected", notes)
-					}
-				},
-				"open"
-			),
-			host.renderActiveDialog()
-		)
+		if (action === undefined || action === null || typeof action !== "object" || !("onClick" in action) || action.label !== "Undo") {
+			throw new Error("no Undo action")
+		}
+
+		return () => {
+			action.onClick({} as never)
+		}
 	}
 
-	it("closes at once and hands a run of several to the activity toast, pruning what succeeded", async () => {
+	it("offers Undo on a bulk trash, reverting every trashed note and only those", async () => {
 		const notes = [mockNote({ uuid: testUuid("a"), title: "a" }), mockNote({ uuid: testUuid("b"), title: "b" })]
-		const { promise, resolve } = Promise.withResolvers<{ succeeded: Note[]; failed: [] }>()
-		trashNotes.mockReturnValue(promise)
-		useNotesSelectionStore.setState({ selectedNotes: notes })
-		render(createElement(Host, { notes }))
+		const already = mockNote({ uuid: testUuid("c"), title: "c", trash: true })
+		trashNotes.mockResolvedValue({ succeeded: [...notes, already], failed: [] })
+		revertNoteDispositions.mockResolvedValue({ succeeded: notes, failed: [] })
 
-		fireEvent.click(screen.getByText("open"))
-		fireEvent.click(screen.getByRole("button", { name: "Trash" }))
+		await runBulkActivity(notesTrashActivity([...notes, already]))
 
-		expect(screen.queryByRole("alertdialog")).toBeNull()
-		expect(toast.mock.lastCall?.[0]).toBe("Moving 2 notes to trash")
+		expect(toast.success).toHaveBeenCalledWith("Moved 3 notes to trash", expect.anything())
 
-		await act(async () => {
-			resolve({ succeeded: notes, failed: [] })
-			await promise
-		})
+		undoAction()()
 
 		await vi.waitFor(() => {
-			expect(toast.success).toHaveBeenCalledWith("Moved 2 notes to trash", expect.anything())
+			expect(toast.success).toHaveBeenCalledWith("Restored 2 notes", expect.anything())
 		})
-		expect(useNotesSelectionStore.getState().selectedNotes).toEqual([])
+		expect(revertNoteDispositions.mock.calls[0]?.[0]).toEqual(notes)
 	})
 
-	it("keeps the dialog's spinner for one note, then shows only the result", async () => {
-		const notes = [mockNote({ uuid: testUuid("a"), title: "a" })]
-		trashNotes.mockResolvedValue({ succeeded: notes, failed: [] })
-		render(createElement(Host, { notes }))
+	it("offers no Undo when a note failed (Try again takes its place) or nothing moved", async () => {
+		const notes = [mockNote({ uuid: testUuid("a"), title: "a" }), mockNote({ uuid: testUuid("b"), title: "b" })]
+		trashNotes.mockResolvedValue({ succeeded: [notes[0]], failed: [{ item: notes[1], error: plainErrorDTO("nope") }] })
 
-		fireEvent.click(screen.getByText("open"))
-		fireEvent.click(screen.getByRole("button", { name: "Trash" }))
+		await runBulkActivity(notesTrashActivity(notes))
 
-		await vi.waitFor(() => {
-			expect(toast.success).toHaveBeenCalledWith("Moved a to trash", expect.anything())
-		})
-		expect(toast).not.toHaveBeenCalled()
+		expect(toast.error.mock.lastCall?.[1]?.action).toMatchObject({ label: "Try again" })
+
+		const archived = mockNote({ uuid: testUuid("d"), title: "d", archive: true })
+		archiveNotes.mockResolvedValue({ succeeded: [archived], failed: [] })
+
+		await runBulkActivity(notesArchiveActivity([archived]))
+
+		expect(toast.success.mock.lastCall?.[1]?.action).toBeUndefined()
 	})
-})
 
-// Delete on the open note, with no row focused, asks first; confirmed, it runs the menu's own Trash.
-describe("open note trash confirm", () => {
-	function Host({ target }: { target: Note }): ReactNode {
-		const host = useNoteDialogHost()
-
-		return createElement(
-			"div",
-			null,
-			createElement(
-				"button",
-				{
-					type: "button",
-					onClick: () => {
-						host.openNoteDialog("trash", target)
-					}
-				},
-				"open"
-			),
-			host.renderActiveDialog()
-		)
-	}
-
-	it("trashes nothing until confirmed, then trashes the note as its menu does", async () => {
+	it("trashes from the note menu without a confirm, its Undo restoring the note", async () => {
 		actions.trashNote.mockResolvedValue({ status: "success", item: { ...note, trash: true } })
-		render(createElement(Host, { target: note }))
+		revertNoteDispositions.mockResolvedValue({ succeeded: [note], failed: [] })
+		renderNoteMenu()
 
-		fireEvent.click(screen.getByText("open"))
-
-		expect(screen.getByRole("alertdialog")).toBeDefined()
-		expect(screen.getByText("Are you sure you want to move this note to the trash? You can restore it later.")).toBeDefined()
-		expect(actions.trashNote).not.toHaveBeenCalled()
-
-		fireEvent.click(screen.getByRole("button", { name: "Trash" }))
+		clickItem("Trash")
 
 		expect(screen.queryByRole("alertdialog")).toBeNull()
-		expect(toast.mock.lastCall?.[0]).toBe("Moving Groceries to trash")
 
 		await vi.waitFor(() => {
-			expect(actions.trashNote).toHaveBeenCalledExactlyOnceWith(note)
+			expect(toast.success).toHaveBeenCalledWith("Moved Groceries to trash", expect.anything())
 		})
-	})
 
-	it("trashes nothing when cancelled", () => {
-		render(createElement(Host, { target: note }))
+		undoAction()()
 
-		fireEvent.click(screen.getByText("open"))
-		fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
-
-		expect(screen.queryByRole("alertdialog")).toBeNull()
-		expect(actions.trashNote).not.toHaveBeenCalled()
+		await vi.waitFor(() => {
+			expect(revertNoteDispositions).toHaveBeenCalledOnce()
+		})
+		expect(revertNoteDispositions.mock.calls[0]?.[0]).toEqual([note])
 	})
 })

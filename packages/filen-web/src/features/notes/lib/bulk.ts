@@ -63,6 +63,21 @@ export function trashNotes(notes: readonly Note[], onSettled?: BulkProgress): Pr
 	return runBulkOutcomes(notes, note => trashNote(note), onSettled)
 }
 
+// Each note back as it was before a trash or archive (`before`: the note as the action was handed it). A restore takes a
+// note out of both the trash and the archive, so a note trashed out of the archive is archived again.
+export function revertNoteDispositions(before: readonly Note[], onSettled?: BulkProgress): Promise<BulkOutcome<Note>> {
+	return runBulkOutcomes(
+		before,
+		async note => {
+			// restoreNote skips a note it reads as neither trashed nor archived, which `before` always is.
+			const restored = await restoreNote({ ...note, trash: true })
+
+			return restored.status === "success" && note.archive ? archiveNote(restored.item) : restored
+		},
+		onSettled
+	)
+}
+
 export interface BulkDeleteOrLeaveOptions {
 	// Fired per-note, BEFORE that note leaves the cache — mirrors DeleteNoteOptions.beforeCacheRemoval,
 	// threaded through so the caller (useNoteDialogHost) can navigate away first if the CURRENTLY

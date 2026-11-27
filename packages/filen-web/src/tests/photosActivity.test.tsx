@@ -93,7 +93,7 @@ describe("photos bulk favorite", () => {
 })
 
 describe("photos bulk trash", () => {
-	it("closes the confirm at once and hands the trash to an activity", async () => {
+	it("trashes at once, unconfirmed, as an activity whose result offers Undo", async () => {
 		const host: { current: PhotosDialogHost | null } = { current: null }
 
 		function Host() {
@@ -113,8 +113,8 @@ describe("photos bulk trash", () => {
 		act(() => {
 			host.current?.handleBulkDialogAction("trash")
 		})
-		fireEvent.click(screen.getByRole("button", { name: "Trash" }))
 
+		expect(screen.queryByRole("alertdialog")).toBeNull()
 		expect(trashPhotos).toHaveBeenCalledExactlyOnceWith([ROOT], [A, B], expect.any(Function))
 		expect(host.current?.isDialogOpen).toBe(false)
 		expect(toast).toHaveBeenCalledWith("Moving 2 items to trash", expect.anything())
@@ -125,6 +125,7 @@ describe("photos bulk trash", () => {
 		})
 
 		expect(toast.success).toHaveBeenCalledExactlyOnceWith("Moved 2 items to trash", expect.anything())
+		expect(toast.success.mock.lastCall?.[1]).toMatchObject({ action: { label: "Undo" } })
 		expect(usePhotosStore.getState().selectedItems).toEqual([])
 	})
 })

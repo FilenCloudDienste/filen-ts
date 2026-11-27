@@ -9,7 +9,8 @@ import { DRIVE_DELETE_PERMANENTLY, DRIVE_TRASH, DRIVE_UNSHARE, driveActivity } f
 import type { ParentNaming } from "@/features/drive/lib/archiveTargets"
 import type { DriveActionDialogKind } from "@/features/drive/lib/selectionActions"
 import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
-import { ItemDialog, RenameItemDialog, TrashConfirmDialog } from "@/features/drive/components/itemDialogs"
+import { ItemDialog, RenameItemDialog } from "@/features/drive/components/itemDialogs"
+import { undoTrash } from "@/features/drive/lib/undo"
 import type { usePreviewRemoteChanges } from "@/features/preview/hooks/usePreviewRemoteChanges"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { runBulkActivity, type BulkActivitySpec } from "@/lib/activity/activity"
@@ -106,15 +107,16 @@ export function usePreviewItemMenu({
 		setMenuDialogKind(null)
 	}
 
-	// The menu's confirm dialog shows the run, so only its result toasts.
-	async function runMenuActivity(spec: BulkActivitySpec<DriveItem>): Promise<void> {
+	// The menu's confirm dialog shows the run, so only its result toasts; with no dialog (a trash) the toast shows it.
+	async function runMenuActivity(spec: BulkActivitySpec<DriveItem>, confirmed = true): Promise<void> {
 		setMenuPending(true)
-		await runBulkActivity({ ...spec, showRunning: false })
+		await runBulkActivity(confirmed ? { ...spec, showRunning: false } : spec)
 		setMenuPending(false)
 		setMenuDialogKind(null)
 	}
 
-	async function removeCurrentItem(remove: BulkActivitySpec<DriveItem>["run"], keys: ActivityKeys): Promise<void> {
+	// A trash runs at once, reversible from its toast's Undo; a permanent delete has confirmed first.
+	async function removeCurrentItem(remove: BulkActivitySpec<DriveItem>["run"], keys: ActivityKeys, trash = false): Promise<void> {
 		if (driveItem === undefined || rawDriveItem === undefined) {
 			return
 		}
@@ -131,9 +133,11 @@ export function usePreviewItemMenu({
 						if (outcome.succeeded.length > 0) {
 							onItemRemoved(frozenUuid)
 						}
-					}
+					},
+					...(trash ? { undo: undoTrash } : {})
 				}
-			)
+			),
+			!trash
 		)
 	}
 
@@ -257,17 +261,6 @@ export function usePreviewItemMenu({
 						}}
 					/>
 				)
-			case "trash":
-				return (
-					<TrashConfirmDialog
-						count={1}
-						pending={menuPending}
-						onClose={closeMenuDialog}
-						onConfirm={() => {
-							void removeCurrentItem(trashItems, DRIVE_TRASH)
-						}}
-					/>
-				)
 			case "delete":
 				return (
 					<ConfirmDialog
@@ -288,6 +281,9 @@ export function usePreviewItemMenu({
 						}}
 					/>
 				)
+			// Runs without a dialog (openMenuDialog).
+			case "trash":
+				return null
 			case "color":
 			case "openAsText":
 				// Unreachable — see menuDialogKind's own doc comment.
@@ -296,6 +292,12 @@ export function usePreviewItemMenu({
 	}
 
 	function openMenuDialog(kind: DriveActionDialogKind, startPath?: readonly string[]): void {
+		if (kind === "trash") {
+			void removeCurrentItem(trashItems, DRIVE_TRASH, true)
+
+			return
+		}
+
 		setMenuStartPath(startPath)
 		setMenuDialogKind(kind)
 	}

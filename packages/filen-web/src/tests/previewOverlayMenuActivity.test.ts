@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
-// The preview header menu's trash, delete and unshare keep the confirm's own spinner while they run and
-// then toast only their result, in the words of the same action anywhere else.
+// The preview header menu's delete and unshare keep the confirm's own spinner while they run and then toast only
+// their result; its trash runs unconfirmed, its toast showing it run and offering Undo. In the words of the same
+// action anywhere else.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { createElement } from "react"
@@ -58,11 +59,10 @@ afterEach(() => {
 async function trashFromMenu(): Promise<void> {
 	fireEvent.click(screen.getByRole("button", { name: "More actions" }))
 	fireEvent.click(await screen.findByRole("menuitem", { name: "Trash" }))
-	fireEvent.click(await screen.findByRole("button", { name: "Trash" }))
 }
 
 describe("PreviewOverlay header menu trash", () => {
-	it("toasts only the result, then steps past the trashed file", async () => {
+	it("trashes unconfirmed, then steps past the trashed file, offering Undo", async () => {
 		let finish: (outcome: unknown) => void = () => undefined
 		trashItems.mockReturnValue(
 			new Promise(resolve => {
@@ -76,8 +76,9 @@ describe("PreviewOverlay header menu trash", () => {
 
 		await trashFromMenu()
 
+		expect(screen.queryByRole("alertdialog")).toBeNull()
 		expect(trashItems).toHaveBeenCalledExactlyOnceWith([REPORT], expect.any(Function), expect.any(Function))
-		expect(toast).not.toHaveBeenCalled()
+		expect(toast).toHaveBeenCalledWith("Moving report.pdf to trash", expect.anything())
 
 		await act(async () => {
 			finish({ succeeded: [REPORT], failed: [] })
@@ -85,6 +86,7 @@ describe("PreviewOverlay header menu trash", () => {
 		})
 
 		expect(toast.success).toHaveBeenCalledExactlyOnceWith("Moved report.pdf to trash", expect.anything())
+		expect(toast.success.mock.lastCall?.[1]).toMatchObject({ action: { label: "Undo" } })
 		expect(onItemRemoved).toHaveBeenCalledExactlyOnceWith(REPORT.data.uuid)
 	})
 

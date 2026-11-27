@@ -18,7 +18,9 @@ import {
 import { type DriveActionDialogKind } from "@/features/drive/lib/selectionActions"
 import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
 import { ColorDialog } from "@/features/drive/components/colorDialog"
-import { ItemDialog, RenameItemDialog, TrashConfirmDialog } from "@/features/drive/components/itemDialogs"
+import { ItemDialog, RenameItemDialog } from "@/features/drive/components/itemDialogs"
+import { undoTrash } from "@/features/drive/lib/undo"
+import { runBulkActivity, type BulkActivitySpec } from "@/lib/activity/activity"
 import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
 import type { SlideshowSource } from "@/features/preview/lib/slideshowTree"
 import { keepPreviewOpenOnNavigate, usePreviewDialogState } from "@/features/preview/hooks/usePreviewDialogState"
@@ -107,7 +109,18 @@ export function useDriveDialogHost({ variant, hiddenNoticeApplies, infoOpensDeta
 			return
 		}
 
+		// Trash is reversible: it runs at once, its toast offering Undo. Only the root `.filen` asks first.
+		if (kind === "trash" && !includesRootDotFilen(items)) {
+			void runBulkActivity(trashActivity(items))
+
+			return
+		}
+
 		setActiveDialog({ kind, items, startPath })
+	}
+
+	function trashActivity(items: DriveItem[]): BulkActivitySpec<DriveItem> {
+		return driveActivity(items, DRIVE_TRASH, trashItems, { undo: undoTrash })
 	}
 
 	async function handleRenameSubmit(item: DriveItem, value: string): Promise<void> {
@@ -124,7 +137,7 @@ export function useDriveDialogHost({ variant, hiddenNoticeApplies, infoOpensDeta
 	// Every HOST-owned bulk-dialog confirm (trash/delete/restoreSelected/unshare/disable links) runs as an
 	// activity (useDialogHost's runBulkDialogActivity) and prunes the succeeded items from the selection.
 	async function handleTrashConfirm(items: DriveItem[]): Promise<void> {
-		await runBulkDialogActivity(driveActivity(items, DRIVE_TRASH, trashItems))
+		await runBulkDialogActivity(trashActivity(items))
 	}
 
 	async function handleDeleteConfirm(items: DriveItem[]): Promise<void> {
@@ -215,23 +228,11 @@ export function useDriveDialogHost({ variant, hiddenNoticeApplies, infoOpensDeta
 					/>
 				)
 			}
+			// Reached only for the root `.filen` (handleDialogAction runs any other trash at once).
 			case "trash":
-				if (includesRootDotFilen(activeDialog.items)) {
-					return renderDotFilenConfirm("trash", activeDialog.items, () => {
-						void handleTrashConfirm(activeDialog.items)
-					})
-				}
-
-				return (
-					<TrashConfirmDialog
-						count={activeDialog.items.length}
-						pending={dialogPending}
-						onClose={closeActiveDialog}
-						onConfirm={() => {
-							void handleTrashConfirm(activeDialog.items)
-						}}
-					/>
-				)
+				return renderDotFilenConfirm("trash", activeDialog.items, () => {
+					void handleTrashConfirm(activeDialog.items)
+				})
 			case "delete":
 				if (includesRootDotFilen(activeDialog.items)) {
 					return renderDotFilenConfirm("delete", activeDialog.items, () => {

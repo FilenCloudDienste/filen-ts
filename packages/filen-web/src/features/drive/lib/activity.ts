@@ -19,6 +19,8 @@ export const DRIVE_DISABLE_LINK = activityKeys("drive:driveDisableLink")
 
 export const DRIVE_MOVE = activityKeys("drive:driveMove")
 
+export const DRIVE_MOVE_BACK = activityKeys("drive:driveMoveBack")
+
 export const DRIVE_RENAME = activityKeys("drive:driveRename")
 
 export const DRIVE_SORT_BY_DATE = activityKeys("drive:driveSortByDate")
@@ -106,7 +108,12 @@ export function driveActivity<T extends DriveItem>(
 	items: readonly T[],
 	keys: ActivityKeys,
 	run: BulkActivitySpec<T>["run"],
-	options?: { prune?: DrivePrune<T>; values?: ActivityValues; onDone?: (outcome: BulkOutcome<T>) => void }
+	options?: {
+		prune?: DrivePrune<T>
+		values?: ActivityValues
+		onDone?: (outcome: BulkOutcome<T>) => void
+		undo?: BulkActivitySpec<T>["undo"]
+	}
 ): BulkActivitySpec<T> {
 	const prune = options?.prune ?? "uuid"
 	const selected = typeof prune === "function" ? null : trackSelectedThroughout(items)
@@ -133,6 +140,7 @@ export function driveActivity<T extends DriveItem>(
 
 			options?.onDone?.(outcome)
 		},
-		...(options?.values !== undefined ? { values: options.values } : {})
+		...(options?.values !== undefined ? { values: options.values } : {}),
+		...(options?.undo !== undefined ? { undo: options.undo } : {})
 	}
 }

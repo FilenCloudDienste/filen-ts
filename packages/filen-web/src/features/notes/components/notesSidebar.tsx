@@ -50,7 +50,8 @@ import {
 import { createNote } from "@/features/notes/lib/actions"
 import { exportAllNotes, toastNotesExportOutcome, type ExportAllOutcome } from "@/features/notes/lib/export"
 import { asErrorDTO } from "@/lib/sdk/errors"
-import { createFailedAs, runNoteCreateActivity } from "@/features/notes/lib/activity"
+import { createFailedAs, notesTrashActivity, runNoteCreateActivity } from "@/features/notes/lib/activity"
+import { runBulkActivity } from "@/lib/activity/activity"
 import { importNoteFromFile } from "@/features/notes/lib/import"
 import { importAcceptAttribute } from "@/features/notes/lib/import.logic"
 import { selectableNotesForSelectAll } from "@/features/notes/lib/selectionFlags"
@@ -520,22 +521,10 @@ export function NotesSidebar() {
 		return true
 	}
 
-	// The open note's Trash, behind a confirmation: offered by the same gate as its menu's Trash. True when it asked.
-	function confirmOpenNoteTrash(note: Note | undefined): boolean {
-		if (note === undefined || availableNoteAction(note, "trash", currentUserId, isOnline, isNoteInflight(note.uuid)) === undefined) {
-			return false
-		}
-
-		dialogHost.openNoteDialog("trash", note)
-
-		return true
-	}
-
-	// Def in features/notes/lib/keymap.ts. A selection (shown only with the panel in sight) is confirmed and trashed
-	// as the bulk bar does, when it offers Trash at all (canBulkTrashNotes, its own gate); with none, the focused note
-	// is trashed as its menu's Trash does, and the open note (no row focused: the key was pressed in the page at large)
-	// only once confirmed, through the same menu gate. preventDefault only once it acts: Backspace still has a "go back"
-	// default in some engines.
+	// Def in features/notes/lib/keymap.ts. A selection (shown only with the panel in sight) is trashed as the bulk bar
+	// does, when it offers Trash at all (canBulkTrashNotes, its own gate); with none, the focused note, else the open one,
+	// as its menu's Trash does. Unconfirmed: the toast offers Undo. preventDefault only once it acts: Backspace still has
+	// a "go back" default in some engines.
 	useAction(
 		"notes.trash",
 		keyboardEvent => {
@@ -545,14 +534,12 @@ export function NotesSidebar() {
 				}
 
 				keyboardEvent.preventDefault()
-				dialogHost.openBulkDialog("trashSelected", liveSelectedNotes)
+				void runBulkActivity(notesTrashActivity(liveSelectedNotes))
 
 				return
 			}
 
-			const rowUuid = rowNoteUuid(keyboardEvent.target)
-
-			if (rowUuid !== undefined ? runNoteKey(noteWithUuid(rowUuid), "trash") : confirmOpenNoteTrash(noteWithUuid(selectedUuid))) {
+			if (runNoteKey(noteWithUuid(rowNoteUuid(keyboardEvent.target) ?? selectedUuid), "trash")) {
 				keyboardEvent.preventDefault()
 			}
 		},

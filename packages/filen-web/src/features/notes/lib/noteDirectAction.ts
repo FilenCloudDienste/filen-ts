@@ -6,6 +6,7 @@ import { copyText, copyTextLater } from "@/lib/copyText"
 import type { VoidActionOutcome } from "@/lib/actions/outcome"
 import { runOutcomeActivity } from "@/lib/activity/activity"
 import type { ActivityKeys, ActivityValues } from "@/lib/activity/activity.logic"
+import type { BulkActivitySpec } from "@/lib/activity/activity"
 import {
 	togglePinned,
 	toggleFavorited,
@@ -25,29 +26,41 @@ import {
 	NOTES_TRASH,
 	NOTES_UNFAVORITE,
 	NOTES_UNPIN,
-	noteActivityName
+	noteActivityName,
+	undoNoteArchive,
+	undoNoteTrash
 } from "@/features/notes/lib/activity"
 import type { NoteActionId } from "@/features/notes/components/noteMenu.logic"
 
 // Direct server writes, each run as an activity in its own words. Keyed off the note as the menu saw it:
-// a pin or favorite says which way it flips.
+// a pin or favorite says which way it flips. Archive and trash run unconfirmed, their toast offering Undo.
 const ACTIVITY_ACTIONS: Partial<
-	Record<NoteActionId, { keys: (note: Note) => ActivityKeys; run: (note: Note) => Promise<VoidActionOutcome> }>
+	Record<
+		NoteActionId,
+		{ keys: (note: Note) => ActivityKeys; run: (note: Note) => Promise<VoidActionOutcome>; undo?: BulkActivitySpec<Note>["undo"] }
+	>
 > = {
 	pin: { keys: note => (note.pinned ? NOTES_UNPIN : NOTES_PIN), run: togglePinned },
 	favorite: { keys: note => (note.favorite ? NOTES_UNFAVORITE : NOTES_FAVORITE), run: toggleFavorited },
-	archive: { keys: () => NOTES_ARCHIVE, run: archiveNote },
+	archive: { keys: () => NOTES_ARCHIVE, run: archiveNote, undo: undoNoteArchive },
 	restore: { keys: () => NOTES_RESTORE, run: restoreNote },
-	trash: { keys: () => NOTES_TRASH, run: trashNote }
+	trash: { keys: () => NOTES_TRASH, run: trashNote, undo: undoNoteTrash }
 }
 
 export function runNoteActivity(
 	note: Note,
 	keys: ActivityKeys,
 	run: (note: Note) => Promise<VoidActionOutcome>,
-	values?: ActivityValues
+	values?: ActivityValues,
+	undo?: BulkActivitySpec<Note>["undo"]
 ): void {
-	void runOutcomeActivity(note, { keys, name: noteActivityName, run, ...(values !== undefined ? { values } : {}) })
+	void runOutcomeActivity(note, {
+		keys,
+		name: noteActivityName,
+		run,
+		...(values !== undefined ? { values } : {}),
+		...(undo !== undefined ? { undo } : {})
+	})
 }
 
 // What a note menu's "direct" entry does, for the menu (noteMenu.tsx) and the notes shortcuts (notesSidebar.tsx)
@@ -61,7 +74,7 @@ export async function runNoteDirectAction(
 	const activity = ACTIVITY_ACTIONS[id]
 
 	if (activity) {
-		runNoteActivity(note, activity.keys(note), activity.run)
+		runNoteActivity(note, activity.keys(note), activity.run, undefined, activity.undo)
 		return
 	}
 
