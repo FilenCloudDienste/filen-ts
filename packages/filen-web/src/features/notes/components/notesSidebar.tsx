@@ -16,20 +16,14 @@ import {
 	UploadIcon,
 	ArrowDownNarrowWideIcon
 } from "lucide-react"
-import type { Note, NoteTag, NoteType } from "@filen/sdk-rs"
+import type { Note, NoteTag } from "@filen/sdk-rs"
 import { cn, aggregateNoteSelectionFlags, DEFAULT_NOTE_TAGS_SORT_BY, toggleInSet, type NoteTagsSortBy } from "@filen/shared"
 import { useNotes } from "@/features/notes/queries/notes"
 import { useNoteTags } from "@/features/notes/queries/noteTags"
 import { useNotesViewModeQuery, useNoteTagsSortByQuery } from "@/features/notes/queries/preferences"
 import { useAccountQuery } from "@/queries/account"
 import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
-import {
-	setNotesViewMode,
-	DEFAULT_NOTES_VIEW_MODE,
-	setNoteTagsSortBy,
-	useDefaultNoteType,
-	type NotesViewMode
-} from "@/features/notes/lib/preferences"
+import { setNotesViewMode, DEFAULT_NOTES_VIEW_MODE, setNoteTagsSortBy, type NotesViewMode } from "@/features/notes/lib/preferences"
 import { tagDisplayName, isNoteUndecryptable } from "@/features/notes/lib/sort"
 import {
 	buildNotesGroupedRows,
@@ -293,7 +287,6 @@ export function NotesSidebar() {
 	const tagsSortByQuery = useNoteTagsSortByQuery()
 	// Read once here and handed to every row: notes of this type carry no type mark. Held since boot, so the first
 	// render already marks the right notes.
-	const defaultNoteType = useDefaultNoteType()
 	const tagsSortBy = tagsSortByQuery.data ?? DEFAULT_NOTE_TAGS_SORT_BY
 	const accountQuery = useAccountQuery()
 	const currentUserId = accountQuery.data?.id
@@ -941,7 +934,6 @@ export function NotesSidebar() {
 						isOnline={isOnline}
 						inflightUuids={inflightUuids}
 						failedUuids={failedUuids}
-						defaultNoteType={defaultNoteType}
 						searchHits={searchHits}
 						selectableIndexByRowKey={selectableIndexByRowKey}
 						onToggleTag={toggleTag}
@@ -988,7 +980,6 @@ interface NotesSidebarListProps {
 	inflightUuids: ReadonlySet<string>
 	// Notes whose queued edit failed and waits for a retry.
 	failedUuids: ReadonlySet<string>
-	defaultNoteType: NoteType
 	// The active search's body matches: a matching row shows its snippet.
 	searchHits: NoteSearchHits | undefined
 	selectableIndexByRowKey: ReadonlyMap<string, number>
@@ -1018,7 +1009,6 @@ function NotesSidebarList({
 	isOnline,
 	inflightUuids,
 	failedUuids,
-	defaultNoteType,
 	searchHits,
 	selectableIndexByRowKey,
 	onToggleTag,
@@ -1230,7 +1220,6 @@ function NotesSidebarList({
 								isOnline={isOnline}
 								inflight={inflightUuids.has(row.note.uuid)}
 								saveFailed={failedUuids.has(row.note.uuid)}
-								defaultNoteType={defaultNoteType}
 								snippet={searchHits?.body.get(row.note.uuid)?.snippet}
 								onAction={onNoteAction}
 								onDuplicated={duplicated => {

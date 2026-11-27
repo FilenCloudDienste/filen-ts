@@ -34,15 +34,14 @@ export function noteIcon(note: Note): NoteIcon {
 	return NOTE_TYPE_ICON[note.noteType]
 }
 
-// A sidebar row's inline mark, or null for a note of the user's default type (Appearance → Notes). In the notes
-// view the Archived/Trashed sections already say a note's lifecycle, so only its type shows; the tags view has no
-// sections, so it keeps the override.
-export function noteRowIcon(note: Note, sectioned: boolean, defaultType: NoteType): NoteIcon | null {
+// A sidebar row's inline mark: every note shows its type. In the notes view the Archived/Trashed sections already
+// say a note's lifecycle, so only its type shows; the tags view has no sections, so it keeps the override.
+export function noteRowIcon(note: Note, sectioned: boolean): NoteIcon {
 	if (!sectioned && (note.trash || note.archive)) {
 		return noteIcon(note)
 	}
 
-	return note.noteType === defaultType ? null : NOTE_TYPE_ICON[note.noteType]
+	return NOTE_TYPE_ICON[note.noteType]
 }
 
 // Bare per-type icon (no archive/trash override) — for a type picker or legend that names the type

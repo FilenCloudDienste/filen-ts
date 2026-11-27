@@ -2,7 +2,7 @@ import { useId, type MouseEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
 import { PinIcon, HeartIcon, UsersIcon, TriangleAlertIcon, type LucideIcon } from "lucide-react"
-import type { Note, NoteTag, NoteType } from "@filen/sdk-rs"
+import type { Note, NoteTag } from "@filen/sdk-rs"
 import { cn } from "@filen/shared"
 import { noteRowIcon } from "@/features/notes/lib/icon.logic"
 import { noteDisplayTitle } from "@/features/notes/lib/displayTitle"
@@ -51,8 +51,6 @@ export interface NoteRowProps {
 	inflight: boolean
 	// Its queued edit failed and waits for a retry (the editor header's "Not saved" state).
 	saveFailed: boolean
-	// The user's default note type (Appearance → Notes): its notes carry no type mark.
-	defaultNoteType: NoteType
 	// The text around the active search's hits in this note's body (searchIndex.ts), shown instead of the preview.
 	snippet?: string | undefined
 	// Threaded straight through to the row's own menu (noteMenu.tsx's onAction/onDuplicated) — the
@@ -163,7 +161,6 @@ export function NoteRow({
 	isOnline,
 	inflight,
 	saveFailed,
-	defaultNoteType,
 	snippet,
 	onAction,
 	onDuplicated,
@@ -172,7 +169,7 @@ export function NoteRow({
 }: NoteRowProps) {
 	// ["notes", "common"] for the shared cannot-decrypt title; notes stays the default namespace.
 	const { t } = useTranslation(["notes", "common"])
-	const mark = noteRowIcon(note, nested !== true, defaultNoteType)
+	const mark = noteRowIcon(note, nested !== true)
 	const title = noteDisplayTitle(note, t)
 	const preview = noteRowPreview(note)
 	const sharedByEmail = noteRowSharedByEmail(note, currentUserId)
@@ -238,7 +235,7 @@ export function NoteRow({
 							className="flex min-w-0 flex-1 flex-col gap-0.5 rounded-md text-left focus-ring-row outline-none"
 						>
 							<span className="flex min-w-0 items-center gap-1.5">
-								{mark !== null ? <mark.icon className={cn("size-3.5 shrink-0", mark.colorClass)} /> : null}
+								<mark.icon className={cn("size-3.5 shrink-0", mark.colorClass)} />
 								<span className="min-w-0 truncate text-sm font-medium">{title}</span>
 								{sharedLabel !== null ? (
 									<LazyTooltip

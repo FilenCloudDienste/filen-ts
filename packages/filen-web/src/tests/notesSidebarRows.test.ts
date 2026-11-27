@@ -32,10 +32,7 @@ function renderNoteRow(
 	multiSelected: boolean,
 	note: Note = mockNote(),
 	handlers: Partial<
-		Pick<
-			NoteRowProps,
-			"onPointerSelect" | "onLongPress" | "now" | "isOnline" | "inflight" | "saveFailed" | "nested" | "defaultNoteType"
-		>
+		Pick<NoteRowProps, "onPointerSelect" | "onLongPress" | "now" | "isOnline" | "inflight" | "saveFailed" | "nested">
 	> = {}
 ) {
 	return render(
@@ -49,7 +46,6 @@ function renderNoteRow(
 			isOnline: true,
 			inflight: false,
 			saveFailed: false,
-			defaultNoteType: "text",
 			onAction: () => undefined,
 			onDuplicated: () => undefined,
 			onPointerSelect: () => false,
@@ -158,7 +154,6 @@ describe("note row — calm layout", () => {
 				isOnline: true,
 				inflight: false,
 				saveFailed: false,
-				defaultNoteType: "text",
 				onAction: () => undefined,
 				onDuplicated: () => undefined,
 				onPointerSelect: () => false,
@@ -197,22 +192,16 @@ describe("note row — calm layout", () => {
 		expect(document.querySelector("[data-slot='tooltip-content']")).toBeNull()
 	})
 
-	it("marks every type but the user's default one", () => {
+	it("marks every note with its type, text included", () => {
 		const plain = renderNoteRow(false, false, mockNote({ noteType: "text" }))
 
-		expect(plain.container.querySelector("a svg")).toBeNull()
+		expect(plain.container.querySelector("a svg")).not.toBeNull()
 
 		cleanup()
 
 		const checklist = renderNoteRow(false, false, mockNote({ noteType: "checklist" }))
 
 		expect(checklist.container.querySelector("a svg")).not.toBeNull()
-
-		cleanup()
-
-		const defaultChecklist = renderNoteRow(false, false, mockNote({ noteType: "checklist" }), { defaultNoteType: "checklist" })
-
-		expect(defaultChecklist.container.querySelector("a svg")).toBeNull()
 	})
 
 	it("folds who shared the note and who else is on it into one mark", () => {
