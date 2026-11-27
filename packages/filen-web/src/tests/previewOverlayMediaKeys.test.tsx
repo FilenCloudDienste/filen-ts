@@ -40,6 +40,7 @@ import { registerAllActions } from "@/lib/keymap/actions"
 import { narrowItem } from "@/features/drive/lib/item"
 import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
 import { setPreviewDirty, usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
+import { createTestQueryClient, queryClientWrapper } from "@/tests/testQueryClient"
 
 registerAllActions()
 
@@ -88,7 +89,9 @@ function shown(index: number): ReturnType<typeof vi.fn> {
 			onStep,
 			onClose: vi.fn(),
 			onItemRemoved: vi.fn()
-		})
+		}),
+		// Rename checks the name against the held listing through a query.
+		{ wrapper: queryClientWrapper(createTestQueryClient()) }
 	)
 
 	return onStep
