@@ -13,6 +13,8 @@ import { WEB_APP_ORIGIN } from "@/lib/webApp"
 export interface LinkFormState {
 	downloadEnabled: boolean
 	expiration: PublicLinkExpiration
+	// Epoch ms the server reported; undefined for a link that never expires or whose expiry is not known yet.
+	expiresAt: bigint | undefined
 	passwordSet: boolean
 }
 
@@ -39,6 +41,7 @@ export function readLinkForm(status: DirPublicLinkRW | FilePublicLink): LinkForm
 	return {
 		downloadEnabled: isDirLink(status) ? status.enableDownload : status.downloadable,
 		expiration: status.expiration,
+		expiresAt: status.expiration === "never" ? undefined : status.expiresAt,
 		passwordSet: status.password.type !== "none"
 	}
 }

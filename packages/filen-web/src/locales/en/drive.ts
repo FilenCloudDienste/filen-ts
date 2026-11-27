@@ -786,6 +786,14 @@ export const drive = {
 	driveLinkNoLinkTitle: "No public link",
 	/** Public-link dialog — empty-state description under driveLinkNoLinkTitle */
 	driveLinkNoLinkDescription: "Anyone with the link can access this item.",
+	/** Public-link dialog — muted note under driveLinkNoLinkDescription: the key rides the URL fragment */
+	driveLinkEncryptionNote: "End-to-end encrypted: the key after # in the link never reaches Filen's servers.",
+	/** Public-link dialog — muted line under the expiration select; {{date}} = the link's actual expiry date and time */
+	driveLinkExpiresAt: "Expires {{date}}",
+	/** Public-link dialog — password-removal confirm title */
+	driveLinkPasswordRemoveConfirmTitle: "Remove the password?",
+	/** Public-link dialog — password-removal confirm body */
+	driveLinkPasswordRemoveConfirmBody: "Anyone with the link will be able to open this item without a password.",
 	/** Public-link dialog — premium-gate title shown to a non-subscribed account instead of the link form */
 	driveLinkPremiumRequiredTitle: "Feature requires a subscription",
 	/** Public-link dialog — premium-gate description under driveLinkPremiumRequiredTitle */

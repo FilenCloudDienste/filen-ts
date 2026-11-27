@@ -20,12 +20,13 @@ import {
 import { ItemHeroTile } from "@/features/drive/components/itemThumbnail"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { copyText } from "@/lib/copyText"
+import { formatDateTime } from "@/lib/formatDate"
 import { useIsOnline } from "@/lib/useIsOnline"
 import type { DriveKey } from "@/lib/i18n"
 import { pendingGuardedOpenChange } from "@/components/dialogs/dismissal.logic"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Field, FieldContent, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { SecretInput } from "@/components/ui/secretInput"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -124,6 +125,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 	const [passwordEditing, setPasswordEditing] = useState(false)
 	const [passwordDraft, setPasswordDraft] = useState("")
 	const [confirmDisableOpen, setConfirmDisableOpen] = useState(false)
+	const [confirmRemovePasswordOpen, setConfirmRemovePasswordOpen] = useState(false)
 
 	const handleOpenChange = pendingGuardedOpenChange(pending, next => {
 		if (!next) {
@@ -191,6 +193,12 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 		if (outcome.status === "error") {
 			toast.error(errorLabel(outcome.dto))
 		}
+	}
+
+	// Reached only through the remove-password confirm; closes it once the write settles, like handleDisable.
+	async function handleRemovePassword(current: DriveItemLinkStatus): Promise<void> {
+		await handleUpdate(current, { password: { kind: "cleared" } })
+		setConfirmRemovePasswordOpen(false)
 	}
 
 	async function handleCopy(url: string): Promise<void> {
@@ -277,6 +285,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 										</EmptyMedia>
 										<EmptyTitle>{t("driveLinkNoLinkTitle")}</EmptyTitle>
 										<EmptyDescription>{t("driveLinkNoLinkDescription")}</EmptyDescription>
+										<EmptyDescription className="text-xs">{t("driveLinkEncryptionNote")}</EmptyDescription>
 									</EmptyHeader>
 									<EmptyContent>
 										<Button
@@ -343,6 +352,11 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 												</SelectGroup>
 											</SelectContent>
 										</Select>
+										{form.expiresAt !== undefined ? (
+											<FieldDescription>
+												{t("driveLinkExpiresAt", { date: formatDateTime(form.expiresAt) })}
+											</FieldDescription>
+										) : null}
 									</Field>
 									<Field>
 										{/* Labels the input only while it shows. No "password" in the id: password managers key on it. */}
@@ -350,7 +364,16 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 											{t("driveLinkPasswordLabel")}
 										</FieldLabel>
 										{passwordEditing ? (
-											<div className="flex items-center gap-2">
+											<form
+												className="flex items-center gap-2"
+												onSubmit={e => {
+													e.preventDefault()
+
+													if (!pending && isOnline) {
+														void handleSavePassword(current)
+													}
+												}}
+											>
 												<SecretInput
 													id="link-secret"
 													autoFocus
@@ -362,17 +385,16 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 													}}
 												/>
 												<Button
+													type="submit"
 													size="sm"
 													disabled={pending || !isOnline || passwordDraft.trim().length === 0}
 													title={!isOnline ? t("common:offlineActionDisabled") : undefined}
-													onClick={() => {
-														void handleSavePassword(current)
-													}}
 												>
 													{pending && <Spinner data-icon="inline-start" />}
 													{t("driveLinkPasswordSaveAction")}
 												</Button>
 												<Button
+													type="button"
 													size="sm"
 													variant="ghost"
 													disabled={pending || !isOnline}
@@ -384,7 +406,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 												>
 													{t("common:cancel")}
 												</Button>
-											</div>
+											</form>
 										) : (
 											<div className="flex items-center gap-2">
 												<span className="text-sm text-muted-foreground">
@@ -410,7 +432,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 														disabled={pending || !isOnline}
 														title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 														onClick={() => {
-															void handleUpdate(current, { password: { kind: "cleared" } })
+															setConfirmRemovePasswordOpen(true)
 														}}
 													>
 														{t("driveLinkPasswordRemoveAction")}
@@ -463,6 +485,25 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 					) : null}
 				</DialogContent>
 			</Dialog>
+			{current ? (
+				<ConfirmDialog
+					open={confirmRemovePasswordOpen}
+					pending={pending}
+					title={t("driveLinkPasswordRemoveConfirmTitle")}
+					body={t("driveLinkPasswordRemoveConfirmBody")}
+					confirmLabel={t("driveLinkPasswordRemoveAction")}
+					cancelLabel={t("common:cancel")}
+					destructive
+					onOpenChange={open => {
+						if (!open) {
+							setConfirmRemovePasswordOpen(false)
+						}
+					}}
+					onConfirm={() => {
+						void handleRemovePassword(current)
+					}}
+				/>
+			) : null}
 			{current ? (
 				<ConfirmDialog
 					open={confirmDisableOpen}
