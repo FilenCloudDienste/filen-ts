@@ -5,13 +5,7 @@ import type { StorageApi } from "@/workers/db.worker"
 import type { NoteIndexRow } from "@/workers/noteIndex"
 import { createListenerSet } from "@/lib/listenerSet"
 import { log } from "@/lib/log"
-import {
-	buildNoteMatchQuery,
-	noteIndexIsStale,
-	noteIndexText,
-	noteSearchCandidates,
-	type NoteSearchHits
-} from "@/features/notes/lib/searchIndex.logic"
+import { noteIndexIsStale, noteIndexText, noteSearchCandidates, type NoteSearchHits } from "@/features/notes/lib/searchIndex.logic"
 
 // The notes full-text index: decrypted note text in the origin's private OPFS database (workers/noteIndex.ts), so
 // a search reads only the bodies that changed since they were indexed. The owner chose this trade-off: the text is
@@ -160,8 +154,8 @@ export class NoteSearchIndex {
 		await this.call((api, account) => api.noteIndexPrune(account, keep))
 	}
 
-	public search(match: string, limit: number): Promise<[string, string][] | null> {
-		return this.call((api, account) => api.noteIndexSearch(account, match, limit))
+	public search(key: string, limit: number): Promise<[string, string][] | null> {
+		return this.call((api, account) => api.noteIndexSearch(account, key, limit))
 	}
 
 	// One body read for the index; null when the content does not decrypt.
@@ -469,9 +463,8 @@ export class NoteSearchSession {
 
 		const key = this.key
 		const generation = this.generation
-		const match = buildNoteMatchQuery(key)
 
-		if (match === null || this.unavailable) {
+		if (this.unavailable) {
 			this.setBody(new Map(), key)
 
 			return
@@ -480,7 +473,7 @@ export class NoteSearchSession {
 		this.querying = true
 
 		void this.index
-			.search(match, RESULT_LIMIT)
+			.search(key, RESULT_LIMIT)
 			.then(
 				rows => {
 					if (generation === this.generation && key === this.key) {

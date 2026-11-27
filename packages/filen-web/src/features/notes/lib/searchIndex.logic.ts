@@ -19,19 +19,6 @@ export function noteIndexText(noteType: NoteType, content: string): string {
 	return notePlainText({ noteType }, content).normalize("NFC")
 }
 
-// An FTS5 query from a search key (nameSearchKey): every whitespace-separated token must match the start of a word.
-// Each token is quoted, so FTS5 syntax in it is literal text, and its own punctuation splits it into a phrase. A
-// token with no letter or digit matches no word and is left out; null when none is left.
-export function buildNoteMatchQuery(key: string): string | null {
-	const tokens = key.split(/\s+/u).filter(token => /[\p{L}\p{N}]/u.test(token))
-
-	if (tokens.length === 0) {
-		return null
-	}
-
-	return tokens.map(token => `"${token.replaceAll('"', '""')}"*`).join(" ")
-}
-
 // Whether the index's text for a note (read at `stamp`) predates the note as listed.
 export function noteIndexIsStale(note: Note, stamp: bigint | undefined): boolean {
 	return stamp === undefined || stamp < note.editedTimestamp

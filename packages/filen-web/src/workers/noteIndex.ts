@@ -1,4 +1,5 @@
 import type { SqlValue } from "@sqlite.org/sqlite-wasm"
+import { matchesNameSearch } from "@filen/shared"
 
 // The notes full-text index, in the db worker's own database. Holds decrypted note text in the origin's
 // private OPFS storage, by the owner's decision: sign-out wipes the database files (db.worker.ts wipe),
@@ -10,6 +11,11 @@ import type { SqlValue } from "@sqlite.org/sqlite-wasm"
 
 interface Exec {
 	exec(opts: { sql: string; bind?: readonly SqlValue[]; callback?: (row: SqlValue[]) => void }): unknown
+	createFunction(
+		name: string,
+		func: (ctxPtr: number, ...values: SqlValue[]) => SqlValue,
+		options: { arity: number; deterministic: boolean }
+	): unknown
 }
 
 export interface NoteIndexRow {
@@ -18,17 +24,25 @@ export interface NoteIndexRow {
 	text: string
 }
 
-const ROWS = "note_search_v1"
-const FTS = "note_search_fts_v1"
-const OWNER = "note_search_owner_v1"
-// Tables of earlier versions, dropped on first use.
-const RETIRED_TABLES: readonly string[] = []
+const ROWS = "note_search_v2"
+const FTS = "note_search_fts_v2"
+const OWNER = "note_search_owner_v2"
+// Tables of earlier versions, dropped on first use (the full-text table before the one it indexes). v1 indexed words
+// (unicode61), so a body matched only at a word's start.
+const RETIRED_TABLES: readonly string[] = ["note_search_fts_v1", "note_search_v1", "note_search_owner_v1"]
+
+// The trigram tokenizer indexes every 3-character run, so a query part of 3+ characters matches anywhere in the text,
+// in any script.
+const TRIGRAM_MIN = 3
+// The title search's own test (matchesNameSearch), for query parts too short for the trigram index.
+const MATCHES_FN = "note_search_matches"
 
 // U+0002 / U+0003 around each hit in a snippet: never part of note text the user can type, so the page splits on
 // them without escaping anything.
 export const SNIPPET_OPEN = "\u0002"
 export const SNIPPET_CLOSE = "\u0003"
-const SNIPPET_TOKENS = 12
+// snippet() counts trigram tokens, about one per character.
+const SNIPPET_TOKENS = 48
 
 // Connections whose schema is in place; a wipe reconnects, so this keys on the connection.
 const ready = new WeakSet<Exec>()
@@ -45,11 +59,16 @@ function ensureSchema(db: Exec): void {
 	db.exec({
 		sql: `CREATE TABLE IF NOT EXISTS ${ROWS} (id INTEGER PRIMARY KEY, uuid TEXT NOT NULL UNIQUE, edited TEXT NOT NULL, text TEXT NOT NULL)`
 	})
-	// External content: the text is stored once, in the rows table, and snippet() reads it from there. Diacritics are
-	// kept, as the title search keeps them.
+	// External content: the text is stored once, in the rows table, and snippet() reads it from there. Case folds and
+	// diacritics are kept, as in the title search.
 	db.exec({
-		sql: `CREATE VIRTUAL TABLE IF NOT EXISTS ${FTS} USING fts5(text, content='${ROWS}', content_rowid='id', tokenize='unicode61 remove_diacritics 0')`
+		sql: `CREATE VIRTUAL TABLE IF NOT EXISTS ${FTS} USING fts5(text, content='${ROWS}', content_rowid='id', tokenize='trigram case_sensitive 0 remove_diacritics 0')`
 	})
+	db.createFunction(
+		MATCHES_FN,
+		(_ctx, text, key) => (typeof text === "string" && typeof key === "string" && matchesNameSearch(text, key) ? 1 : 0),
+		{ arity: 2, deterministic: true }
+	)
 	db.exec({
 		sql: `CREATE TRIGGER IF NOT EXISTS ${ROWS}_ai AFTER INSERT ON ${ROWS} BEGIN INSERT INTO ${FTS}(rowid, text) VALUES (new.id, new.text); END`
 	})
@@ -158,16 +177,75 @@ export function noteIndexPrune(db: Exec, account: string, keep: readonly string[
 	db.exec({ sql: `DELETE FROM ${ROWS} WHERE uuid NOT IN (SELECT value FROM json_each(?))`, bind: [JSON.stringify(keep)] })
 }
 
-// Best match first (bm25), each with a snippet around its hits. `match` is an FTS5 query the page built from quoted
-// tokens; a malformed one fails the call.
-export function noteIndexSearch(db: Exec, account: string, match: string, limit: number): [string, string][] {
+// Where a short-query snippet starts before its hit, and how much of the text it shows.
+const SNIPPET_LEAD = 24
+const SNIPPET_CHARS = 72
+
+// A snippet for a hit the trigram index did not find (every query part under 3 characters): the text around the
+// first part's first occurrence, marked like snippet()'s. Located on the lowercased text, which keeps its indexes
+// for all but a few characters; a miss there shows the text's start.
+function plainSnippet(text: string, part: string): string {
+	const at = text.toLowerCase().indexOf(part)
+
+	if (at === -1) {
+		return text.slice(0, SNIPPET_CHARS) + (text.length > SNIPPET_CHARS ? "…" : "")
+	}
+
+	const start = Math.max(0, at - SNIPPET_LEAD)
+	const hitEnd = at + part.length
+	const end = Math.max(hitEnd, Math.min(text.length, start + SNIPPET_CHARS))
+
+	return (
+		(start > 0 ? "…" : "") +
+		text.slice(start, at) +
+		SNIPPET_OPEN +
+		text.slice(at, hitEnd) +
+		SNIPPET_CLOSE +
+		text.slice(hitEnd, end) +
+		(end < text.length ? "…" : "")
+	)
+}
+
+// Notes whose text holds every whitespace-separated part of `key` (a nameSearchKey), anywhere, best first, each with
+// a snippet around its hits. Parts of 3+ characters go through the trigram index (bm25 order, snippet()); shorter
+// ones are checked on the candidates it returns with the title search's own match. With no part long enough the rows
+// are scanned with that match alone, newest first: local text, bounded by the note count.
+export function noteIndexSearch(db: Exec, account: string, key: string, limit: number): [string, string][] {
 	claim(db, account)
 
+	const parts = key.split(/\s+/u).filter(part => part.length > 0)
+	const long = parts.filter(part => Array.from(part).length >= TRIGRAM_MIN)
+	const short = parts.filter(part => Array.from(part).length < TRIGRAM_MIN)
+	const shortFilter = short.map(() => ` AND ${MATCHES_FN}(r.text, ?) = 1`).join("")
 	const out: [string, string][] = []
 
+	if (parts.length === 0) {
+		return out
+	}
+
+	if (long.length === 0) {
+		db.exec({
+			sql: `SELECT r.uuid, r.text FROM ${ROWS} r WHERE 1 = 1${shortFilter} ORDER BY CAST(r.edited AS INTEGER) DESC LIMIT ?`,
+			bind: [...short, limit],
+			callback: row => {
+				const [uuid, text] = row
+
+				if (typeof uuid === "string" && typeof text === "string") {
+					out.push([uuid, plainSnippet(text, short[0] ?? "")])
+				}
+			}
+		})
+
+		return out
+	}
+
+	// Each long part as one quoted string: a trigram phrase is a substring match, and quoting makes FTS5 syntax in it
+	// literal text. Space-separated strings must all match.
+	const match = long.map(part => `"${part.replaceAll('"', '""')}"`).join(" ")
+
 	db.exec({
-		sql: `SELECT r.uuid, snippet(${FTS}, 0, ?, ?, '…', ?) FROM ${FTS} JOIN ${ROWS} r ON r.id = ${FTS}.rowid WHERE ${FTS} MATCH ? ORDER BY rank LIMIT ?`,
-		bind: [SNIPPET_OPEN, SNIPPET_CLOSE, SNIPPET_TOKENS, match, limit],
+		sql: `SELECT r.uuid, snippet(${FTS}, 0, ?, ?, '…', ?) FROM ${FTS} JOIN ${ROWS} r ON r.id = ${FTS}.rowid WHERE ${FTS} MATCH ?${shortFilter} ORDER BY rank LIMIT ?`,
+		bind: [SNIPPET_OPEN, SNIPPET_CLOSE, SNIPPET_TOKENS, match, ...short, limit],
 		callback: row => {
 			const [uuid, snippet] = row
 

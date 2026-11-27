@@ -1,19 +1,8 @@
 import { describe, expect, it } from "vitest"
-import { buildNoteMatchQuery, noteIndexIsStale, noteIndexText, splitSnippet } from "@/features/notes/lib/searchIndex.logic"
+import { noteIndexIsStale, noteIndexText, splitSnippet } from "@/features/notes/lib/searchIndex.logic"
 import { SNIPPET_CLOSE, SNIPPET_OPEN } from "@/workers/noteIndex"
 import { mockNote } from "@/tests/fixtures/notes"
 import { testUuid } from "@/tests/support/uuid"
-
-describe("buildNoteMatchQuery", () => {
-	it("quotes each token as a word prefix", () => {
-		expect(buildNoteMatchQuery("launch plan")).toBe('"launch"* "plan"*')
-	})
-
-	it("escapes quotes and drops tokens without a letter or digit", () => {
-		expect(buildNoteMatchQuery('say "hi" -')).toBe('"say"* """hi"""*')
-		expect(buildNoteMatchQuery("- ...")).toBeNull()
-	})
-})
 
 describe("noteIndexIsStale", () => {
 	const note = mockNote({ uuid: testUuid("a"), editedTimestamp: 10n })

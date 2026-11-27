@@ -20,6 +20,11 @@ import {
 interface Db {
 	exec(opts: { sql: string; bind?: readonly SqlValue[]; callback?: (row: SqlValue[]) => void }): unknown
 	prepare(sql: string): { step(): boolean; finalize(): unknown }
+	createFunction(
+		name: string,
+		func: (ctxPtr: number, ...values: SqlValue[]) => SqlValue,
+		options: { arity: number; deterministic: boolean }
+	): unknown
 	close(): void
 }
 
@@ -403,8 +408,7 @@ const api = {
 	noteIndexPrune: (account: string, keep: string[]): void => {
 		noteIndexPrune(requireDb(), account, keep)
 	},
-	noteIndexSearch: (account: string, match: string, limit: number): [string, string][] =>
-		noteIndexSearch(requireDb(), account, match, limit),
+	noteIndexSearch: (account: string, key: string, limit: number): [string, string][] => noteIndexSearch(requireDb(), account, key, limit),
 	noteIndexClear: (): void => {
 		noteIndexClear(requireDb())
 	},
