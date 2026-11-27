@@ -599,6 +599,20 @@
 	}
 }
 
+/* A ringed row at a panel's top or bottom edge takes the panel's corner radius (CARD_SURFACE_CLASS), so the panel's
+   rounded, overflow-hidden edge does not clip the ring's corners. Rows sit in the panel directly or one wrapper deep. */
+[data-slot="settings-panel"] > [data-help-highlight]:first-child,
+[data-slot="settings-panel"] > :first-child > [data-help-highlight]:first-child {
+	border-top-left-radius: min(var(--radius-4xl), 24px);
+	border-top-right-radius: min(var(--radius-4xl), 24px);
+}
+
+[data-slot="settings-panel"] > [data-help-highlight]:last-child,
+[data-slot="settings-panel"] > :last-child > [data-help-highlight]:last-child {
+	border-bottom-left-radius: min(var(--radius-4xl), 24px);
+	border-bottom-right-radius: min(var(--radius-4xl), 24px);
+}
+
 /* A drag of drive items (features/drive/lib/pointerDrag.ts): one cursor over the whole page — grabbing
    for a move, copy for a copy, no-drop where nothing takes the drop — and no text selection while it
    lasts. Classes on <body>, toggled only when the cursor changes. */
