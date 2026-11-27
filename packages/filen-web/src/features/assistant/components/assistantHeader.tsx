@@ -19,6 +19,7 @@ import { useAssistantHistoryStore } from "@/features/assistant/store/conversatio
 import { ASSISTANT_TITLE_ID, assistantInitialFocusTarget } from "@/features/assistant/components/assistantFocus"
 import { canRemoveModel, downloadPercent, modelShowsLoading, removableModelBytes } from "@/features/assistant/components/assistant.logic"
 import type { AssistantModelState } from "@/features/assistant/types"
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 
 const CHIP_CLASS = "shrink-0 truncate rounded-full px-2 py-0.5 text-[11px] leading-4 font-medium"
 
@@ -97,18 +98,25 @@ function ModelMenu({ state }: { state: AssistantModelState }) {
 	return (
 		<>
 			<DropdownMenu>
-				<DropdownMenuTrigger
-					render={
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							aria-label={t("assistant:assistantMoreOptions")}
-							className="app-region-no-drag"
-						>
-							<EllipsisIcon />
-						</Button>
-					}
-				/>
+				<Tooltip>
+					<TooltipTrigger
+						render={
+							<DropdownMenuTrigger
+								render={
+									<Button
+										variant="ghost"
+										size="icon-sm"
+										aria-label={t("assistant:assistantMoreOptions")}
+										className="app-region-no-drag"
+									>
+										<EllipsisIcon />
+									</Button>
+								}
+							/>
+						}
+					/>
+					<TooltipContent>{t("assistant:assistantMoreOptions")}</TooltipContent>
+				</Tooltip>
 				<DropdownMenuContent
 					align="end"
 					className="min-w-52"

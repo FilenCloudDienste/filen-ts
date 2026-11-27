@@ -36,10 +36,12 @@ import { useIsOnline } from "@/lib/useIsOnline"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
+import { Kbd } from "@/lib/keymap/kbd"
 import { UserAvatar } from "@/components/userAvatar"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 
 const SECTION_HEADING_CLASS = "text-xs font-medium text-muted-foreground"
 
@@ -80,17 +82,24 @@ function ParticipantRowMenu({
 
 	return (
 		<DropdownMenu>
-			<DropdownMenuTrigger
-				render={
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						aria-label={t("chatInfoParticipantMenu", { name: contactDisplayName(row.participant) })}
-					>
-						<MoreHorizontalIcon />
-					</Button>
-				}
-			/>
+			<Tooltip>
+				<TooltipTrigger
+					render={
+						<DropdownMenuTrigger
+							render={
+								<Button
+									variant="ghost"
+									size="icon-sm"
+									aria-label={t("chatInfoParticipantMenu", { name: contactDisplayName(row.participant) })}
+								>
+									<MoreHorizontalIcon />
+								</Button>
+							}
+						/>
+					}
+				/>
+				<TooltipContent>{t("chatInfoParticipantMenu", { name: contactDisplayName(row.participant) })}</TooltipContent>
+			</Tooltip>
 			<DropdownMenuContent align="end">
 				{actions.map(action => {
 					switch (action) {
@@ -476,25 +485,34 @@ export function ChatInfoToggle({ chat }: { chat: Chat }) {
 	}
 
 	return (
-		<Button
-			id={CHAT_INFO_TOGGLE_ID}
-			variant="ghost"
-			size="icon-sm"
-			aria-label={label}
-			aria-expanded={open}
-			aria-controls={open ? CHAT_INFO_PANEL_ID : undefined}
-			title={label}
-			onClick={() => {
-				if (!open) {
-					openChatInfo(chat.uuid)
-				} else if (isSidePanelNarrow()) {
-					closeChatInfoDrawer()
-				} else {
-					closeChatInfoPanel()
+		<Tooltip>
+			<TooltipTrigger
+				render={
+					<Button
+						id={CHAT_INFO_TOGGLE_ID}
+						variant="ghost"
+						size="icon-sm"
+						aria-label={label}
+						aria-expanded={open}
+						aria-controls={open ? CHAT_INFO_PANEL_ID : undefined}
+						onClick={() => {
+							if (!open) {
+								openChatInfo(chat.uuid)
+							} else if (isSidePanelNarrow()) {
+								closeChatInfoDrawer()
+							} else {
+								closeChatInfoPanel()
+							}
+						}}
+					>
+						<UsersIcon />
+					</Button>
 				}
-			}}
-		>
-			<UsersIcon />
-		</Button>
+			/>
+			<TooltipContent>
+				{label}
+				<Kbd action="chats.participants" />
+			</TooltipContent>
+		</Tooltip>
 	)
 }

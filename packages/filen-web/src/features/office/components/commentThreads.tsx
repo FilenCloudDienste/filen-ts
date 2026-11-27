@@ -6,6 +6,7 @@ import { ArrowLeftIcon, CheckIcon, MoreHorizontalIcon, PlusIcon, RotateCcwIcon, 
 import { cn } from "@filen/shared"
 import { revisionColor } from "@filen/office/dom/docx"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { useCommentAuthor } from "@/features/office/components/commentAuthor"
 import { Byline } from "@/features/preview/components/docxAnnotations"
@@ -215,22 +216,29 @@ function CommentItem<C extends ThreadComment>({
 					color={colors.get(comment.authorId) ?? revisionColor(0)}
 				/>
 				{actions.editable ? (
-					<DropdownMenuTrigger
-						handle={menu}
-						payload={{ index, comment }}
-						onClick={() => {
-							onMenu(index)
-						}}
-						render={
-							<Button
-								variant="ghost"
-								size="icon-xs"
-								aria-label={labels.actions}
-							/>
-						}
-					>
-						<MoreHorizontalIcon />
-					</DropdownMenuTrigger>
+					<Tooltip>
+						<TooltipTrigger
+							render={
+								<DropdownMenuTrigger
+									handle={menu}
+									payload={{ index, comment }}
+									onClick={() => {
+										onMenu(index)
+									}}
+									render={
+										<Button
+											variant="ghost"
+											size="icon-xs"
+											aria-label={labels.actions}
+										/>
+									}
+								>
+									<MoreHorizontalIcon />
+								</DropdownMenuTrigger>
+							}
+						/>
+						<TooltipContent>{labels.actions}</TooltipContent>
+					</Tooltip>
 				) : null}
 			</div>
 			{editing ? (
@@ -686,27 +694,39 @@ export function CommentThreads<C extends ThreadComment>({
 				</h2>
 				<div className="flex shrink-0 items-center gap-0.5">
 					{editable && onNew !== undefined ? (
-						<Button
-							ref={newButton}
-							variant="ghost"
-							size="icon-sm"
-							aria-label={labels.new}
-							title={labels.new}
-							onClick={onNew}
-						>
-							<PlusIcon />
-						</Button>
+						<Tooltip>
+							<TooltipTrigger
+								render={
+									<Button
+										ref={newButton}
+										variant="ghost"
+										size="icon-sm"
+										aria-label={labels.new}
+										onClick={onNew}
+									>
+										<PlusIcon />
+									</Button>
+								}
+							/>
+							<TooltipContent>{labels.new}</TooltipContent>
+						</Tooltip>
 					) : null}
-					<Button
-						ref={closeButton}
-						variant="ghost"
-						size="icon-sm"
-						aria-label={labels.close}
-						title={labels.close}
-						onClick={onClose}
-					>
-						<XIcon />
-					</Button>
+					<Tooltip>
+						<TooltipTrigger
+							render={
+								<Button
+									ref={closeButton}
+									variant="ghost"
+									size="icon-sm"
+									aria-label={labels.close}
+									onClick={onClose}
+								>
+									<XIcon />
+								</Button>
+							}
+						/>
+						<TooltipContent>{labels.close}</TooltipContent>
+					</Tooltip>
 				</div>
 			</div>
 			{composing && editable && post !== undefined && postLabel !== undefined ? (

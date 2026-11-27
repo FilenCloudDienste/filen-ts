@@ -76,6 +76,9 @@ import { canBulkTrashNotes } from "@/features/notes/components/notesBulkActionBa
 import { TagContextMenuContent } from "@/features/notes/components/noteMenu"
 import { type NoteActionDialogKind, type NoteTagDialogKind } from "@/features/notes/components/noteMenu.logic"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
+import { Kbd } from "@/lib/keymap/kbd"
 import { LoadingState } from "@/components/loadingState"
 import { ListFilterInput } from "@/components/listFilterInput"
 import { SidebarNotice } from "@/components/sidebarNotice"
@@ -221,18 +224,25 @@ function TagsSortMenu({ value, onChange }: { value: NoteTagsSortBy; onChange: (n
 
 	return (
 		<DropdownMenu>
-			<DropdownMenuTrigger
-				render={
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						aria-label={t("notesTagsSortMenuLabel")}
-						className="app-region-no-drag"
-					>
-						<ArrowDownNarrowWideIcon />
-					</Button>
-				}
-			/>
+			<Tooltip>
+				<TooltipTrigger
+					render={
+						<DropdownMenuTrigger
+							render={
+								<Button
+									variant="ghost"
+									size="icon-sm"
+									aria-label={t("notesTagsSortMenuLabel")}
+									className="app-region-no-drag"
+								>
+									<ArrowDownNarrowWideIcon />
+								</Button>
+							}
+						/>
+					}
+				/>
+				<TooltipContent>{t("notesTagsSortMenuLabel")}</TooltipContent>
+			</Tooltip>
 			<DropdownMenuContent align="end">
 				<DropdownMenuRadioGroup
 					value={field}
@@ -785,35 +795,41 @@ export function NotesSidebar() {
 				<div className="flex items-center justify-between gap-2">
 					<h2 className="truncate px-1 text-[15px] font-medium">{t("notesSidebarTitle")}</h2>
 					<div className="flex items-center gap-0.5">
-						<Button
-							variant="ghost"
-							size="icon-sm"
+						<TooltipIconButton
 							disabled={!isOnline}
-							aria-label={t("notesNewNote")}
-							title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+							label={t("notesNewNote")}
+							title={t("common:offlineActionDisabled")}
+							shortcut={<Kbd action="notes.newNote" />}
 							className="app-region-no-drag"
 							onClick={() => {
 								void handleNewNote()
 							}}
 						>
 							<PlusIcon />
-						</Button>
+						</TooltipIconButton>
 						{/* Bulk-ops menu — export/import/new-tag. The TRIGGER itself stays always-enabled: a
 						zero-note account must still be able to reach "New tag" here; only the export item,
 						which genuinely needs notes to zip, carries its own disabled state. */}
 						<DropdownMenu>
-							<DropdownMenuTrigger
-								render={
-									<Button
-										variant="ghost"
-										size="icon-sm"
-										aria-label={t("notesSidebarMoreActions")}
-										className="app-region-no-drag"
-									>
-										<MoreHorizontalIcon />
-									</Button>
-								}
-							/>
+							<Tooltip>
+								<TooltipTrigger
+									render={
+										<DropdownMenuTrigger
+											render={
+												<Button
+													variant="ghost"
+													size="icon-sm"
+													aria-label={t("notesSidebarMoreActions")}
+													className="app-region-no-drag"
+												>
+													<MoreHorizontalIcon />
+												</Button>
+											}
+										/>
+									}
+								/>
+								<TooltipContent>{t("notesSidebarMoreActions")}</TooltipContent>
+							</Tooltip>
 							<DropdownMenuContent align="end">
 								<DropdownMenuItem
 									disabled={exportingAll || notesQuery.isPending || allNotes.length === 0}

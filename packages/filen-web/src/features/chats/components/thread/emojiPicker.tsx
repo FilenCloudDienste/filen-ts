@@ -34,6 +34,7 @@ import { cn } from "@filen/shared"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 
 const CATEGORY_FACTS: Readonly<Record<EmojiPickerCategory, { labelKey: ChatsKey; icon: LucideIcon }>> = {
 	recent: { labelKey: "chatEmojiCategoryRecent", icon: ClockIcon },
@@ -146,19 +147,25 @@ function EmojiPickerBody({
 						className="h-8 w-full rounded-xl bg-muted py-1 pr-2 pl-8 text-sm leading-5 outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
 					/>
 				</div>
-				<Button
-					variant="ghost"
-					size="icon-sm"
-					className="shrink-0 rounded-full text-lg"
-					aria-label={t("chatEmojiSkinTone")}
-					title={t("chatEmojiSkinTone")}
-					aria-expanded={toneChoicesOpen}
-					onClick={() => {
-						setToneChoicesOpen(open => !open)
-					}}
-				>
-					<span aria-hidden="true">{skinToneSample(skinTone)}</span>
-				</Button>
+				<Tooltip>
+					<TooltipTrigger
+						render={
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								className="shrink-0 rounded-full text-lg"
+								aria-label={t("chatEmojiSkinTone")}
+								aria-expanded={toneChoicesOpen}
+								onClick={() => {
+									setToneChoicesOpen(open => !open)
+								}}
+							>
+								<span aria-hidden="true">{skinToneSample(skinTone)}</span>
+							</Button>
+						}
+					/>
+					<TooltipContent>{t("chatEmojiSkinTone")}</TooltipContent>
+				</Tooltip>
 			</div>
 			{toneChoicesOpen ? (
 				<div
@@ -277,19 +284,25 @@ export function EmojiPicker({
 			open={open}
 			onOpenChange={setOpen}
 		>
-			<PopoverTrigger
-				render={
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						className="rounded-full text-muted-foreground"
-						aria-label={t("chatComposerEmoji")}
-						title={t("chatComposerEmoji")}
-					>
-						<SmilePlusIcon />
-					</Button>
-				}
-			/>
+			<Tooltip>
+				<TooltipTrigger
+					render={
+						<PopoverTrigger
+							render={
+								<Button
+									variant="ghost"
+									size="icon-sm"
+									className="rounded-full text-muted-foreground"
+									aria-label={t("chatComposerEmoji")}
+								>
+									<SmilePlusIcon />
+								</Button>
+							}
+						/>
+					}
+				/>
+				<TooltipContent>{t("chatComposerEmoji")}</TooltipContent>
+			</Tooltip>
 			<PopoverContent
 				side="top"
 				align="start"

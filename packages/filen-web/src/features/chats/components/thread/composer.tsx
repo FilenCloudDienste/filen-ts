@@ -50,6 +50,9 @@ import { useIsOnline } from "@/lib/useIsOnline"
 import { toastObstructionRef } from "@/lib/toastClearance"
 import { useAccountQuery } from "@/queries/account"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { DisabledReason, EXPLAINED_DISABLED_CLASS, TooltipIconButton } from "@/components/ui/tooltipIconButton"
+import { Kbd } from "@/lib/keymap/kbd"
 import { GLASS_SURFACE_CLASS } from "@/components/ui/surface"
 import {
 	DropdownMenu,
@@ -185,6 +188,9 @@ export function Composer({
 	// A free account opens the menu to learn why and upgrade; only offline, an upload in flight or a still-loading
 	// account keep the trigger off.
 	const attachTriggerDisabled = sender === undefined || isAttachDisabled(uploadingCount, isOnline, true)
+	const attachReasonId = useId()
+	// A trigger turned off with a reason stays hoverable (aria-disabled) so its tooltip can say why.
+	const attachExplained = attachTriggerDisabled && attachGateReason !== undefined
 
 	function upgrade(): void {
 		if (isDesktopBilling()) {
@@ -683,24 +689,42 @@ export function Composer({
 					)}
 				>
 					<DropdownMenu>
-						<DropdownMenuTrigger
-							render={
-								<Button
-									variant="ghost"
-									size="icon-sm"
-									className="rounded-full text-muted-foreground"
-									// Attach-menu pre-gate — both entries need network right away (an upload/
-									// drive-attach start, not a durably-queued send), unlike the send button below,
-									// which stays enabled offline by design (its outbox queues and flushes later).
-									// A free account gets the reason and an upgrade inside instead.
-									disabled={attachTriggerDisabled}
-									aria-label={t("chatComposerAttach")}
-									title={attachGateReason}
-								>
-									<PlusIcon />
-								</Button>
-							}
-						/>
+						<Tooltip>
+							<TooltipTrigger
+								render={
+									<DropdownMenuTrigger
+										render={
+											<Button
+												variant="ghost"
+												size="icon-sm"
+												className={cn(
+													"rounded-full text-muted-foreground",
+													attachExplained && EXPLAINED_DISABLED_CLASS
+												)}
+												// Attach-menu pre-gate — both entries need network right away (an upload/
+												// drive-attach start, not a durably-queued send), unlike the send button below,
+												// which stays enabled offline by design (its outbox queues and flushes later).
+												// A free account gets the reason and an upgrade inside instead.
+												disabled={attachTriggerDisabled}
+												focusableWhenDisabled={attachExplained}
+												aria-label={t("chatComposerAttach")}
+												aria-describedby={attachExplained ? attachReasonId : undefined}
+											>
+												<PlusIcon />
+												<DisabledReason
+													id={attachReasonId}
+													reason={attachExplained ? attachGateReason : undefined}
+												/>
+											</Button>
+										}
+									/>
+								}
+							/>
+							<TooltipContent>
+								{attachGateReason ?? t("chatComposerAttach")}
+								{attachGateReason === undefined ? <Kbd action="chats.composer.attach" /> : null}
+							</TooltipContent>
+						</Tooltip>
 						<DropdownMenuContent
 							align="start"
 							side="top"
@@ -785,19 +809,20 @@ export function Composer({
 							</span>
 						</span>
 					) : null}
-					<Button
-						size="icon-sm"
+					<TooltipIconButton
+						variant="default"
 						className="rounded-full bg-chat-own text-chat-own-foreground hover:bg-chat-own-strong"
 						// No sender until the account has loaded, and submit() cannot send without one: an enabled
 						// button (or Enter) would do nothing, silently, keeping the text.
 						disabled={!canSend(draft) || sender === undefined}
-						aria-label={mode.kind === "edit" ? t("chatComposerSaveEdit") : t("chatComposerSend")}
+						label={mode.kind === "edit" ? t("chatComposerSaveEdit") : t("chatComposerSend")}
+						shortcut={<Kbd action="chats.composer.send" />}
 						onClick={() => {
 							void submit()
 						}}
 					>
 						<ArrowUpIcon className="size-4" />
-					</Button>
+					</TooltipIconButton>
 				</div>
 			</div>
 

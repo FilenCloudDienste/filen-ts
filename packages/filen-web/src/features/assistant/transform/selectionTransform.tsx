@@ -3,12 +3,14 @@ import { createPortal } from "react-dom"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { SparklesIcon } from "lucide-react"
+import { Kbd } from "@/lib/keymap/kbd"
 import { IN_EDITORS_AND_FIELDS, useAction } from "@/lib/keymap/useAction"
 import { useTransformOffered } from "@/features/assistant/store/useAssistantOnDevice"
 import type { TransformHost, TransformSelection } from "@/features/assistant/transform/host"
 import { TransformMenu } from "@/features/assistant/transform/transformMenu"
 import type { TransformPick } from "@/features/assistant/transform/transformMenuParts"
 import { TransformPopover, type TransformRequest } from "@/features/assistant/transform/transformPopover"
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 
 // The selection transform on a text editor (a note's editor, the chat composer): a ✨ button beside a selection and the
 // app.assistantTransform key open the rewrite menu; a pick shows the result's popover. A right click keeps the
@@ -153,28 +155,37 @@ export function SelectionTransform({ host, root, readOnly }: { host: TransformHo
 			{button === null || menu !== null || request !== null || !offered
 				? null
 				: createPortal(
-						<button
-							type="button"
-							aria-label={t("assistantTransformOpen")}
-							title={t("assistantTransformOpen")}
-							data-assistant-transform-button
-							className="fixed z-40 flex size-7 items-center justify-center rounded-full border bg-popover text-popover-foreground shadow-md transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
-							style={{ left: button.x, top: button.y }}
-							// The editor keeps its focus and selection.
-							onPointerDown={event => {
-								event.preventDefault()
-							}}
-							onClick={event => {
-								const rect = event.currentTarget.getBoundingClientRect()
+						<Tooltip>
+							<TooltipTrigger
+								render={
+									<button
+										type="button"
+										aria-label={t("assistantTransformOpen")}
+										data-assistant-transform-button
+										className="fixed z-40 flex size-7 items-center justify-center rounded-full border bg-popover text-popover-foreground shadow-md transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+										style={{ left: button.x, top: button.y }}
+										// The editor keeps its focus and selection.
+										onPointerDown={event => {
+											event.preventDefault()
+										}}
+										onClick={event => {
+											const rect = event.currentTarget.getBoundingClientRect()
 
-								open(pointAnchor(rect.left, rect.bottom))
-							}}
-						>
-							<SparklesIcon
-								aria-hidden="true"
-								className="size-4"
+											open(pointAnchor(rect.left, rect.bottom))
+										}}
+									>
+										<SparklesIcon
+											aria-hidden="true"
+											className="size-4"
+										/>
+									</button>
+								}
 							/>
-						</button>,
+							<TooltipContent>
+								{t("assistantTransformOpen")}
+								<Kbd action="app.assistantTransform" />
+							</TooltipContent>
+						</Tooltip>,
 						document.body
 					)}
 			{menu === null || !onDevice ? null : (

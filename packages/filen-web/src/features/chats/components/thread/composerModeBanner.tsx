@@ -5,7 +5,8 @@ import { cn } from "@filen/shared"
 import { safeAvatarUrl } from "@/lib/avatarUrl"
 import { messageSenderName } from "@/features/chats/lib/sort"
 import { isOwnMessage } from "@/features/chats/lib/sender"
-import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
+import { Kbd } from "@/lib/keymap/kbd"
 import { UserAvatar } from "@/components/userAvatar"
 import { GLASS_SURFACE_CLASS } from "@/components/ui/surface"
 
@@ -45,15 +46,14 @@ export function ComposerModeBanner({
 					<span className="min-w-0 flex-1 truncate font-medium">{t("chatComposerEditing")}</span>
 				</>
 			)}
-			<Button
-				variant="ghost"
-				size="icon-sm"
+			<TooltipIconButton
 				className="shrink-0 rounded-full text-muted-foreground"
-				aria-label={kind === "reply" ? t("chatComposerCancelReply") : t("chatComposerCancelEdit")}
+				label={kind === "reply" ? t("chatComposerCancelReply") : t("chatComposerCancelEdit")}
+				shortcut={<Kbd action="chats.composer.cancel" />}
 				onClick={onCancel}
 			>
 				<XIcon />
-			</Button>
+			</TooltipIconButton>
 		</div>
 	)
 }

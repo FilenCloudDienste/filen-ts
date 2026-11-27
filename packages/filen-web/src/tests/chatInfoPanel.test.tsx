@@ -46,6 +46,7 @@ vi.mock("@/features/chats/lib/actions", () => actions)
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigate, useRouter: () => router, useRouterState: () => "" }))
 
 const { ChatInfoHost, ChatInfoToggle } = await import("@/features/chats/components/chatInfoPanel")
+const { registerAllActions } = await import("@/lib/keymap/actions")
 const { openChatInfo, useChatInfoStore } = await import("@/features/chats/store/useChatInfoStore")
 const { SidePanelSlotContext } = await import("@/features/shell/lib/sidePanelSlot")
 
@@ -97,6 +98,8 @@ function openPanel(): HTMLElement {
 let restoreSize: () => void = () => undefined
 
 beforeAll(() => {
+	// The toggle's tooltip names its action's keys.
+	registerAllActions()
 	restoreSize = stubElementSize({ clientHeight: 400, clientWidth: 400 })
 })
 

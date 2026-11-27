@@ -1,4 +1,4 @@
-import { type MouseEvent } from "react"
+import { useId, type MouseEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
 import { PinIcon, HeartIcon, UsersIcon, type LucideIcon } from "lucide-react"
@@ -23,7 +23,9 @@ import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 import { RowMenuTrigger } from "@/components/rowMenuTrigger"
-import { LazyTooltip } from "@/components/lazyTooltip"
+import { LazyTooltip, RowTooltipContent } from "@/components/lazyTooltip"
+import { Tooltip, TooltipTrigger } from "@/components/ui/tooltip"
+import { DisabledReason, EXPLAINED_DISABLED_CLASS } from "@/components/ui/tooltipIconButton"
 import { stopRowPropagation } from "@/lib/domEvents"
 import { useTouchLongPress } from "@/lib/useTouchLongPress"
 
@@ -80,26 +82,41 @@ function RowFlagToggle({
 	disabledTitle: string | undefined
 	onToggle: () => void
 }) {
+	const reasonId = useId()
+
 	return (
-		<Button
-			variant="ghost"
-			size="icon-xs"
-			aria-label={label}
-			aria-pressed={pressed}
-			disabled={disabledTitle !== undefined}
-			title={disabledTitle}
-			className={cn(
-				"shrink-0 text-muted-foreground",
-				pressed ? pressedClass : "hidden group-focus-within:inline-flex group-hover:inline-flex pointer-coarse:hidden"
-			)}
-			onClick={event => {
-				stopRowPropagation(event)
-				onToggle()
-			}}
-			onDoubleClick={stopRowPropagation}
-		>
-			<Icon className={cn(pressed && "fill-current")} />
-		</Button>
+		<Tooltip>
+			<TooltipTrigger
+				render={
+					<Button
+						variant="ghost"
+						size="icon-xs"
+						aria-label={label}
+						aria-pressed={pressed}
+						aria-describedby={disabledTitle === undefined ? undefined : reasonId}
+						disabled={disabledTitle !== undefined}
+						focusableWhenDisabled={disabledTitle !== undefined}
+						className={cn(
+							"shrink-0 text-muted-foreground",
+							disabledTitle !== undefined && EXPLAINED_DISABLED_CLASS,
+							pressed ? pressedClass : "hidden group-focus-within:inline-flex group-hover:inline-flex pointer-coarse:hidden"
+						)}
+						onClick={event => {
+							stopRowPropagation(event)
+							onToggle()
+						}}
+						onDoubleClick={stopRowPropagation}
+					>
+						<Icon className={cn(pressed && "fill-current")} />
+						<DisabledReason
+							id={reasonId}
+							reason={disabledTitle}
+						/>
+					</Button>
+				}
+			/>
+			<RowTooltipContent>{disabledTitle ?? label}</RowTooltipContent>
+		</Tooltip>
 	)
 }
 

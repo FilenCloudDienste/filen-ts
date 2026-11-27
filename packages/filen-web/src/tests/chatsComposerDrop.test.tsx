@@ -195,7 +195,15 @@ describe("Composer — attach menu on a free account", () => {
 		state.isOnline = false
 		renderComposer()
 
-		expect(screen.getByRole<HTMLButtonElement>("button", { name: "Attach" }).disabled).toBe(true)
+		const trigger = screen.getByRole<HTMLButtonElement>("button", { name: "Attach" })
+
+		// Off but hoverable, so its tooltip and description say why.
+		expect(trigger.getAttribute("aria-disabled")).toBe("true")
+		expect(document.getElementById(trigger.getAttribute("aria-describedby") ?? "")?.textContent).toBe("Unavailable while offline")
+
+		fireEvent.click(trigger)
+
+		expect(screen.queryByRole("menuitem", { name: "Upload a file" })).toBeNull()
 	})
 })
 

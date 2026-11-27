@@ -237,7 +237,8 @@ describe("note row — calm layout", () => {
 
 		expect(pin?.getAttribute("aria-pressed")).toBe("true")
 		expect(favorite?.getAttribute("aria-pressed")).toBe("false")
-		expect(pin?.hasAttribute("disabled")).toBe(true)
+		// Off but hoverable, so the tooltip can say why.
+		expect(pin?.getAttribute("aria-disabled")).toBe("true")
 		// Siblings of the link, never inside it.
 		expect(container.querySelector("a [aria-pressed]")).toBeNull()
 	})
@@ -247,15 +248,15 @@ describe("note row — calm layout", () => {
 		const pin = rowOf(container).querySelector('[aria-label="Pinned"]')
 		const favorite = rowOf(container).querySelector('[aria-label="Favorite"]')
 
-		expect(pin?.hasAttribute("disabled")).toBe(true)
-		expect(favorite?.hasAttribute("disabled")).toBe(true)
-		expect(pin?.getAttribute("title")).toBe("Saving…")
+		expect(pin?.getAttribute("aria-disabled")).toBe("true")
+		expect(favorite?.getAttribute("aria-disabled")).toBe("true")
+		expect(document.getElementById(pin?.getAttribute("aria-describedby") ?? "")?.textContent).toBe("Saving…")
 
 		cleanup()
 
 		const idle = renderNoteRow(false, false, mockNote({ pinned: true }))
 
-		expect(rowOf(idle.container).querySelector('[aria-label="Pinned"]')?.hasAttribute("disabled")).toBe(false)
+		expect(rowOf(idle.container).querySelector('[aria-label="Pinned"]')?.hasAttribute("aria-disabled")).toBe(false)
 	})
 
 	it("keeps clicks, presses and right-clicks on a row's tooltip from reaching the row", () => {

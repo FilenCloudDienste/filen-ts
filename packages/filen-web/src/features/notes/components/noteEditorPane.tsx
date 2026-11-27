@@ -25,6 +25,7 @@ import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/spinner"
 import { LoadingState } from "@/components/loadingState"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
 export interface NoteEditorPaneProps {
@@ -209,18 +210,25 @@ export function NoteEditorPane({ note, loading }: NoteEditorPaneProps) {
 					{/* Menu trigger suppressed while inflight — disabled-not-hidden (mobile suppresses the menu
 					entirely mid-sync): acting on a note whose content is mid-flight is blocked, but the
 					control stays in place so the header doesn't reflow. */}
-					<DropdownMenuTrigger
-						render={
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								disabled={isInflight}
-								aria-label={t("noteItemMenuTrigger")}
-							>
-								<MoreHorizontalIcon />
-							</Button>
-						}
-					/>
+					<Tooltip>
+						<TooltipTrigger
+							render={
+								<DropdownMenuTrigger
+									render={
+										<Button
+											variant="ghost"
+											size="icon-sm"
+											disabled={isInflight}
+											aria-label={t("noteItemMenuTrigger")}
+										>
+											<MoreHorizontalIcon />
+										</Button>
+									}
+								/>
+							}
+						/>
+						<TooltipContent>{t("noteItemMenuTrigger")}</TooltipContent>
+					</Tooltip>
 					<NoteDropdownMenuContent
 						note={note}
 						allTags={tagsQuery.data ?? []}

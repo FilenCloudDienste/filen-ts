@@ -69,6 +69,8 @@ import { blockingQueryError } from "@/queries/blockingError"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { UserAvatar } from "@/components/userAvatar"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { Kbd } from "@/lib/keymap/kbd"
 import { Spinner } from "@/components/ui/spinner"
 import { LoadingState } from "@/components/loadingState"
 import { EmptyMessage } from "@/components/emptyMessage"
@@ -130,24 +132,34 @@ function UnreadDivider({ chat }: { chat: Chat }) {
 
 	return (
 		<div className="px-4 py-2">
-			<button
-				type="button"
-				disabled={pending}
-				// The visible pill only says "New"; the name and tooltip also say what activating it does.
-				aria-label={t("chatUnreadDividerMarkRead")}
-				title={t("chatUnreadDividerMarkRead")}
-				onClick={() => {
-					void handleClick()
-				}}
-				className="flex w-full items-center gap-2 rounded-full focus-ring outline-none disabled:opacity-60"
-			>
-				<span className="h-px flex-1 bg-destructive/40" />
-				{/* text-primary-foreground, not text-white: white on destructive computes 2.89:1 in dark. */}
-				<span className="shrink-0 rounded-full bg-destructive px-2 py-0.5 text-[11px] leading-4 font-medium text-primary-foreground">
-					{t("chatUnreadDivider")}
-				</span>
-				<span className="h-px flex-1 bg-destructive/40" />
-			</button>
+			<Tooltip>
+				<TooltipTrigger
+					render={
+						<button
+							type="button"
+							disabled={pending}
+							// The visible pill only says "New"; the name and tooltip also say what activating it does.
+							aria-label={t("chatUnreadDividerMarkRead")}
+							title={t("chatUnreadDividerMarkRead")}
+							onClick={() => {
+								void handleClick()
+							}}
+							className="flex w-full items-center gap-2 rounded-full focus-ring outline-none disabled:opacity-60"
+						>
+							<span className="h-px flex-1 bg-destructive/40" />
+							{/* text-primary-foreground, not text-white: white on destructive computes 2.89:1 in dark. */}
+							<span className="shrink-0 rounded-full bg-destructive px-2 py-0.5 text-[11px] leading-4 font-medium text-primary-foreground">
+								{t("chatUnreadDivider")}
+							</span>
+							<span className="h-px flex-1 bg-destructive/40" />
+						</button>
+					}
+				/>
+				<TooltipContent>
+					{t("chatUnreadDividerMarkRead")}
+					<Kbd action="chats.markRead" />
+				</TooltipContent>
+			</Tooltip>
 		</div>
 	)
 }
@@ -955,17 +967,24 @@ export function MessageThread({ chat }: { chat: Chat }) {
 				{/* The menu's own participants entry, one click away: toggles the chat info panel. */}
 				<ChatInfoToggle chat={chat} />
 				<DropdownMenu>
-					<DropdownMenuTrigger
-						render={
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								aria-label={t("chatItemMenuTrigger")}
-							>
-								<MoreHorizontalIcon />
-							</Button>
-						}
-					/>
+					<Tooltip>
+						<TooltipTrigger
+							render={
+								<DropdownMenuTrigger
+									render={
+										<Button
+											variant="ghost"
+											size="icon-sm"
+											aria-label={t("chatItemMenuTrigger")}
+										>
+											<MoreHorizontalIcon />
+										</Button>
+									}
+								/>
+							}
+						/>
+						<TooltipContent>{t("chatItemMenuTrigger")}</TooltipContent>
+					</Tooltip>
 					<ChatDropdownMenuContent
 						chat={chat}
 						currentUserId={currentUserId}

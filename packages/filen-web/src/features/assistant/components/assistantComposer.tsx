@@ -2,7 +2,8 @@ import { useRef, type ChangeEvent, type KeyboardEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { ArrowUpIcon, SquareIcon } from "lucide-react"
 import { cn } from "@filen/shared"
-import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
+import { KbdKeys } from "@/lib/keymap/kbd"
 import { GLASS_SURFACE_CLASS } from "@/components/ui/surface"
 import { isImeKeydown } from "@filen/shared/keymap"
 import { enterIntent } from "@/features/chats/lib/composer.logic"
@@ -93,11 +94,10 @@ export function AssistantComposer() {
 					className="max-h-40 min-h-7 flex-1 resize-none bg-transparent py-1 text-sm leading-5 outline-none placeholder:text-muted-foreground"
 				/>
 				{busy ? (
-					<Button
-						size="icon-sm"
+					<TooltipIconButton
 						variant="secondary"
 						className="rounded-full"
-						aria-label={t("assistantStop")}
+						label={t("assistantStop")}
 						onClick={() => {
 							// The button turns into a disabled Send once the turn ends, which would drop focus to the page.
 							assistantInitialFocusTarget()?.focus()
@@ -105,17 +105,18 @@ export function AssistantComposer() {
 						}}
 					>
 						<SquareIcon className="size-3.5 fill-current" />
-					</Button>
+					</TooltipIconButton>
 				) : (
-					<Button
-						size="icon-sm"
+					<TooltipIconButton
+						variant="default"
 						className="rounded-full bg-chat-own text-chat-own-foreground hover:bg-chat-own-strong"
 						disabled={!canSend}
-						aria-label={t("assistantSend")}
+						label={t("assistantSend")}
+						shortcut={<KbdKeys keys={["↵"]} />}
 						onClick={submit}
 					>
 						<ArrowUpIcon className="size-4" />
-					</Button>
+					</TooltipIconButton>
 				)}
 			</div>
 			{/* Plain text, outside the pill and named by nothing, so no control's accessible name takes it in. */}

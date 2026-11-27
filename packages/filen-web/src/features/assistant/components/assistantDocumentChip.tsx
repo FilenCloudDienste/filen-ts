@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next"
 import { FileTextIcon, XIcon } from "lucide-react"
 import { driveItemName } from "@filen/shared"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { activeDocumentKey, useActiveDocument } from "@/lib/activeDocument"
 import { noteDisplayTitle } from "@/features/notes/lib/displayTitle"
 import { useAssistantStore } from "@/features/assistant/store/useAssistantStore"
@@ -53,19 +54,26 @@ export function AssistantDocumentChip() {
 						{where}
 					</span>
 				)}
-				<button
-					type="button"
-					aria-label={t("assistantDocumentChipRemove", { name })}
-					className="flex size-5 shrink-0 items-center justify-center rounded-full focus-ring transition-colors outline-none hover:bg-background hover:text-foreground"
-					onClick={() => {
-						setDetached(key)
-					}}
-				>
-					<XIcon
-						aria-hidden="true"
-						className="size-3"
+				<Tooltip>
+					<TooltipTrigger
+						render={
+							<button
+								type="button"
+								aria-label={t("assistantDocumentChipRemove", { name })}
+								className="flex size-5 shrink-0 items-center justify-center rounded-full focus-ring transition-colors outline-none hover:bg-background hover:text-foreground"
+								onClick={() => {
+									setDetached(key)
+								}}
+							>
+								<XIcon
+									aria-hidden="true"
+									className="size-3"
+								/>
+							</button>
+						}
 					/>
-				</button>
+					<TooltipContent>{t("assistantDocumentChipRemove", { name })}</TooltipContent>
+				</Tooltip>
 			</div>
 		</div>
 	)

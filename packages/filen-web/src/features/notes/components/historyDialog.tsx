@@ -16,6 +16,7 @@ import { pendingGuardedOpenChange } from "@/components/dialogs/dismissal.logic"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { LoadingState } from "@/components/loadingState"
 import { EmptyMessage } from "@/components/emptyMessage"
 import { SURFACE_RING } from "@/components/ui/surface"
@@ -160,18 +161,16 @@ export function HistoryDialog({ note: initialNote, onClose }: HistoryDialogProps
 							>
 								{t("noteHistoryViewAction")}
 							</Button>
-							<Button
-								variant="ghost"
-								size="icon-sm"
+							<TooltipIconButton
 								disabled={pending || !isOnline}
-								aria-label={t("noteHistoryRestoreAction")}
+								label={t("noteHistoryRestoreAction")}
 								title={!isOnline ? t("common:offlineActionDisabled") : undefined}
 								onClick={() => {
 									setConfirmingRestore(history)
 								}}
 							>
 								<RotateCcwIcon aria-hidden="true" />
-							</Button>
+							</TooltipIconButton>
 						</div>
 					)
 				}}

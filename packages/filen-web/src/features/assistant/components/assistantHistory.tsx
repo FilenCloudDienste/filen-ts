@@ -7,6 +7,7 @@ import { cn } from "@filen/shared"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { REVEAL_CLASS } from "@/components/rowReveal"
+import { LazyTooltip } from "@/components/lazyTooltip"
 import { useNowMinute } from "@/lib/useNowMinute"
 import type { AssistantKey } from "@/lib/i18n"
 import {
@@ -106,17 +107,22 @@ function ConversationRow({
 			>
 				{title}
 			</button>
-			<Button
-				variant="ghost"
-				size="icon-xs"
-				aria-label={t("assistantHistoryDelete", { title })}
-				className={REVEAL_CLASS.plain}
-				onClick={() => {
-					onDelete(meta)
-				}}
+			<LazyTooltip
+				label={t("assistantHistoryDelete", { title })}
+				className="flex shrink-0"
 			>
-				<Trash2Icon />
-			</Button>
+				<Button
+					variant="ghost"
+					size="icon-xs"
+					aria-label={t("assistantHistoryDelete", { title })}
+					className={REVEAL_CLASS.plain}
+					onClick={() => {
+						onDelete(meta)
+					}}
+				>
+					<Trash2Icon />
+				</Button>
+			</LazyTooltip>
 		</li>
 	)
 }

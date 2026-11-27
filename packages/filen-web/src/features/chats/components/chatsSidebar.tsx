@@ -41,6 +41,8 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import type { ListPointerSelection } from "@/lib/useListPointerSelection"
 import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
+import { Kbd } from "@/lib/keymap/kbd"
 import { LoadingState } from "@/components/loadingState"
 import { ListFilterInput } from "@/components/listFilterInput"
 import { SidebarNotice } from "@/components/sidebarNotice"
@@ -425,19 +427,18 @@ export function ChatsSidebar() {
 					ariaLabel={t("chatsSearch")}
 					wrapperClassName="min-w-0 flex-1 app-region-no-drag"
 				/>
-				<Button
-					variant="ghost"
-					size="icon-sm"
+				<TooltipIconButton
 					disabled={!isOnline}
-					aria-label={t("chatsSidebarNewChat")}
-					title={!isOnline ? t("common:offlineActionDisabled") : t("chatsSidebarNewChat")}
+					label={t("chatsSidebarNewChat")}
+					title={t("common:offlineActionDisabled")}
+					shortcut={<Kbd action="chats.newChat" />}
 					className="app-region-no-drag"
 					onClick={() => {
 						dialogHost.openCreateChatDialog()
 					}}
 				>
 					<SquarePenIcon />
-				</Button>
+				</TooltipIconButton>
 			</div>
 
 			<div
