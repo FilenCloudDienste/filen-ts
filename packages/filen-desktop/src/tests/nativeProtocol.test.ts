@@ -253,8 +253,12 @@ describe("toNativeSchema", () => {
 			accepts(toNativeSchema, { t: "speed", speed: { sync, transfers } })
 		const client = (overrides: Record<string, unknown>) => ({ ...SPEED.sync, ...overrides })
 
-		expect(speed(client({ preset: "maximum", uploadKbps: DESKTOP_SPEED_KBPS_MAX, downloadKbps: 1 }))).toBe(true)
+		expect(speed(client({ preset: "maximum", customConcurrency: 48, uploadKbps: DESKTOP_SPEED_KBPS_MAX, downloadKbps: 1 }))).toBe(true)
 		expect(speed(client({ preset: "turbo" }))).toBe(false)
+		expect(speed(client({ preset: "custom", customConcurrency: 1 }))).toBe(true)
+		expect(speed(client({ customConcurrency: 0 }))).toBe(false)
+		expect(speed(client({ customConcurrency: 161 }))).toBe(false)
+		expect(speed(client({ customConcurrency: 2.5 }))).toBe(false)
 		expect(speed(client({ uploadKbps: -1 }))).toBe(false)
 		expect(speed(client({ uploadKbps: 1.5 }))).toBe(false)
 		expect(speed(client({ downloadKbps: DESKTOP_SPEED_KBPS_MAX + 1 }))).toBe(false)

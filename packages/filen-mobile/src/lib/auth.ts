@@ -9,8 +9,10 @@ import {
 	getResolvedTransferConfig,
 	buildJsClientConfig,
 	bandwidthKbpsToSdkArg,
+	resolveTransferValues,
 	DEFAULT_RESOLVED_TRANSFER_CONFIG
 } from "@/features/settings/transferConfig"
+import type { TransferPerformanceChoice } from "@filen/shared"
 import secureStore, { useSecureStore } from "@/lib/secureStore"
 import { useEffect, useState } from "react"
 import transfers from "@/features/transfers/transfers"
@@ -269,8 +271,8 @@ class Auth {
 
 	/**
 	 * Re-read the persisted transfer prefs and refresh the in-memory SDK config. Called at boot
-	 * (setup.ts) before the client is built, and on a fresh login. The preset values
-	 * (concurrency/memory) take effect only on the NEXT client construction (= app restart).
+	 * (setup.ts) before the client is built, and on a fresh login. A change while signed in goes
+	 * through applyTransferPerformance instead.
 	 */
 	public async loadTransferConfig(): Promise<void> {
 		const resolved = await getResolvedTransferConfig()
@@ -301,6 +303,37 @@ class Auth {
 			await this.authedClient.setBandwidthLimits(bandwidthKbpsToSdkArg(uploadKbps), bandwidthKbpsToSdkArg(downloadKbps))
 		} catch (e) {
 			logger.warn("auth", "applyBandwidthLimits failed — will apply on next launch", { err: e })
+		}
+	}
+
+	/**
+	 * Apply a transfer performance choice (chunk concurrency + file-IO memory budget) to the LIVE
+	 * authed client, and mirror it into the config later constructions read. The authed and unauthed
+	 * clients share state, so one call covers both. No-op (config-only) when logged out. Never
+	 * throws — a failure just means it applies on the next launch (the caller already persisted it).
+	 */
+	public async applyTransferPerformance(choice: TransferPerformanceChoice, customConcurrency: number): Promise<void> {
+		const resolved = resolveTransferValues(choice, customConcurrency)
+
+		this.jsClientBaseConfig = {
+			...this.jsClientBaseConfig,
+			concurrency: resolved.concurrency,
+			fileIoMemoryBudget: resolved.fileIoMemoryBudget
+		}
+		this.maxIoMemoryUsage = resolved.maxIoMemoryUsage
+		this.maxParallelRequests = resolved.maxParallelRequests
+
+		if (!this.authedClient) {
+			return
+		}
+
+		try {
+			await Promise.all([
+				this.authedClient.setConcurrency(resolved.concurrency),
+				this.authedClient.setFileIoMemoryBudget(resolved.fileIoMemoryBudget)
+			])
+		} catch (e) {
+			logger.warn("auth", "applyTransferPerformance failed — will apply on next launch", { err: e, choice, customConcurrency })
 		}
 	}
 

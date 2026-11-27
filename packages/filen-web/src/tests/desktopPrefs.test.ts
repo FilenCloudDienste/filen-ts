@@ -17,8 +17,8 @@ const PREFS: DesktopPrefs = {
 	notificationSound: true,
 	downloadDirectory: null,
 	speed: {
-		sync: { preset: "balanced", uploadKbps: 0, downloadKbps: 0 },
-		transfers: { preset: "balanced", uploadKbps: 0, downloadKbps: 0 }
+		sync: { preset: "balanced", customConcurrency: 48, uploadKbps: 0, downloadKbps: 0 },
+		transfers: { preset: "balanced", customConcurrency: 48, uploadKbps: 0, downloadKbps: 0 }
 	}
 }
 
@@ -155,7 +155,7 @@ describe("speed group", () => {
 			expect(useDesktopPrefs.getState().prefs?.speed.transfers.downloadKbps).toBe(2500)
 		})
 		expect(prefs.set).toHaveBeenCalledWith({
-			speed: { sync: PREFS.speed.sync, transfers: { preset: "balanced", uploadKbps: 0, downloadKbps: 2500 } }
+			speed: { sync: PREFS.speed.sync, transfers: { preset: "balanced", customConcurrency: 48, uploadKbps: 0, downloadKbps: 2500 } }
 		})
 	})
 

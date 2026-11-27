@@ -237,10 +237,19 @@ export const settings = {
 	settingsAdvancedTransferDescription:
 		"Tune how many transfers Filen runs in parallel and how much memory they may use. Desktop sync and network drives have their own settings.",
 	settingsAdvancedTransferPreset: "Transfer performance",
+	/** Transfer preset: the fewest simultaneous transfers, for slow or unstable connections */
+	settingsAdvancedPresetSlowConnection: "Slow connection",
 	settingsAdvancedPresetBatterySaver: "Battery saver",
 	settingsAdvancedPresetBalanced: "Balanced",
 	settingsAdvancedPresetPerformance: "Performance",
 	settingsAdvancedPresetMaximum: "Maximum",
+	/** Transfer preset: a number of simultaneous chunks the user enters themselves, in the row shown below it */
+	settingsAdvancedPresetCustom: "Custom",
+	/** Number input shown while the transfer preset is Custom: how many file chunks upload or download at once */
+	settingsAdvancedTransferChunks: "Simultaneous chunks",
+	/** Description under Simultaneous chunks, shown while the transfer preset is Custom */
+	settingsAdvancedTransferChunksDescription:
+		"How many file chunks upload or download at once. Fewer is steadier on slow or unstable connections.",
 	/** Toast: a stored transfer preset could not be applied to the running client; it applies the next time Filen starts */
 	settingsAdvancedTransferApplyFailed: "Couldn't apply this now. It takes effect the next time Filen starts.",
 	/** Shown after a change to a setting read only at startup (archive memory) */

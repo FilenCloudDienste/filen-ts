@@ -451,7 +451,7 @@ describe("createNativeSupervisor", () => {
 
 	it("sends a speed change to a running host, never starts one for it, and starts the next host with it", async () => {
 		const { supervisor, forks, deps, last } = harness()
-		const changed = { ...SPEED, transfers: { preset: "maximum" as const, uploadKbps: 500, downloadKbps: 0 } }
+		const changed = { ...SPEED, transfers: { preset: "maximum" as const, customConcurrency: 48, uploadKbps: 500, downloadKbps: 0 } }
 		const speeds = () => last().sent.filter(message => message.t === "speed")
 
 		deps.demand.mockResolvedValue(false)
@@ -465,7 +465,7 @@ describe("createNativeSupervisor", () => {
 		// Newer than the stored speed the start read.
 		expect(last().sent[0]).toMatchObject({ t: "init", speed: changed })
 
-		const later = { ...changed, sync: { preset: "batterySaver" as const, uploadKbps: 0, downloadKbps: 100 } }
+		const later = { ...changed, sync: { preset: "batterySaver" as const, customConcurrency: 48, uploadKbps: 0, downloadKbps: 100 } }
 
 		supervisor.setSpeed(later)
 		expect(speeds()).toEqual([{ t: "speed", speed: later }])
@@ -473,7 +473,7 @@ describe("createNativeSupervisor", () => {
 
 	it("starts the host with the stored speed", async () => {
 		const { supervisor, deps, last } = harness()
-		const stored = { ...SPEED, sync: { preset: "performance" as const, uploadKbps: 16, downloadKbps: 32 } }
+		const stored = { ...SPEED, sync: { preset: "performance" as const, customConcurrency: 48, uploadKbps: 16, downloadKbps: 32 } }
 
 		deps.speed.mockResolvedValue(stored)
 		supervisor.ensure("launch")

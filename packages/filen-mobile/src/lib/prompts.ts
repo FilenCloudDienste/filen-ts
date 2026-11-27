@@ -71,9 +71,10 @@ export type InputPromptOptions = {
 	/**
 	 * Field semantics for the keyboard. A plain-text prompt otherwise capitalizes the first letter,
 	 * which is right for the names these prompts mostly collect and wrong for an address — so an
-	 * address says so, and gets the address keyboard on both platforms into the bargain.
+	 * address says so, and gets the address keyboard on both platforms into the bargain. A count asks
+	 * for the digit pad.
 	 */
-	keyboardType?: "default" | "email-address"
+	keyboardType?: "default" | "email-address" | "number-pad"
 }
 
 // Serializes native dialogs (one at a time) so concurrent callers do not stack alerts.

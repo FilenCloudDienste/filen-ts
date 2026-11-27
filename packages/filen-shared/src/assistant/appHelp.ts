@@ -289,6 +289,12 @@ const APP_HELP_ROWS = [
 		descriptionKey: "settings:settingsAdvancedTransferDescription"
 	},
 	{
+		id: "transferChunks",
+		section: "advanced",
+		titleKey: "settings:settingsAdvancedTransferChunks",
+		descriptionKey: "settings:settingsAdvancedTransferChunksDescription"
+	},
+	{
 		id: "archiveMemory",
 		section: "advanced",
 		titleKey: "settings:settingsAdvancedArchiveMemory",

@@ -4,7 +4,7 @@
 import type { AssistantGenerateRequest, AssistantGenerateResult } from "./assistant/loop"
 import type { DesktopLockAfterSeconds } from "./desktopLock"
 import type { DesktopShellStringsPayload } from "./desktopShellStrings"
-import type { TransferPerformancePreset } from "./transferPresets"
+import type { TransferPerformanceChoice } from "./transferPresets"
 
 export type DesktopPlatform = "darwin" | "win32" | "linux"
 
@@ -66,10 +66,12 @@ export interface DesktopPrefs {
 	speed: DesktopSpeed
 }
 
-// One SDK client's speed: its preset (concurrency, file-IO budget, request rate) and bandwidth limits in KB/s, 0 for
-// unlimited, at most DESKTOP_SPEED_KBPS_MAX.
+// One SDK client's speed: its preset (concurrency, file-IO budget, request rate), the chunks in flight while the preset
+// is "custom" (kept while another is chosen), and bandwidth limits in KB/s, 0 for unlimited, at most
+// DESKTOP_SPEED_KBPS_MAX.
 export interface DesktopClientSpeed {
-	preset: TransferPerformancePreset
+	preset: TransferPerformanceChoice
+	customConcurrency: number
 	uploadKbps: number
 	downloadKbps: number
 }

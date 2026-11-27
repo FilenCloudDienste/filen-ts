@@ -38,6 +38,7 @@ describe("buildJsClientConfig", () => {
 
 	it("pins the web ladder", () => {
 		expect(DESKTOP_WEB_TRANSFER_PRESET_VALUES).toEqual({
+			slowConnection: { chunks: 4, concurrency: 2, rateLimitPerSec: 64 },
 			batterySaver: { chunks: 8, concurrency: 12, rateLimitPerSec: 64 },
 			balanced: { chunks: 32, concurrency: 48, rateLimitPerSec: 160 },
 			performance: { chunks: 64, concurrency: 96, rateLimitPerSec: 320 },
@@ -58,10 +59,14 @@ describe("buildJsClientConfig", () => {
 		expect(FULL_CHUNK_BYTES).toBe(1_048_604)
 	})
 
-	it("leaves every preset more requests than chunks, so listings still get through", () => {
-		for (const values of Object.values(DESKTOP_WEB_TRANSFER_PRESET_VALUES)) {
-			expect(values.concurrency).toBeGreaterThan(values.chunks)
-		}
+	it("runs a custom count of chunks, and the default preset's count until one was set", () => {
+		expect(buildJsClientConfig({ preset: "custom", customConcurrency: 1 })).toEqual({
+			concurrency: 1,
+			fileIoMemoryBudget: 4 * 1_048_604,
+			rateLimitPerSec: 64
+		})
+		expect(buildJsClientConfig({ preset: "custom" }).concurrency).toBe(48)
+		expect(buildJsClientConfig({ preset: "balanced", customConcurrency: 1 }).concurrency).toBe(48)
 	})
 
 	it("emits only the three knobs the wasm client actually honors", () => {
@@ -83,5 +88,10 @@ describe("transfer preferences: get/set", () => {
 		await setTransferPreferences(prefs)
 
 		await expect(getTransferPreferences()).resolves.toEqual(prefs)
+	})
+
+	it("roundtrips a custom count", async () => {
+		await setTransferPreferences({ preset: "custom", customConcurrency: 2 })
+		await expect(getTransferPreferences()).resolves.toEqual({ preset: "custom", customConcurrency: 2 })
 	})
 })

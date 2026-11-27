@@ -183,7 +183,10 @@ describe("native host", () => {
 		const host = setup()
 
 		host.send(init())
-		host.send({ t: "speed", speed: { ...SPEED, transfers: { preset: "maximum", uploadKbps: 8, downloadKbps: 2000 } } })
+		host.send({
+			t: "speed",
+			speed: { ...SPEED, transfers: { preset: "maximum", customConcurrency: 48, uploadKbps: 8, downloadKbps: 2000 } }
+		})
 		await vi.waitFor(() => {
 			expect(transfers.setBandwidthLimits).toHaveBeenCalled()
 		})
@@ -200,7 +203,7 @@ describe("native host", () => {
 		const host = setup()
 
 		host.send({ t: "speed", speed: SPEED })
-		host.send({ t: "speed", speed: { ...SPEED, sync: { preset: "turbo", uploadKbps: 0, downloadKbps: 0 } } })
+		host.send({ t: "speed", speed: { ...SPEED, sync: { preset: "turbo", customConcurrency: 48, uploadKbps: 0, downloadKbps: 0 } } })
 
 		expect(host.posts).toEqual([])
 		expect(logged).toEqual(["rejected a malformed message"])

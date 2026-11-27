@@ -36,7 +36,7 @@ import {
 	type DesktopTransferError,
 	type DesktopVfsTuning
 } from "@filen/shared/desktop"
-import { TRANSFER_PERFORMANCE_PRESETS } from "@filen/shared/transferPresets"
+import { DESKTOP_WEB_CUSTOM_CONCURRENCY_MAX, TRANSFER_PERFORMANCE_CHOICES } from "@filen/shared/transferPresets"
 import { SESSION_BLOB_MAX_LENGTH, TRANSFER_ITEMS_MAX } from "./channels.ts"
 
 // The messages between main and the native host (the utility process that owns the sync engine), validated on both
@@ -856,7 +856,8 @@ const kbpsSchema = type.number.divisibleBy(1).atLeast(0).atMost(DESKTOP_SPEED_KB
 
 const clientSpeedSchema = pinned<DesktopClientSpeed>()(
 	type({
-		preset: type.enumerated(...TRANSFER_PERFORMANCE_PRESETS),
+		preset: type.enumerated(...TRANSFER_PERFORMANCE_CHOICES),
+		customConcurrency: type.number.divisibleBy(1).atLeast(1).atMost(DESKTOP_WEB_CUSTOM_CONCURRENCY_MAX),
 		uploadKbps: kbpsSchema,
 		downloadKbps: kbpsSchema,
 		"+": "reject"

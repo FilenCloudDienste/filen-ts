@@ -2,7 +2,7 @@ import { useId, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { DESKTOP_SPEED_KBPS_MAX, type DesktopClientSpeed, type DesktopSpeed } from "@filen/shared/desktop"
-import { TRANSFER_PERFORMANCE_PRESETS } from "@filen/shared"
+import { DESKTOP_WEB_CUSTOM_CONCURRENCY_MAX, TRANSFER_PERFORMANCE_CHOICES } from "@filen/shared"
 import { SettingsBlock, SettingsGroup } from "@/features/settings/components/settingsLayout"
 import { SettingsNumberRow, SettingsSelectRow } from "@/features/settings/components/settingRows"
 import { PRESET_LABEL_KEYS } from "@/features/settings/lib/presetLabels"
@@ -41,7 +41,7 @@ export function SpeedSettings() {
 			})
 	}
 
-	const presetOptions = TRANSFER_PERFORMANCE_PRESETS.map(preset => ({ value: preset, label: t(PRESET_LABEL_KEYS[preset]) }))
+	const presetOptions = TRANSFER_PERFORMANCE_CHOICES.map(preset => ({ value: preset, label: t(PRESET_LABEL_KEYS[preset]) }))
 
 	return (
 		<SettingsGroup title={t("settingsDesktopSpeedTitle")}>
@@ -70,6 +70,20 @@ export function SpeedSettings() {
 							change(client, { preset })
 						}}
 					/>
+					{speed?.[client].preset === "custom" ? (
+						<SettingsNumberRow
+							label={t("settingsAdvancedTransferChunks")}
+							description={t("settingsAdvancedTransferChunksDescription")}
+							id={`desktop-speed-${client}-chunks`}
+							value={speed[client].customConcurrency}
+							min={1}
+							max={DESKTOP_WEB_CUSTOM_CONCURRENCY_MAX}
+							disabled={pending}
+							onChange={customConcurrency => {
+								change(client, { customConcurrency })
+							}}
+						/>
+					) : null}
 					<SettingsNumberRow
 						label={t("settingsDesktopSpeedUploadLimit")}
 						id={`desktop-speed-${client}-upload`}

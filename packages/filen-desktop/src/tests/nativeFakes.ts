@@ -37,8 +37,8 @@ import type { TransferClient, TransferSdk } from "../native/transfers.ts"
 
 // The speed main sends by default: both clients balanced, unlimited.
 export const SPEED: DesktopSpeed = {
-	sync: { preset: "balanced", uploadKbps: 0, downloadKbps: 0 },
-	transfers: { preset: "balanced", uploadKbps: 0, downloadKbps: 0 }
+	sync: { preset: "balanced", customConcurrency: 48, uploadKbps: 0, downloadKbps: 0 },
+	transfers: { preset: "balanced", customConcurrency: 48, uploadKbps: 0, downloadKbps: 0 }
 }
 
 // The addon's values the host reads, with the napi enums' numbers.

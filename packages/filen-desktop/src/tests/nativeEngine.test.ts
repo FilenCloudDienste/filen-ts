@@ -123,8 +123,8 @@ describe("clientsFromSession", () => {
 		}))
 		const sdk = { ...fakeSdk, UnauthJsClient: { fromConfig } } as unknown as typeof fakeSdk
 		const clients = clientsFromSession(sdk, blob, "Info", {
-			sync: { preset: "batterySaver", uploadKbps: 0, downloadKbps: 0 },
-			transfers: { preset: "performance", uploadKbps: 4, downloadKbps: 900 }
+			sync: { preset: "batterySaver", customConcurrency: 48, uploadKbps: 0, downloadKbps: 0 },
+			transfers: { preset: "performance", customConcurrency: 48, uploadKbps: 4, downloadKbps: 900 }
 		})
 
 		expect(fromConfig).toHaveBeenCalledTimes(2)

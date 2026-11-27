@@ -2,11 +2,16 @@ import { type } from "arktype"
 import type { DesktopClientSpeed, DesktopPrefs } from "@filen/shared/desktop"
 import { DEFAULT_DESKTOP_LOCK_AFTER_SECONDS, DESKTOP_LOCK_AFTER_SECONDS } from "@filen/shared/desktopLock"
 import { type AtomicFile, readStoreFile } from "./atomicFile.ts"
-import { DEFAULT_TRANSFER_PERFORMANCE_PRESET } from "@filen/shared/transferPresets"
+import { DEFAULT_TRANSFER_PERFORMANCE_PRESET, DESKTOP_WEB_TRANSFER_PRESET_VALUES } from "@filen/shared/transferPresets"
 import { absolutePathSchema, speedSchema } from "../shared/nativeProtocol.ts"
 import { serialQueue } from "../shared/serial.ts"
 
-const DEFAULT_CLIENT_SPEED: DesktopClientSpeed = { preset: DEFAULT_TRANSFER_PERFORMANCE_PRESET, uploadKbps: 0, downloadKbps: 0 }
+const DEFAULT_CLIENT_SPEED: DesktopClientSpeed = {
+	preset: DEFAULT_TRANSFER_PERFORMANCE_PRESET,
+	customConcurrency: DESKTOP_WEB_TRANSFER_PRESET_VALUES[DEFAULT_TRANSFER_PERFORMANCE_PRESET].concurrency,
+	uploadKbps: 0,
+	downloadKbps: 0
+}
 
 export const DEFAULT_PREFS: DesktopPrefs = {
 	minimizeToTray: false,

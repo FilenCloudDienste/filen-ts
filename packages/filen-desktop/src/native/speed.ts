@@ -1,6 +1,6 @@
 import type { JsClient, JsClientConfig } from "@filen/sdk-rs"
 import type { DesktopClientSpeed, DesktopSpeed } from "@filen/shared/desktop"
-import { DESKTOP_WEB_TRANSFER_PRESET_VALUES, FULL_CHUNK_BYTES } from "@filen/shared/transferPresets"
+import { FULL_CHUNK_BYTES, desktopWebTransferValues } from "@filen/shared/transferPresets"
 
 // The host's two clients' speed: each is built with its preset and limits, and a change reaches the running clients
 // through their setters, never a rebuild.
@@ -17,7 +17,7 @@ export type SpeedConfig = {
 }
 
 export function speedConfig(speed: DesktopClientSpeed): SpeedConfig {
-	const { chunks, concurrency, rateLimitPerSec } = DESKTOP_WEB_TRANSFER_PRESET_VALUES[speed.preset]
+	const { chunks, concurrency, rateLimitPerSec } = desktopWebTransferValues(speed.preset, speed.customConcurrency)
 
 	return {
 		concurrency,
@@ -43,7 +43,12 @@ function hasSetters(client: object): client is SpeedClient {
 }
 
 function sameSpeed(a: DesktopClientSpeed, b: DesktopClientSpeed): boolean {
-	return a.preset === b.preset && a.uploadKbps === b.uploadKbps && a.downloadKbps === b.downloadKbps
+	return (
+		a.preset === b.preset &&
+		a.customConcurrency === b.customConcurrency &&
+		a.uploadKbps === b.uploadKbps &&
+		a.downloadKbps === b.downloadKbps
+	)
 }
 
 export interface SpeedApplier {

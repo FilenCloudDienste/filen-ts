@@ -466,7 +466,9 @@ export const settings = {
 	transfer_performance_description: "How aggressively transfers run — higher uses more battery, memory and data",
 	/** Advanced → Transfers — bandwidth picker option for no limit */
 	transfer_limit_unlimited: "Unlimited",
-	/** Advanced → Transfers — performance preset: gentlest (fewest parallel transfers) */
+	/** Advanced → Transfers — performance preset: fewest parallel chunks, steadiest on slow or unstable connections */
+	transfer_preset_slow_connection: "Slow connection",
+	/** Advanced → Transfers — performance preset: gentle (few parallel transfers) */
 	transfer_preset_battery_saver: "Battery saver",
 	/** Advanced → Transfers — performance preset: default */
 	transfer_preset_balanced: "Balanced",
@@ -474,10 +476,16 @@ export const settings = {
 	transfer_preset_performance: "Performance",
 	/** Advanced → Transfers — performance preset: most aggressive */
 	transfer_preset_maximum: "Maximum",
-	/** Advanced → Transfers — title of the dialog shown after changing the performance preset */
-	transfer_performance_updated_title: "Performance updated",
-	/** Advanced → Transfers — body of the dialog telling the user the change applies on restart */
-	transfer_performance_restart_required: "This change will take effect the next time you restart the app.",
+	/** Advanced → Transfers — performance picker option that opens a prompt for a custom number of simultaneous chunks */
+	transfer_preset_custom: "Custom…",
+	/** Advanced → Transfers — performance row value for the custom choice; {{value}} is the number of simultaneous chunks */
+	transfer_preset_custom_value: "Custom ({{value}})",
+	/** Advanced → Transfers — title of the prompt asking for a custom number of simultaneous file chunks */
+	transfer_custom_concurrency_title: "Simultaneous chunks",
+	/** Advanced → Transfers — body of the custom chunk count prompt; {{max}} is the largest allowed number */
+	transfer_custom_concurrency_message: "How many file chunks transfer at once (1–{{max}}). Fewer is steadier on slow or unstable connections.",
+	/** Advanced → Transfers — error when the custom chunk count is not a whole number in range; {{max}} is the largest allowed number */
+	transfer_custom_concurrency_invalid: "Enter a whole number from 1 to {{max}}.",
 
 	// ── Third party notices (thirdPartyNotices.tsx / thirdPartyNotice.tsx) ─────
 	/** More → row opening the third-party attribution list, and its screen title */

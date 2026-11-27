@@ -63,8 +63,8 @@ describe("parsePrefs", () => {
 			notificationSound: false,
 			downloadDirectory: null,
 			speed: {
-				sync: { preset: "balanced", uploadKbps: 0, downloadKbps: 0 },
-				transfers: { preset: "balanced", uploadKbps: 0, downloadKbps: 0 }
+				sync: { preset: "balanced", customConcurrency: 48, uploadKbps: 0, downloadKbps: 0 },
+				transfers: { preset: "balanced", customConcurrency: 48, uploadKbps: 0, downloadKbps: 0 }
 			}
 		})
 	})
@@ -97,8 +97,8 @@ describe("prefsPatchSchema", () => {
 
 describe("speed", () => {
 	const speed = {
-		sync: { preset: "batterySaver", uploadKbps: 0, downloadKbps: 500 },
-		transfers: { preset: "maximum", uploadKbps: 1000, downloadKbps: 0 }
+		sync: { preset: "batterySaver", customConcurrency: 48, uploadKbps: 0, downloadKbps: 500 },
+		transfers: { preset: "maximum", customConcurrency: 48, uploadKbps: 1000, downloadKbps: 0 }
 	} as const
 
 	it("the page sets both clients' speed, validated", () => {

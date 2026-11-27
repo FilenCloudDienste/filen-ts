@@ -18,13 +18,13 @@ const { setHeic, setDotFilen, setTransfer, setArchive, refetch, applyTransferCon
 	forgetHandoff: vi.fn()
 }))
 
-const MAXIMUM_CONFIG = { concurrency: 160, fileIoMemoryBudget: 1, rateLimitPerSec: 640 }
+const CHOSEN_CONFIG = { concurrency: 160, fileIoMemoryBudget: 1, rateLimitPerSec: 640 }
 
 vi.mock("@/features/drive/lib/heicUpload", () => ({ setHeicUploadConvertPreference: setHeic }))
 vi.mock("@/features/drive/lib/preferences", () => ({ DEFAULT_SHOW_DOT_FILEN: false, setShowDotFilen: setDotFilen }))
 vi.mock("@/features/settings/lib/transferConfig", () => ({
 	setTransferPreferences: setTransfer,
-	buildJsClientConfig: (prefs: { preset: string }) => (prefs.preset === "maximum" ? MAXIMUM_CONFIG : null),
+	buildJsClientConfig: (prefs: { preset: string }) => (prefs.preset === "custom" ? CHOSEN_CONFIG : null),
 	rememberAppliedTransferConfig: remember
 }))
 vi.mock("@/features/drive/lib/saveDownload", () => ({ forgetSwClientHandoff: forgetHandoff }))
@@ -136,9 +136,9 @@ describe("the transfer preset row's live apply", () => {
 
 		await change()
 
-		expect(remember).toHaveBeenCalledExactlyOnceWith(MAXIMUM_CONFIG)
+		expect(remember).toHaveBeenCalledExactlyOnceWith(CHOSEN_CONFIG)
 		expect(forgetHandoff).toHaveBeenCalledOnce()
-		expect(applyTransferConfig).toHaveBeenCalledExactlyOnceWith(MAXIMUM_CONFIG)
+		expect(applyTransferConfig).toHaveBeenCalledExactlyOnceWith(CHOSEN_CONFIG)
 		expect(toastError).not.toHaveBeenCalled()
 		expect(toastInfo).not.toHaveBeenCalled()
 	})

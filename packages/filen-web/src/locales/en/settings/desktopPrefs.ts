@@ -38,7 +38,7 @@ export const settingsDesktopPrefs = {
 	settingsDesktopSpeedSync: "Sync",
 	/** Desktop settings, Speed group — subheading: the settings for drive uploads and downloads (not sync, not the network drive) */
 	settingsDesktopSpeedTransfers: "Uploads & downloads",
-	/** Desktop settings, Speed group — select label: the performance preset (Battery saver … Maximum) */
+	/** Desktop settings, Speed group — select label: the performance preset (Slow connection … Maximum, or Custom) */
 	settingsDesktopSpeedPreset: "Performance",
 	/** Desktop settings, Speed group — input label: the upload bandwidth limit in kilobytes per second */
 	settingsDesktopSpeedUploadLimit: "Upload limit",

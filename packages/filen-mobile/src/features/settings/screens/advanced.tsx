@@ -5,12 +5,20 @@ import { Fragment, useState, useEffect } from "react"
 import { Platform, AppState } from "react-native"
 import useDismissStack from "@/hooks/useDismissStack"
 import { Image } from "expo-image"
-import { run, formatBytes, TRANSFER_PERFORMANCE_PRESETS, type TransferPerformancePreset } from "@filen/shared"
+import {
+	run,
+	formatBytes,
+	TRANSFER_PERFORMANCE_PRESETS,
+	MOBILE_CUSTOM_CONCURRENCY_MAX,
+	mobileTransferValues,
+	type TransferPerformancePreset,
+	type TransferPerformanceChoice
+} from "@filen/shared"
 import SettingsHeader from "@/components/ui/settingsHeader"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import { shareTmpFile } from "@/lib/share"
 import prompts from "@/lib/prompts"
-import { confirmPrompt } from "@/lib/promptFlow"
+import { confirmPrompt, inputPrompt } from "@/lib/promptFlow"
 import alerts from "@/lib/alerts"
 import thumbnails from "@/lib/thumbnails"
 import fileCache from "@/lib/fileCache"
@@ -42,7 +50,11 @@ import { actionSheet } from "@/providers/actionSheet.provider"
 import {
 	TRANSFER_BANDWIDTH_PRESETS_KBPS,
 	kbpsToMbLabel,
-	useTransferPerformancePreset,
+	normalizeTransferChoice,
+	normalizeCustomConcurrency,
+	parseCustomConcurrency,
+	useTransferPerformanceChoice,
+	useCustomConcurrency,
 	useUploadLimitKbps,
 	useDownloadLimitKbps
 } from "@/features/settings/transferConfig"
@@ -178,15 +190,67 @@ function Advanced() {
 
 	const [showDotFilen, setShowDotFilen] = useShowDotFilen()
 
-	const [transferPreset, setTransferPreset] = useTransferPerformancePreset()
+	const [transferChoiceRaw, setTransferChoice] = useTransferPerformanceChoice()
+	const [customConcurrencyRaw, setCustomConcurrency] = useCustomConcurrency()
+	const transferChoice = normalizeTransferChoice(transferChoiceRaw)
+	const customConcurrency = normalizeCustomConcurrency(customConcurrencyRaw)
 	const [uploadLimitKbps, setUploadLimitKbps] = useUploadLimitKbps()
 	const [downloadLimitKbps, setDownloadLimitKbps] = useDownloadLimitKbps()
 
 	const presetLabels: Record<TransferPerformancePreset, string> = {
+		slowConnection: t("transfer_preset_slow_connection"),
 		batterySaver: t("transfer_preset_battery_saver"),
 		balanced: t("transfer_preset_balanced"),
 		performance: t("transfer_preset_performance"),
 		maximum: t("transfer_preset_maximum")
+	}
+
+	const choiceLabel = (choice: TransferPerformanceChoice): string =>
+		choice === "custom" ? t("transfer_preset_custom_value", { value: customConcurrency }) : presetLabels[choice]
+
+	const applyTransferChoice = (choice: TransferPerformanceChoice, custom: number): void => {
+		setTransferChoice(choice)
+
+		void auth.applyTransferPerformance(choice, custom)
+	}
+
+	const promptCustomConcurrency = async (): Promise<void> => {
+		const input = await inputPrompt(
+			{
+				title: t("transfer_custom_concurrency_title"),
+				message: t("transfer_custom_concurrency_message", { max: MOBILE_CUSTOM_CONCURRENCY_MAX }),
+				defaultValue: String(mobileTransferValues(transferChoice, customConcurrency).concurrency),
+				keyboardType: "number-pad",
+				okText: t("save"),
+				cancelText: t("cancel")
+			},
+			{
+				tag: "settings",
+				message: "custom transfer concurrency prompt failed"
+			},
+			{
+				trim: true
+			}
+		)
+
+		if (input === null) {
+			return
+		}
+
+		const value = parseCustomConcurrency(input)
+
+		if (value === null) {
+			alerts.error(t("transfer_custom_concurrency_invalid", { max: MOBILE_CUSTOM_CONCURRENCY_MAX }))
+
+			return
+		}
+
+		if (transferChoice === "custom" && value === customConcurrency) {
+			return
+		}
+
+		setCustomConcurrency(value)
+		applyTransferChoice("custom", value)
 	}
 
 	const bandwidthLabel = (kbps: number | null): string => (kbps === null ? t("transfer_limit_unlimited") : kbpsToMbLabel(kbps))
@@ -420,28 +484,34 @@ function Advanced() {
 								subTitle: t("transfer_performance_description"),
 								rightItem: {
 									type: "text",
-									value: presetLabels[transferPreset]
+									value: choiceLabel(transferChoice)
 								},
 								onPress: () => {
 									actionSheet.show({
-										buttons: TRANSFER_PERFORMANCE_PRESETS.map(preset => ({
-											title:
-												preset === transferPreset
-													? `${presetLabels[preset]} (${t("current")})`
-													: presetLabels[preset],
-											onPress: () => {
-												if (preset === transferPreset) {
-													return
+										buttons: [
+											...TRANSFER_PERFORMANCE_PRESETS.map(preset => ({
+												title:
+													preset === transferChoice
+														? `${presetLabels[preset]} (${t("current")})`
+														: presetLabels[preset],
+												onPress: () => {
+													if (preset === transferChoice) {
+														return
+													}
+
+													applyTransferChoice(preset, customConcurrency)
 												}
-
-												setTransferPreset(preset)
-
-												void prompts.info({
-													title: t("transfer_performance_updated_title"),
-													message: t("transfer_performance_restart_required")
-												})
+											})),
+											{
+												title:
+													transferChoice === "custom"
+														? `${choiceLabel("custom")} (${t("current")})`
+														: t("transfer_preset_custom"),
+												onPress: () => {
+													void promptCustomConcurrency()
+												}
 											}
-										}))
+										]
 									})
 								}
 							}

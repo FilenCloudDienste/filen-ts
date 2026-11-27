@@ -2,11 +2,13 @@ import { type, type Type } from "arktype"
 import type { JsClientConfig } from "@filen/sdk-rs"
 import { kvPreference } from "@/lib/storage/preference"
 import {
+	DESKTOP_WEB_CUSTOM_CONCURRENCY_MAX,
 	DESKTOP_WEB_TRANSFER_PRESET_VALUES,
 	FULL_CHUNK_BYTES,
-	TRANSFER_PERFORMANCE_PRESETS,
-	type TransferPerformancePreset,
-	DEFAULT_TRANSFER_PERFORMANCE_PRESET
+	TRANSFER_PERFORMANCE_CHOICES,
+	type TransferPerformanceChoice,
+	DEFAULT_TRANSFER_PERFORMANCE_PRESET,
+	desktopWebTransferValues
 } from "@filen/shared"
 
 // Advanced settings → transfer performance preset. Scoped to THIS web app's own uploads/downloads
@@ -28,8 +30,11 @@ import {
 // client; the numbers behind them are DESKTOP_WEB_TRANSFER_PRESET_VALUES (@filen/shared), shared with the
 // desktop shell. Mobile's ladder is held low by the iOS file-descriptor ceiling, which a browser tab does not have.
 
+// `customConcurrency`: the chunks in flight while `preset` is "custom", kept while another preset is chosen; missing
+// until a custom count was first set.
 export interface TransferPreferences {
-	preset: TransferPerformancePreset
+	preset: TransferPerformanceChoice
+	customConcurrency?: number
 }
 
 export const DEFAULT_TRANSFER_PREFERENCES: TransferPreferences = {
@@ -37,8 +42,14 @@ export const DEFAULT_TRANSFER_PREFERENCES: TransferPreferences = {
 }
 
 const transferPreferencesSchema: Type<TransferPreferences> = type({
-	preset: type.enumerated(...TRANSFER_PERFORMANCE_PRESETS)
+	preset: type.enumerated(...TRANSFER_PERFORMANCE_CHOICES),
+	"customConcurrency?": type.number.divisibleBy(1).atLeast(1).atMost(DESKTOP_WEB_CUSTOM_CONCURRENCY_MAX)
 })
+
+// The custom count in effect: the stored one, else what the default preset runs.
+export function customConcurrencyOf(prefs: TransferPreferences): number {
+	return prefs.customConcurrency ?? DESKTOP_WEB_TRANSFER_PRESET_VALUES[DEFAULT_TRANSFER_PERFORMANCE_PRESET].concurrency
+}
 
 export const { get: getTransferPreferences, set: setTransferPreferences } = kvPreference({
 	key: "settings.transferConfig.v1",
@@ -54,10 +65,10 @@ export interface TransferClientConfig {
 	rateLimitPerSec: number
 }
 
-// Pure preset -> JsClientConfig mapping, called from boot.ts (main thread, after the preference is
+// Pure choice -> JsClientConfig mapping, called from boot.ts (main thread, after the preference is
 // read from kv) and from the settings row, and unit-tested without touching the worker or wasm at all.
 export function buildJsClientConfig(prefs: TransferPreferences): TransferClientConfig {
-	const { chunks, concurrency, rateLimitPerSec } = DESKTOP_WEB_TRANSFER_PRESET_VALUES[prefs.preset]
+	const { chunks, concurrency, rateLimitPerSec } = desktopWebTransferValues(prefs.preset, customConcurrencyOf(prefs))
 
 	return {
 		concurrency,

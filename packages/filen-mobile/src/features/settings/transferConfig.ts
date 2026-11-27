@@ -1,13 +1,19 @@
 import secureStore, { useSecureStore } from "@/lib/secureStore"
 import { LogLevel, type JsClientConfig } from "@filen/sdk-rs"
 import {
-	TRANSFER_PERFORMANCE_PRESETS,
-	type TransferPerformancePreset,
+	TRANSFER_PERFORMANCE_CHOICES,
+	type TransferPerformanceChoice,
 	DEFAULT_TRANSFER_PERFORMANCE_PRESET,
-	TRANSFER_PRESET_VALUES
+	TRANSFER_PRESET_VALUES,
+	MOBILE_CUSTOM_CONCURRENCY_MAX,
+	clampCustomConcurrency,
+	mobileTransferValues
 } from "@filen/shared"
 
+// Holds a TransferPerformanceChoice (a preset name, or "custom").
 export const TRANSFER_PERFORMANCE_PRESET_SECURE_STORE_KEY = "transfers.performancePreset"
+// The chunk count the "custom" choice stands for.
+export const TRANSFER_CUSTOM_CONCURRENCY_SECURE_STORE_KEY = "transfers.customConcurrency"
 export const TRANSFER_UPLOAD_LIMIT_KBPS_SECURE_STORE_KEY = "transfers.uploadLimitKbps"
 export const TRANSFER_DOWNLOAD_LIMIT_KBPS_SECURE_STORE_KEY = "transfers.downloadLimitKbps"
 
@@ -28,7 +34,10 @@ export type ResolvedTransferConfig = {
 	downloadKbps: number | undefined
 }
 
-// concurrency (from TRANSFER_PRESET_VALUES) caps the SDK's in-flight chunk transfers; every other
+// A custom count that was never set (or is unreadable) starts at the default preset's.
+export const DEFAULT_CUSTOM_CONCURRENCY = TRANSFER_PRESET_VALUES[DEFAULT_TRANSFER_PERFORMANCE_PRESET].concurrency
+
+// concurrency (from mobileTransferValues) caps the SDK's in-flight chunk transfers; every other
 // request (listings, renames, upload/done, bulk calls) has 4 more places chunks never take, so the
 // client holds at most concurrency + 4 requests (plus lock requests) at once. Under HTTP/1.1 each
 // in-flight request tends to hold its own socket = one file descriptor, and the SAME client backs the
@@ -36,18 +45,20 @@ export type ResolvedTransferConfig = {
 // streaming. iOS's default file-descriptor soft limit is low (historically 256), and the provider +
 // SQLite + the expo-image disk cache all draw from the same table; the previous top presets (224/256)
 // could exhaust it → EMFILE surfacing as "could not load this file" + choppy / slow video. The ladder
-// is deliberately conservative (4/8/16/32) — even "maximum" (32, 36 requests with the headroom) sits
+// is deliberately conservative (2/4/8/16/32, custom at most 32) — even "maximum" (32, 36 requests with the headroom) sits
 // at 2× the SDK's own default (16) and leaves a huge FD margin on iOS,
 // prioritising reliable video streaming over peak bulk-transfer parallelism. maxParallelRequests /
 // maxIoMemoryUsage below are mirrored (no consumer found in the pinned SDK, but set to avoid any
 // regression — see the design doc).
-export function resolvePreset(preset: TransferPerformancePreset): {
+export type ResolvedTransferValues = {
 	concurrency: number
 	fileIoMemoryBudget: bigint
 	maxParallelRequests: number
 	maxIoMemoryUsage: number
-} {
-	const { concurrency, memoryMib } = TRANSFER_PRESET_VALUES[preset]
+}
+
+export function resolveTransferValues(choice: TransferPerformanceChoice, customConcurrency: number): ResolvedTransferValues {
+	const { concurrency, memoryMib } = mobileTransferValues(choice, customConcurrency)
 	const bytes = memoryMib * MIB
 
 	return {
@@ -59,15 +70,32 @@ export function resolvePreset(preset: TransferPerformancePreset): {
 }
 
 export const DEFAULT_RESOLVED_TRANSFER_CONFIG: ResolvedTransferConfig = {
-	...resolvePreset(DEFAULT_TRANSFER_PERFORMANCE_PRESET),
+	...resolveTransferValues(DEFAULT_TRANSFER_PERFORMANCE_PRESET, DEFAULT_CUSTOM_CONCURRENCY),
 	uploadKbps: undefined,
 	downloadKbps: undefined
 }
 
-function normalizePreset(value: unknown): TransferPerformancePreset {
-	return TRANSFER_PERFORMANCE_PRESETS.includes(value as TransferPerformancePreset)
-		? (value as TransferPerformancePreset)
+export function normalizeTransferChoice(value: unknown): TransferPerformanceChoice {
+	return TRANSFER_PERFORMANCE_CHOICES.includes(value as TransferPerformanceChoice)
+		? (value as TransferPerformanceChoice)
 		: DEFAULT_TRANSFER_PERFORMANCE_PRESET
+}
+
+export function normalizeCustomConcurrency(value: unknown): number {
+	return clampCustomConcurrency(value, MOBILE_CUSTOM_CONCURRENCY_MAX, DEFAULT_CUSTOM_CONCURRENCY)
+}
+
+// A typed custom count: a whole number within 1..MOBILE_CUSTOM_CONCURRENCY_MAX, else null.
+export function parseCustomConcurrency(input: string): number | null {
+	const trimmed = input.trim()
+
+	if (!/^\d+$/.test(trimmed)) {
+		return null
+	}
+
+	const value = Number(trimmed)
+
+	return value >= 1 && value <= MOBILE_CUSTOM_CONCURRENCY_MAX ? value : null
 }
 
 function normalizeKbps(value: unknown): number | undefined {
@@ -76,14 +104,15 @@ function normalizeKbps(value: unknown): number | undefined {
 
 // Non-reactive one-shot read for boot/auth (mirrors theme.ts getInitialThemeSetting).
 export async function getResolvedTransferConfig(): Promise<ResolvedTransferConfig> {
-	const [presetRaw, uploadRaw, downloadRaw] = await Promise.all([
-		secureStore.get<TransferPerformancePreset>(TRANSFER_PERFORMANCE_PRESET_SECURE_STORE_KEY),
+	const [choiceRaw, customRaw, uploadRaw, downloadRaw] = await Promise.all([
+		secureStore.get<TransferPerformanceChoice>(TRANSFER_PERFORMANCE_PRESET_SECURE_STORE_KEY),
+		secureStore.get<number>(TRANSFER_CUSTOM_CONCURRENCY_SECURE_STORE_KEY),
 		secureStore.get<number | null>(TRANSFER_UPLOAD_LIMIT_KBPS_SECURE_STORE_KEY),
 		secureStore.get<number | null>(TRANSFER_DOWNLOAD_LIMIT_KBPS_SECURE_STORE_KEY)
 	])
 
 	return {
-		...resolvePreset(normalizePreset(presetRaw)),
+		...resolveTransferValues(normalizeTransferChoice(choiceRaw), normalizeCustomConcurrency(customRaw)),
 		uploadKbps: normalizeKbps(uploadRaw),
 		downloadKbps: normalizeKbps(downloadRaw)
 	}
@@ -126,11 +155,15 @@ export function kbpsToMbLabel(kbps: number): string {
 	return `${kbps / 1024} MB/s`
 }
 
-export function useTransferPerformancePreset(): [
-	TransferPerformancePreset,
-	(next: TransferPerformancePreset | ((prev: TransferPerformancePreset) => TransferPerformancePreset)) => void
+export function useTransferPerformanceChoice(): [
+	TransferPerformanceChoice,
+	(next: TransferPerformanceChoice | ((prev: TransferPerformanceChoice) => TransferPerformanceChoice)) => void
 ] {
-	return useSecureStore<TransferPerformancePreset>(TRANSFER_PERFORMANCE_PRESET_SECURE_STORE_KEY, DEFAULT_TRANSFER_PERFORMANCE_PRESET)
+	return useSecureStore<TransferPerformanceChoice>(TRANSFER_PERFORMANCE_PRESET_SECURE_STORE_KEY, DEFAULT_TRANSFER_PERFORMANCE_PRESET)
+}
+
+export function useCustomConcurrency(): [number, (next: number | ((prev: number) => number)) => void] {
+	return useSecureStore<number>(TRANSFER_CUSTOM_CONCURRENCY_SECURE_STORE_KEY, DEFAULT_CUSTOM_CONCURRENCY)
 }
 
 export function useUploadLimitKbps(): [number | null, (next: number | null | ((prev: number | null) => number | null)) => void] {
