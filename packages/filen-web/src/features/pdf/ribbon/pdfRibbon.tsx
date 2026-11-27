@@ -4,6 +4,7 @@ import { ChevronDownIcon, PanelLeftIcon, Redo2Icon, Undo2Icon } from "lucide-rea
 import { cn } from "@filen/shared"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
 	DropdownMenu,
 	DropdownMenuCheckboxItem,
@@ -118,20 +119,27 @@ function PdfToolButton({ tool, props }: { tool: PdfTool; props: PdfRibbonProps }
 		<span className="flex shrink-0 items-center">
 			{button}
 			<DropdownMenu>
-				<DropdownMenuTrigger
-					disabled={control.reasonKey !== null}
-					render={
-						<Button
-							variant="ghost"
-							size="icon-xs"
-							aria-label={t("previewPdfToolVariants", { tool: t(tool.labelKey) })}
-							className="w-6 rounded-l-none pointer-coarse:w-11"
-							onMouseDown={keepFocus}
-						/>
-					}
-				>
-					<ChevronDownIcon />
-				</DropdownMenuTrigger>
+				<Tooltip>
+					<TooltipTrigger
+						render={
+							<DropdownMenuTrigger
+								disabled={control.reasonKey !== null}
+								render={
+									<Button
+										variant="ghost"
+										size="icon-xs"
+										aria-label={t("previewPdfToolVariants", { tool: t(tool.labelKey) })}
+										className="w-6 rounded-l-none pointer-coarse:w-11"
+										onMouseDown={keepFocus}
+									/>
+								}
+							>
+								<ChevronDownIcon />
+							</DropdownMenuTrigger>
+						}
+					/>
+					<TooltipContent>{t("previewPdfToolVariants", { tool: t(tool.labelKey) })}</TooltipContent>
+				</Tooltip>
 				<DropdownMenuContent data-preview-surface>
 					{(tool.variants ?? []).map(entry => (
 						<DropdownMenuItem
@@ -265,18 +273,25 @@ function HistoryControls({ history, onDiscard }: { history: PdfRibbonHistory; on
 					{t("previewPdfSave")}
 				</Button>
 				<DropdownMenu>
-					<DropdownMenuTrigger
-						render={
-							<Button
-								size="icon-xs"
-								disabled={!history.canSave}
-								aria-label={t("previewPdfSaveOptions")}
-								className="rounded-l-none border-l-primary-foreground/20"
-							/>
-						}
-					>
-						<ChevronDownIcon />
-					</DropdownMenuTrigger>
+					<Tooltip>
+						<TooltipTrigger
+							render={
+								<DropdownMenuTrigger
+									render={
+										<Button
+											size="icon-xs"
+											disabled={!history.canSave}
+											aria-label={t("previewPdfSaveOptions")}
+											className="rounded-l-none border-l-primary-foreground/20"
+										/>
+									}
+								>
+									<ChevronDownIcon />
+								</DropdownMenuTrigger>
+							}
+						/>
+						<TooltipContent>{t("previewPdfSaveOptions")}</TooltipContent>
+					</Tooltip>
 					<DropdownMenuContent
 						align="end"
 						data-preview-surface

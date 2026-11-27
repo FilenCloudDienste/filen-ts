@@ -17,6 +17,8 @@ import { ContentSniffGate } from "@/features/preview/components/contentSniffGate
 import { PreviewUnsupportedState } from "@/features/preview/components/previewErrorState"
 import { sniffedEntryCategory } from "@/features/archive/lib/entryAccess.logic"
 import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
+import { Kbd } from "@/lib/keymap/kbd"
 
 const IS_MAC = isMacPlatform()
 const BACK = ARCHIVE_ACTIONS.find(def => def.id === "archive.back")
@@ -189,16 +191,15 @@ export function NestedFileViewer({
 					{name}
 				</span>
 				{onDownload !== null ? (
-					<Button
-						variant="ghost"
-						size="icon-sm"
+					<TooltipIconButton
 						disabled={!isOnline}
-						aria-label={t("previewDownloadAction")}
-						title={isOnline ? undefined : t("common:offlineActionDisabled")}
+						label={t("previewDownloadAction")}
+						title={t("common:offlineActionDisabled")}
+						shortcut={<Kbd action="archive.download" />}
 						onClick={onDownload}
 					>
 						<DownloadIcon />
-					</Button>
+					</TooltipIconButton>
 				) : null}
 			</div>
 			<div className="relative min-h-0 flex-1">

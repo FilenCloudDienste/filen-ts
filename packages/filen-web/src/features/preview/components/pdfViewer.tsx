@@ -13,6 +13,7 @@ import { useLeaveViewerFullScreen } from "@/features/preview/components/commandB
 import { PreviewDownloadableProvider, useProvidedPreviewOrigin, type PreviewAccessMode } from "@/features/preview/lib/accessMode"
 import { IN_EDITORS_AND_FIELDS, useAction } from "@/lib/keymap/useAction"
 import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { PreviewErrorState, PreviewGate, PreviewLoading } from "@/features/preview/components/previewErrorState"
@@ -505,17 +506,15 @@ export function PdfDraftDocument({
 							{t("previewPdfDraftUnsaved")}
 						</span>
 						<div className="flex-1" />
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							aria-label={t("common:close")}
+						<TooltipIconButton
+							label={t("common:close")}
 							disabled={saving}
 							onClick={() => {
 								setAsking(true)
 							}}
 						>
 							<XIcon />
-						</Button>
+						</TooltipIconButton>
 					</header>
 					<div className="min-h-0 flex-1">{body}</div>
 					<ConfirmDialog

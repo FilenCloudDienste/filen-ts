@@ -5,7 +5,7 @@ import { ChevronDownIcon, ChevronRightIcon, XIcon } from "lucide-react"
 import { resolveDestination, type PdfDestination, type PdfOutlineItem } from "@filen/office/dom/pdf"
 import type { PdfDomDocument } from "@filen/office/react/pdf"
 import { scheduleIdle } from "@filen/shared/dom/scheduleIdle"
-import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 import { cn } from "@filen/shared"
 import {
@@ -177,14 +177,12 @@ export function PdfOutlinePane({ document, outline, page, onGo, onClose, classNa
 			{onClose === undefined ? null : (
 				<div className="flex h-9 shrink-0 items-center justify-between border-b border-border pr-1 pl-3">
 					<span className="text-sm font-medium">{t("previewPdfOutlinePane")}</span>
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						aria-label={t("previewPdfOutlinePaneClose")}
+					<TooltipIconButton
+						label={t("previewPdfOutlinePaneClose")}
 						onClick={onClose}
 					>
 						<XIcon />
-					</Button>
+					</TooltipIconButton>
 				</div>
 			)}
 			<div

@@ -6,6 +6,8 @@ import type { DeckOp, ShapeRef, SmartArtOp } from "@filen/office/core/presentati
 import type { CommandResult } from "@filen/office/dom/presentation"
 import type { SmartArtInfo, SmartArtNodeInfo } from "@filen/office/core/smartart"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { FIELD_CONTROL_CLASS } from "@/components/ui/surface"
 import {
 	addNodeOp,
@@ -331,14 +333,9 @@ function NodeField({ editor, target, info, index, keysId, register, onEscape, pi
 				onKeyDown={onKeyDown}
 			/>
 			{picture === undefined ? null : (
-				<Button
-					variant="ghost"
-					size="icon-sm"
+				<TooltipIconButton
 					className="mt-0.5 shrink-0"
-					aria-label={t(picture.filled ? "previewPptxSmartArtPictureChangeFor" : "previewPptxSmartArtPictureInsertFor", {
-						number: index + 1
-					})}
-					title={t(picture.filled ? "previewPptxSmartArtPictureChangeFor" : "previewPptxSmartArtPictureInsertFor", {
+					label={t(picture.filled ? "previewPptxSmartArtPictureChangeFor" : "previewPptxSmartArtPictureInsertFor", {
 						number: index + 1
 					})}
 					onClick={() => {
@@ -346,7 +343,7 @@ function NodeField({ editor, target, info, index, keysId, register, onEscape, pi
 					}}
 				>
 					{picture.filled ? <ImageIcon /> : <ImagePlusIcon />}
-				</Button>
+				</TooltipIconButton>
 			)}
 		</li>
 	)
@@ -410,18 +407,24 @@ export function SmartArtTextPane({
 					<span className="sr-only">{t("previewPptxSmartArtTextPaneLabel")}: </span>
 					{t("previewPptxSmartArtTextPaneTitle")}
 				</h2>
-				<Button
-					ref={closeRef}
-					variant="ghost"
-					size="icon-sm"
-					aria-label={t("previewPptxSmartArtTextPaneClose")}
-					title={t("previewPptxSmartArtTextPaneClose")}
-					onClick={() => {
-						smartArtPane.setOpen(false)
-					}}
-				>
-					<XIcon />
-				</Button>
+				<Tooltip>
+					<TooltipTrigger
+						render={
+							<Button
+								ref={closeRef}
+								variant="ghost"
+								size="icon-sm"
+								aria-label={t("previewPptxSmartArtTextPaneClose")}
+								onClick={() => {
+									smartArtPane.setOpen(false)
+								}}
+							>
+								<XIcon />
+							</Button>
+						}
+					/>
+					<TooltipContent>{t("previewPptxSmartArtTextPaneClose")}</TooltipContent>
+				</Tooltip>
 			</div>
 			<p
 				id={keysId}

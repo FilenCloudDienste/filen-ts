@@ -7,6 +7,8 @@ import { CellFlag, type SheetId, type SheetLayout, type SheetRange, type SheetSu
 import { cellsEditable, celllessSheet, type SheetGridHandle, type SheetGridModel, type SheetGridState } from "@filen/office/react/sheet"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { Kbd } from "@/lib/keymap/kbd"
+import { sheetActionId } from "@/features/spreadsheet/lib/keymap"
 import { cn } from "@filen/shared"
 import { isImeKeydown } from "@filen/shared/keymap"
 import {
@@ -303,16 +305,25 @@ export function SheetFormulaBar({
 				gridRef={gridRef}
 			/>
 			{editable && formula !== undefined ? (
-				<Button
-					variant="ghost"
-					size="icon-xs"
-					className="shrink-0 font-semibold"
-					aria-label={t("previewSheetAutoSum")}
-					title={t("previewSheetAutoSum")}
-					onClick={formula.autoSum}
-				>
-					Σ
-				</Button>
+				<Tooltip>
+					<TooltipTrigger
+						render={
+							<Button
+								variant="ghost"
+								size="icon-xs"
+								className="shrink-0 font-semibold"
+								aria-label={t("previewSheetAutoSum")}
+								onClick={formula.autoSum}
+							>
+								Σ
+							</Button>
+						}
+					/>
+					<TooltipContent>
+						{t("previewSheetAutoSum")}
+						<Kbd action={sheetActionId("autoSum")} />
+					</TooltipContent>
+				</Tooltip>
 			) : null}
 			{editable && formula !== undefined && formulaHelper === true ? <FormulaHelper grid={grid} /> : null}
 			{editable ? (

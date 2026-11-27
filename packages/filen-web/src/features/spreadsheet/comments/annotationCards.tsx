@@ -7,6 +7,7 @@ import { revisionColor } from "@filen/office/dom/docx"
 import type { SheetGridHandle } from "@filen/office/react/sheet"
 import { Byline } from "@/features/preview/components/docxAnnotations"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { formatShortDate } from "@/lib/formatDate"
 import { useCardPlacement } from "@/features/spreadsheet/comments/placement"
@@ -228,17 +229,24 @@ function CommentMenu({ own, root, onEdit, onDelete }: { own: boolean; root: bool
 
 	return (
 		<DropdownMenu>
-			<DropdownMenuTrigger
-				render={
-					<Button
-						variant="ghost"
-						size="icon-xs"
-						aria-label={t("previewSheetCommentActions")}
-					/>
-				}
-			>
-				<MoreHorizontalIcon />
-			</DropdownMenuTrigger>
+			<Tooltip>
+				<TooltipTrigger
+					render={
+						<DropdownMenuTrigger
+							render={
+								<Button
+									variant="ghost"
+									size="icon-xs"
+									aria-label={t("previewSheetCommentActions")}
+								/>
+							}
+						>
+							<MoreHorizontalIcon />
+						</DropdownMenuTrigger>
+					}
+				/>
+				<TooltipContent>{t("previewSheetCommentActions")}</TooltipContent>
+			</Tooltip>
 			<DropdownMenuContent align="end">
 				{own ? <DropdownMenuItem onClick={onEdit}>{t("previewSheetCommentEdit")}</DropdownMenuItem> : null}
 				<DropdownMenuItem

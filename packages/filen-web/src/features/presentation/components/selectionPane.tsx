@@ -25,6 +25,9 @@ import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import { matchesCombo, parseCombo } from "@filen/shared/keymap"
 import { usePresentationObjectBindings } from "@/features/presentation/lib/keymap/objects"
 import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
+import { LazyTooltip } from "@/components/lazyTooltip"
+import { Kbd } from "@/lib/keymap/kbd"
 import { Input } from "@/components/ui/input"
 import { RibbonButton } from "@/features/office/components/ribbon/ribbonControls"
 import { usePresentationEditor } from "@/features/presentation/hooks/usePresentationSession"
@@ -479,18 +482,15 @@ export function SelectionPane({
 				>
 					{t("previewPptxSelectionTitle")}
 				</h2>
-				<Button
-					variant="ghost"
-					size="icon-sm"
-					aria-label={t("previewPptxSelectionClose")}
-					title={t("previewPptxSelectionClose")}
+				<TooltipIconButton
+					label={t("previewPptxSelectionClose")}
 					onClick={() => {
 						store.setOpen(false)
 						onLeave()
 					}}
 				>
 					<XIcon />
-				</Button>
+				</TooltipIconButton>
 			</div>
 			<div className="flex shrink-0 items-center gap-1 border-b border-border p-1">
 				<Button
@@ -514,30 +514,26 @@ export function SelectionPane({
 					{t("previewPptxSelectionHideAll")}
 				</Button>
 				<span className="flex-1" />
-				<Button
-					variant="ghost"
-					size="icon-sm"
-					aria-label={t("previewPptxBringForward")}
-					title={t("previewPptxBringForward")}
+				<TooltipIconButton
+					label={t("previewPptxBringForward")}
+					shortcut={<Kbd action="presentation.objects.bringForward" />}
 					disabled={!canMove("forward")}
 					onClick={() => {
 						move("forward")
 					}}
 				>
 					<ArrowUpIcon />
-				</Button>
-				<Button
-					variant="ghost"
-					size="icon-sm"
-					aria-label={t("previewPptxSendBackward")}
-					title={t("previewPptxSendBackward")}
+				</TooltipIconButton>
+				<TooltipIconButton
+					label={t("previewPptxSendBackward")}
+					shortcut={<Kbd action="presentation.objects.sendBackward" />}
 					disabled={!canMove("backward")}
 					onClick={() => {
 						move("backward")
 					}}
 				>
 					<ArrowDownIcon />
-				</Button>
+				</TooltipIconButton>
 			</div>
 			<p
 				id={keysId}
@@ -703,17 +699,21 @@ export function SelectionPane({
 								) : (
 									<span className={cn("min-w-0 flex-1 truncate", !shown && "text-muted-foreground")}>{name}</span>
 								)}
-								<button
-									type="button"
-									tabIndex={-1}
-									data-outline-control="eye"
-									aria-label={t(shape.hidden ? "previewPptxSelectionShow" : "previewPptxSelectionHide", { name })}
-									title={t(shape.hidden ? "previewPptxSelectionShow" : "previewPptxSelectionHide", { name })}
-									disabled={!changeable}
-									className="flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-background hover:text-foreground disabled:opacity-40"
+								<LazyTooltip
+									label={t(shape.hidden ? "previewPptxSelectionShow" : "previewPptxSelectionHide", { name })}
+									className="flex shrink-0"
 								>
-									{shape.hidden ? <EyeOffIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />}
-								</button>
+									<button
+										type="button"
+										tabIndex={-1}
+										data-outline-control="eye"
+										aria-label={t(shape.hidden ? "previewPptxSelectionShow" : "previewPptxSelectionHide", { name })}
+										disabled={!changeable}
+										className="flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-background hover:text-foreground disabled:opacity-40"
+									>
+										{shape.hidden ? <EyeOffIcon className="size-3.5" /> : <EyeIcon className="size-3.5" />}
+									</button>
+								</LazyTooltip>
 							</div>
 						)
 					})}

@@ -13,6 +13,7 @@ import {
 	type PrintSheetRequest
 } from "@filen/office/react/sheet/print"
 import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -413,34 +414,32 @@ export function SheetPrintDialog({ active, grid, model, kind, name, canSave, run
 								/>
 							)}
 							<div className="flex items-center gap-1">
-								<Button
-									variant="ghost"
+								<TooltipIconButton
 									size="icon-xs"
-									aria-label={t("previewSheetPrintPreviousPage")}
+									label={t("previewSheetPrintPreviousPage")}
 									disabled={shown === 0}
 									onClick={() => {
 										setIndex(shown - 1)
 									}}
 								>
 									<ChevronLeftIcon />
-								</Button>
+								</TooltipIconButton>
 								<span
 									className="text-xs text-muted-foreground tabular-nums"
 									aria-live="polite"
 								>
 									{t("previewSheetPrintPageOf", { page: shown + 1, pages: cut ? `${String(pages)}+` : pages })}
 								</span>
-								<Button
-									variant="ghost"
+								<TooltipIconButton
 									size="icon-xs"
-									aria-label={t("previewSheetPrintNextPage")}
+									label={t("previewSheetPrintNextPage")}
 									disabled={shown >= pages - 1}
 									onClick={() => {
 										setIndex(shown + 1)
 									}}
 								>
 									<ChevronRightIcon />
-								</Button>
+								</TooltipIconButton>
 							</div>
 						</>
 					)}

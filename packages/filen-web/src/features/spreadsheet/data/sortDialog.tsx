@@ -5,6 +5,7 @@ import { columnName, type SheetCommand } from "@filen/office/core/sheet"
 import { entryText, type SheetGridModel } from "@filen/office/react/sheet"
 import { FormDialog } from "@/components/dialogs/formDialog"
 import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -163,30 +164,24 @@ export function SortDialog({ model, open, run }: { model: SheetGridModel; open: 
 						<CopyIcon />
 						{t("previewSheetSortCopyLevel")}
 					</Button>
-					<Button
-						type="button"
-						variant="ghost"
-						size="icon-sm"
-						aria-label={t("previewSheetSortMoveUp")}
+					<TooltipIconButton
+						label={t("previewSheetSortMoveUp")}
 						disabled={chosen === 0}
 						onClick={() => {
 							move(-1)
 						}}
 					>
 						<ArrowUpIcon />
-					</Button>
-					<Button
-						type="button"
-						variant="ghost"
-						size="icon-sm"
-						aria-label={t("previewSheetSortMoveDown")}
+					</TooltipIconButton>
+					<TooltipIconButton
+						label={t("previewSheetSortMoveDown")}
 						disabled={chosen >= levels.length - 1}
 						onClick={() => {
 							move(1)
 						}}
 					>
 						<ArrowDownIcon />
-					</Button>
+					</TooltipIconButton>
 				</div>
 				<div
 					role="list"

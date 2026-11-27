@@ -4,6 +4,7 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 import { XIcon } from "lucide-react"
 import type { RedactionFinding, RedactionPreset, RedactionQuery } from "@filen/office/core/pdfedit/redactVerify"
 import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { addTerm, canSearch, DEFAULT_FIND_FORM, findQuery, togglePreset, type FindRedactForm } from "@/features/pdf/redact/redaction.logic"
@@ -92,14 +93,12 @@ export function FindRedactPanel({ findings, searching, failed, onSearch, onMark,
 				>
 					{t("previewPdfRedactFind")}
 				</h2>
-				<Button
-					variant="ghost"
-					size="icon-sm"
-					aria-label={t("previewPdfFindRedactClose")}
+				<TooltipIconButton
+					label={t("previewPdfFindRedactClose")}
 					onClick={onClose}
 				>
 					<XIcon aria-hidden />
-				</Button>
+				</TooltipIconButton>
 			</header>
 			<form
 				className="flex flex-col gap-2"
@@ -139,16 +138,15 @@ export function FindRedactPanel({ findings, searching, failed, onSearch, onMark,
 								className="flex items-center gap-1 rounded-2xl bg-secondary py-0.5 pr-0.5 pl-2.5 text-xs"
 							>
 								<span className="max-w-48 truncate">{term}</span>
-								<Button
-									variant="ghost"
+								<TooltipIconButton
 									size="icon-xs"
-									aria-label={t("previewPdfFindRedactRemoveTerm", { term })}
+									label={t("previewPdfFindRedactRemoveTerm", { term })}
 									onClick={() => {
 										setForm({ ...form, terms: form.terms.filter(item => item !== term) })
 									}}
 								>
 									<XIcon aria-hidden />
-								</Button>
+								</TooltipIconButton>
 							</li>
 						))}
 					</ul>

@@ -6,6 +6,9 @@ import { hexToRgb, type PdfAnnotationInfo, type PdfRgb } from "@filen/office/cor
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Slider } from "@/components/ui/slider"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
+import { Kbd } from "@/lib/keymap/kbd"
 import { DocxColorGrid } from "@/features/office/components/officeColorGrid"
 import { keepFocus, STANDARD_SWATCHES } from "@/features/office/lib/officeControls"
 import {
@@ -82,23 +85,29 @@ export function PdfAnnotationPopover({
 							open={colorOpen}
 							onOpenChange={setColorOpen}
 						>
-							<PopoverTrigger
-								render={
-									<Button
-										variant="ghost"
-										size="icon-sm"
-										aria-label={t("previewPdfAnnotColor")}
-										title={t("previewPdfAnnotColor")}
-										onMouseDown={keepFocus}
-									/>
-								}
-							>
-								<span
-									aria-hidden="true"
-									className="size-4 rounded-full ring-1 ring-border"
-									style={{ backgroundColor: chosen === undefined ? "transparent" : `#${chosen}` }}
+							<Tooltip>
+								<TooltipTrigger
+									render={
+										<PopoverTrigger
+											render={
+												<Button
+													variant="ghost"
+													size="icon-sm"
+													aria-label={t("previewPdfAnnotColor")}
+													onMouseDown={keepFocus}
+												/>
+											}
+										>
+											<span
+												aria-hidden="true"
+												className="size-4 rounded-full ring-1 ring-border"
+												style={{ backgroundColor: chosen === undefined ? "transparent" : `#${chosen}` }}
+											/>
+										</PopoverTrigger>
+									}
 								/>
-							</PopoverTrigger>
+								<TooltipContent>{t("previewPdfAnnotColor")}</TooltipContent>
+							</Tooltip>
 							<PopoverContent
 								data-preview-surface
 								aria-label={t("previewPdfAnnotColor")}
@@ -171,39 +180,31 @@ export function PdfAnnotationPopover({
 					) : null}
 				</>
 			)}
-			<Button
-				variant="ghost"
-				size="icon-sm"
-				aria-label={t("previewPdfAnnotComment")}
-				title={t("previewPdfAnnotComment")}
+			<TooltipIconButton
+				label={t("previewPdfAnnotComment")}
 				onMouseDown={keepFocus}
 				onClick={onComment}
 			>
 				<MessageSquareIcon />
-			</Button>
-			{onDownload === undefined ? null : (
-				<Button
-					variant="ghost"
-					size="icon-sm"
-					aria-label={downloadLabel}
-					title={downloadLabel}
+			</TooltipIconButton>
+			{onDownload === undefined || downloadLabel === undefined ? null : (
+				<TooltipIconButton
+					label={downloadLabel}
 					onMouseDown={keepFocus}
 					onClick={onDownload}
 				>
 					<DownloadIcon />
-				</Button>
+				</TooltipIconButton>
 			)}
 			{info.locked ? null : (
-				<Button
-					variant="ghost"
-					size="icon-sm"
-					aria-label={t("previewPdfAnnotDelete")}
-					title={t("previewPdfAnnotDelete")}
+				<TooltipIconButton
+					label={t("previewPdfAnnotDelete")}
+					shortcut={<Kbd action="pdf.delete" />}
 					onMouseDown={keepFocus}
 					onClick={onDelete}
 				>
 					<Trash2Icon />
-				</Button>
+				</TooltipIconButton>
 			)}
 		</div>
 	)

@@ -37,6 +37,7 @@ import {
 	type ReviewView
 } from "@/features/preview/components/docxReview.logic"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useLatestRef } from "@/lib/useLatestRef"
@@ -201,17 +202,24 @@ function CommentMenu({
 
 	return (
 		<DropdownMenu>
-			<DropdownMenuTrigger
-				render={
-					<Button
-						variant="ghost"
-						size="icon-xs"
-						aria-label={t("previewDocxCommentActions")}
-					/>
-				}
-			>
-				<MoreHorizontalIcon />
-			</DropdownMenuTrigger>
+			<Tooltip>
+				<TooltipTrigger
+					render={
+						<DropdownMenuTrigger
+							render={
+								<Button
+									variant="ghost"
+									size="icon-xs"
+									aria-label={t("previewDocxCommentActions")}
+								/>
+							}
+						>
+							<MoreHorizontalIcon />
+						</DropdownMenuTrigger>
+					}
+				/>
+				<TooltipContent>{t("previewDocxCommentActions")}</TooltipContent>
+			</Tooltip>
 			<DropdownMenuContent align="end">
 				{comment.canEdit ? <DropdownMenuItem onClick={onEdit}>{t("previewDocxCommentEdit")}</DropdownMenuItem> : null}
 				{canResolve ? (

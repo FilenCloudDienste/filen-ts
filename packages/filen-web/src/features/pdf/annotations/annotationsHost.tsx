@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { DownloadIcon } from "lucide-react"
 import { formatBytes } from "@filen/shared"
-import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { DriveFilePickerDialog } from "@/features/drive/components/driveFilePickerDialog"
 import { useCommentAuthor } from "@/features/office/components/commentAuthor"
@@ -203,11 +203,8 @@ export function PdfAnnotationsHost({ context, phone }: PdfToolPanelProps) {
 									{entry.size === null ? null : (
 										<span className="shrink-0 text-xs text-muted-foreground">{formatBytes(entry.size)}</span>
 									)}
-									<Button
-										variant="ghost"
-										size="icon-sm"
-										aria-label={t("previewPdfAnnotAttachmentDownload", { name: entry.name })}
-										title={t("previewPdfAnnotAttachmentDownload", { name: entry.name })}
+									<TooltipIconButton
+										label={t("previewPdfAnnotAttachmentDownload", { name: entry.name })}
 										onClick={() => {
 											const live = editingSession(context.swap)
 
@@ -215,7 +212,7 @@ export function PdfAnnotationsHost({ context, phone }: PdfToolPanelProps) {
 										}}
 									>
 										<DownloadIcon />
-									</Button>
+									</TooltipIconButton>
 								</li>
 							))}
 						</ul>

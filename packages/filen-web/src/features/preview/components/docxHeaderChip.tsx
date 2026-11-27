@@ -6,6 +6,7 @@ import { COMMAND_LABELS, headerChipKey, keepFocus } from "@/features/preview/com
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
 	DropdownMenu,
 	DropdownMenuCheckboxItem,
@@ -62,19 +63,26 @@ export function DocxHeaderChip({ header, enabled, readOnly, execute, onClose }: 
 			) : null}
 			{labelled.length > 0 || removeLabel !== undefined ? (
 				<DropdownMenu>
-					<DropdownMenuTrigger
-						render={
-							<Button
-								ref={options}
-								variant="ghost"
-								size="icon-xs"
-								aria-label={t("previewDocxHeaderOptions")}
-								onMouseDown={keepFocus}
-							>
-								<SettingsIcon />
-							</Button>
-						}
-					/>
+					<Tooltip>
+						<TooltipTrigger
+							render={
+								<DropdownMenuTrigger
+									render={
+										<Button
+											ref={options}
+											variant="ghost"
+											size="icon-xs"
+											aria-label={t("previewDocxHeaderOptions")}
+											onMouseDown={keepFocus}
+										>
+											<SettingsIcon />
+										</Button>
+									}
+								/>
+							}
+						/>
+						<TooltipContent>{t("previewDocxHeaderOptions")}</TooltipContent>
+					</Tooltip>
 					<DropdownMenuContent
 						align="center"
 						data-preview-surface

@@ -6,6 +6,7 @@ import { useElementSize } from "@/lib/useElementSize"
 import type { EffectRow } from "@filen/office/core/presentation"
 import { paintSlide, SlideShow, type ShowController } from "@filen/office/react/presentation"
 import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import {
 	animationPane,
 	ClassIcon,
@@ -364,17 +365,14 @@ export function AnimationPane({
 				>
 					{t("previewPptxAnimPaneTitle")}
 				</h2>
-				<Button
-					variant="ghost"
-					size="icon-sm"
-					aria-label={t("previewPptxAnimPaneClose")}
-					title={t("previewPptxAnimPaneClose")}
+				<TooltipIconButton
+					label={t("previewPptxAnimPaneClose")}
 					onClick={() => {
 						animationPane.setOpen(false)
 					}}
 				>
 					<XIcon />
-				</Button>
+				</TooltipIconButton>
 			</div>
 			<div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border p-1">
 				<Button

@@ -4,6 +4,7 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 import { ChevronRightIcon, CopyIcon } from "lucide-react"
 import { cn, formatBytes } from "@filen/shared"
 import { Button } from "@/components/ui/button"
+import { LazyTooltip } from "@/components/lazyTooltip"
 import { copyText, copyTextLater } from "@/lib/copyText"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 import type { DicomTagLevel, DicomTagRow } from "@/features/preview/lib/dicom/protocol"
@@ -194,26 +195,30 @@ export function DicomTagTree({
 										</span>
 									</span>
 									{row.value !== null && row.value !== "" ? (
-										<Button
-											variant="ghost"
-											size="icon-sm"
-											title={t("previewDicomTagCopy")}
-											aria-label={t("previewDicomTagCopy")}
-											onClick={() => {
-												const copied = t("previewDicomTagCopied")
-
-												if (row.truncated) {
-													void copyTextLater(loadValue(shown.path), {
-														copied,
-														failed: t("previewDicomTagCopyFailed")
-													})
-												} else {
-													void copyText(row.value ?? "", copied)
-												}
-											}}
+										<LazyTooltip
+											label={t("previewDicomTagCopy")}
+											className="flex shrink-0"
 										>
-											<CopyIcon />
-										</Button>
+											<Button
+												variant="ghost"
+												size="icon-sm"
+												aria-label={t("previewDicomTagCopy")}
+												onClick={() => {
+													const copied = t("previewDicomTagCopied")
+
+													if (row.truncated) {
+														void copyTextLater(loadValue(shown.path), {
+															copied,
+															failed: t("previewDicomTagCopyFailed")
+														})
+													} else {
+														void copyText(row.value ?? "", copied)
+													}
+												}}
+											>
+												<CopyIcon />
+											</Button>
+										</LazyTooltip>
 									) : null}
 								</>
 							)}

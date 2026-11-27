@@ -11,6 +11,7 @@ import {
 	type ShowMediaStatus
 } from "@filen/office/react/presentation"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { mediaStreams, preparingProgress, showMediaLabels } from "@/features/presentation/hooks/useMediaInsert"
 
 // Video and audio on the slide in view, in the viewer and the editor: a play control over each medium (the medium
@@ -78,6 +79,7 @@ function MediaFrame({
 		handleRef.current.click()
 	}
 	const playing = status === "playing" || status === "loading"
+	const label = playing ? t("previewPptxMediaPauseNamed", { name }) : t("previewPptxMediaPlayNamed", { name })
 	const chip =
 		status === "preparing"
 			? progress === undefined || progress >= 1
@@ -107,22 +109,29 @@ function MediaFrame({
 					scale={scale}
 				>
 					<div className="pointer-events-auto absolute bottom-1 left-1 flex items-center gap-1">
-						<Button
-							variant="secondary"
-							size="icon-sm"
-							className="shadow-md"
-							aria-label={playing ? t("previewPptxMediaPauseNamed", { name }) : t("previewPptxMediaPlayNamed", { name })}
-							onPointerDown={event => {
-								// The selection layer below must not take the press.
-								event.stopPropagation()
-							}}
-							onClick={event => {
-								event.stopPropagation()
-								toggle()
-							}}
-						>
-							{playing ? <PauseIcon /> : <PlayIcon />}
-						</Button>
+						<Tooltip>
+							<TooltipTrigger
+								render={
+									<Button
+										variant="secondary"
+										size="icon-sm"
+										className="shadow-md"
+										aria-label={label}
+										onPointerDown={event => {
+											// The selection layer below must not take the press.
+											event.stopPropagation()
+										}}
+										onClick={event => {
+											event.stopPropagation()
+											toggle()
+										}}
+									>
+										{playing ? <PauseIcon /> : <PlayIcon />}
+									</Button>
+								}
+							/>
+							<TooltipContent>{label}</TooltipContent>
+						</Tooltip>
 						{chip === undefined ? null : (
 							<span
 								role="status"

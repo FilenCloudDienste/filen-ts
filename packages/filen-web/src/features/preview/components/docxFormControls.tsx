@@ -15,6 +15,7 @@ import {
 } from "@/features/preview/components/docxEditor.logic"
 import { FormDialog } from "@/components/dialogs/formDialog"
 import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -416,17 +417,15 @@ function ItemsEditor({
 							className="flex items-center justify-between gap-2 rounded-lg bg-muted px-3 py-1"
 						>
 							<span className="truncate">{item.text}</span>
-							<Button
-								type="button"
-								variant="ghost"
+							<TooltipIconButton
 								size="icon-xs"
-								aria-label={t("previewDocxDropdownRemove", { item: item.text })}
+								label={t("previewDocxDropdownRemove", { item: item.text })}
 								onClick={() => {
 									change(items.filter((_, other) => other !== index))
 								}}
 							>
 								<XIcon />
-							</Button>
+							</TooltipIconButton>
 						</li>
 					))}
 				</ul>

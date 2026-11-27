@@ -1329,18 +1329,25 @@ export function PreviewOverlay({
 											</Button>
 											{imagePrimaryTarget.kind === "inPlace" ? (
 												<DropdownMenu>
-													<DropdownMenuTrigger
-														render={
-															<Button
-																size="icon-sm"
-																disabled={!dirty || saving}
-																aria-label={t("previewImageSaveMoreAction")}
-																className="rounded-l-none border-l-primary-foreground/20"
-															/>
-														}
-													>
-														<ChevronDownIcon />
-													</DropdownMenuTrigger>
+													<Tooltip>
+														<TooltipTrigger
+															render={
+																<DropdownMenuTrigger
+																	render={
+																		<Button
+																			size="icon-sm"
+																			disabled={!dirty || saving}
+																			aria-label={t("previewImageSaveMoreAction")}
+																			className="rounded-l-none border-l-primary-foreground/20"
+																		/>
+																	}
+																>
+																	<ChevronDownIcon />
+																</DropdownMenuTrigger>
+															}
+														/>
+														<TooltipContent>{t("previewImageSaveMoreAction")}</TooltipContent>
+													</Tooltip>
 													{/* Portaled outside the darkroom subtree: dark on its own. */}
 													<DropdownMenuContent
 														align="end"

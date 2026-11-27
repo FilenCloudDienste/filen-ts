@@ -13,6 +13,7 @@ import {
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createHistory } from "@/lib/editHistory"
@@ -334,32 +335,24 @@ function SignatureDialogBody({
 							}}
 						/>
 						<div className="flex justify-end gap-1">
-							<Button
-								type="button"
-								variant="ghost"
-								size="icon-sm"
-								aria-label={t("previewPdfSignatureUndoStroke")}
-								title={t("previewPdfSignatureUndoStroke")}
+							<TooltipIconButton
+								label={t("previewPdfSignatureUndoStroke")}
 								disabled={!history.canUndo}
 								onClick={() => {
 									setStrokes(history.undo())
 								}}
 							>
 								<Undo2Icon />
-							</Button>
-							<Button
-								type="button"
-								variant="ghost"
-								size="icon-sm"
-								aria-label={t("previewPdfSignatureRedoStroke")}
-								title={t("previewPdfSignatureRedoStroke")}
+							</TooltipIconButton>
+							<TooltipIconButton
+								label={t("previewPdfSignatureRedoStroke")}
 								disabled={!history.canRedo}
 								onClick={() => {
 									setStrokes(history.redo())
 								}}
 							>
 								<Redo2Icon />
-							</Button>
+							</TooltipIconButton>
 						</div>
 					</TabsContent>
 					<TabsContent

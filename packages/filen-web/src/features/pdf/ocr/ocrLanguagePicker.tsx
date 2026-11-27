@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next"
 import { PlusIcon, XIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { OCR_LANGUAGES, type OcrLanguage } from "@/features/pdf/ocr/languages"
 import { ocrLanguageName } from "@/features/pdf/ocr/ocrLanguageNames"
@@ -32,18 +33,16 @@ export function OcrLanguagePicker({ languages, disabled, onChange }: OcrLanguage
 						className="h-7 gap-1 pr-1 text-sm"
 					>
 						{name}
-						<Button
-							type="button"
-							variant="ghost"
+						<TooltipIconButton
 							size="icon-xs"
 							disabled={disabled || languages.length === 1}
-							aria-label={t("previewPdfOcrRemoveLanguage", { language: name })}
+							label={t("previewPdfOcrRemoveLanguage", { language: name })}
 							onClick={() => {
 								onChange(languages.filter(other => other !== language))
 							}}
 						>
 							<XIcon />
-						</Button>
+						</TooltipIconButton>
 					</Badge>
 				)
 			})}

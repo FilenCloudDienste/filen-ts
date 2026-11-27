@@ -3,6 +3,9 @@ import { ChevronLeftIcon, ChevronRightIcon, GalleryVerticalIcon, MaximizeIcon, M
 import type { ShowController } from "@filen/office/react/presentation"
 import type { SlideRef } from "@filen/office/core/presentation"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
+import { Kbd } from "@/lib/keymap/kbd"
 import {
 	DropdownMenu,
 	DropdownMenuCheckboxItem,
@@ -42,28 +45,34 @@ export function BrowseBar({ index, slides, controller, fullscreen, onFullscreen 
 		>
 			<span>{index === undefined ? "" : t("previewPptxSlideLabel", { current: index + 1, total: slides.length })}</span>
 			<div className="flex items-center gap-0.5">
-				<Button
-					type="button"
-					variant="ghost"
+				<TooltipIconButton
 					size="icon-xs"
-					aria-label={t("previewPptxPresenterPrevious")}
+					label={t("previewPptxPresenterPrevious")}
+					shortcut={<Kbd action="presentation.show.previous" />}
 					onClick={() => controller()?.prev()}
 				>
 					<ChevronLeftIcon />
-				</Button>
+				</TooltipIconButton>
 				<DropdownMenu>
-					<DropdownMenuTrigger
-						render={
-							<Button
-								type="button"
-								variant="ghost"
-								size="icon-xs"
-								aria-label={t("previewPptxShowBrowseMenu")}
-							/>
-						}
-					>
-						<MenuIcon />
-					</DropdownMenuTrigger>
+					<Tooltip>
+						<TooltipTrigger
+							render={
+								<DropdownMenuTrigger
+									render={
+										<Button
+											type="button"
+											variant="ghost"
+											size="icon-xs"
+											aria-label={t("previewPptxShowBrowseMenu")}
+										/>
+									}
+								>
+									<MenuIcon />
+								</DropdownMenuTrigger>
+							}
+						/>
+						<TooltipContent>{t("previewPptxShowBrowseMenu")}</TooltipContent>
+					</Tooltip>
 					<DropdownMenuContent
 						data-preview-surface
 						side="top"
@@ -124,15 +133,14 @@ export function BrowseBar({ index, slides, controller, fullscreen, onFullscreen 
 						</DropdownMenuItem>
 					</DropdownMenuContent>
 				</DropdownMenu>
-				<Button
-					type="button"
-					variant="ghost"
+				<TooltipIconButton
 					size="icon-xs"
-					aria-label={t("previewPptxPresenterNextButton")}
+					label={t("previewPptxPresenterNextButton")}
+					shortcut={<Kbd action="presentation.show.next" />}
 					onClick={() => controller()?.next()}
 				>
 					<ChevronRightIcon />
-				</Button>
+				</TooltipIconButton>
 			</div>
 		</div>
 	)

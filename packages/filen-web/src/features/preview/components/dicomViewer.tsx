@@ -17,6 +17,8 @@ import { BLOCK_BYTES } from "@filen/shared/videos"
 import { isImeKeydown } from "@filen/shared/keymap"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
+import { Kbd } from "@/lib/keymap/kbd"
 import { Slider } from "@/components/ui/slider"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { originRanged, originSize } from "@/lib/sdk/byteOrigin"
@@ -228,42 +230,35 @@ function Scrubber({
 
 	return (
 		<div className="flex w-[min(36rem,calc(100cqw-4rem))] items-center gap-1">
-			<Button
-				variant="ghost"
-				size="icon-sm"
-				title={t("previewDicomPreviousFrame")}
-				aria-label={t("previewDicomPreviousFrame")}
+			<TooltipIconButton
+				label={t("previewDicomPreviousFrame")}
+				shortcut={<Kbd action="preview.dicomPreviousFrame" />}
 				disabled={status.frame <= 0}
 				onClick={() => {
 					onFrame(status.frame - 1)
 				}}
 			>
 				<SkipBackIcon />
-			</Button>
-			<Button
-				variant="ghost"
-				size="icon-sm"
-				title={t("previewDicomNextFrame")}
-				aria-label={t("previewDicomNextFrame")}
+			</TooltipIconButton>
+			<TooltipIconButton
+				label={t("previewDicomNextFrame")}
+				shortcut={<Kbd action="preview.dicomNextFrame" />}
 				disabled={status.frame >= last}
 				onClick={() => {
 					onFrame(status.frame + 1)
 				}}
 			>
 				<SkipForwardIcon />
-			</Button>
-			<Button
-				variant="ghost"
-				size="icon-sm"
-				title={t(status.playing ? "previewDicomPause" : "previewDicomPlay")}
-				aria-label={t(status.playing ? "previewDicomPause" : "previewDicomPlay")}
-				aria-pressed={status.playing}
+			</TooltipIconButton>
+			<TooltipIconButton
+				label={t(status.playing ? "previewDicomPause" : "previewDicomPlay")}
+				pressed={status.playing}
 				onClick={() => {
 					onPlay(!status.playing)
 				}}
 			>
 				{status.playing ? <PauseIcon /> : <PlayIcon />}
-			</Button>
+			</TooltipIconButton>
 			<Slider
 				aria-label={t("previewDicomFrameSlider")}
 				className="mx-2 min-w-0 flex-1"

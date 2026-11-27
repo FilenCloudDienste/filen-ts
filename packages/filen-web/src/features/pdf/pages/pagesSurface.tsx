@@ -5,6 +5,7 @@ import { driveItemName } from "@filen/shared"
 import type { PdfDomDocument } from "@filen/office/react/pdf"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { DriveFilePickerDialog } from "@/features/drive/components/driveFilePickerDialog"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import type { DriveItem } from "@/features/drive/lib/item"
@@ -173,16 +174,15 @@ export function PdfPagesNotices() {
 					className="flex shrink-0 items-center gap-2 border-b bg-muted px-3 py-1.5 text-xs text-muted-foreground"
 				>
 					<p className="min-w-0 flex-1">{t("previewPdfTagged")}</p>
-					<Button
-						variant="ghost"
+					<TooltipIconButton
 						size="icon-xs"
-						aria-label={t("previewPdfPagesNoticeDismiss")}
+						label={t("previewPdfPagesNoticeDismiss")}
 						onClick={() => {
 							controller.dismissTagged()
 						}}
 					>
 						<XIcon />
-					</Button>
+					</TooltipIconButton>
 				</div>
 			) : null}
 			{view.password === null ? null : (

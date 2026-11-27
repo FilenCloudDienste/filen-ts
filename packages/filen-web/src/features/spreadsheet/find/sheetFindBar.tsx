@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import { SlidersHorizontalIcon } from "lucide-react"
 import type { SheetGridHandle, SheetGridState } from "@filen/office/react/sheet"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
 	DropdownMenu,
 	DropdownMenuCheckboxItem,
@@ -98,17 +99,24 @@ function OpenFindBar({
 				onClosed={() => undefined}
 			/>
 			<DropdownMenu>
-				<DropdownMenuTrigger
-					render={
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							aria-label={t("previewSheetFindOptions")}
-						>
-							<SlidersHorizontalIcon />
-						</Button>
-					}
-				/>
+				<Tooltip>
+					<TooltipTrigger
+						render={
+							<DropdownMenuTrigger
+								render={
+									<Button
+										variant="ghost"
+										size="icon-sm"
+										aria-label={t("previewSheetFindOptions")}
+									>
+										<SlidersHorizontalIcon />
+									</Button>
+								}
+							/>
+						}
+					/>
+					<TooltipContent>{t("previewSheetFindOptions")}</TooltipContent>
+				</Tooltip>
 				<DropdownMenuContent align="end">
 					<DropdownMenuCheckboxItem
 						checked={options.wholeCell}

@@ -7,6 +7,7 @@ import { newSheetName, type SheetCommand, type SheetId, type SheetSummary } from
 import type { SheetGridState } from "@filen/office/react/sheet"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
 	ContextMenu,
 	ContextMenuContent,
@@ -481,18 +482,25 @@ export function SheetTabs({ grid, canEdit, run }: { grid: SheetGridState; canEdi
 							</ContextMenu>
 							{active ? (
 								<DropdownMenu>
-									<DropdownMenuTrigger
-										render={
-											<Button
-												variant="ghost"
-												size="icon-xs"
-												aria-label={t("previewSheetTabMenu")}
-												className="shrink-0"
-											>
-												<MoreHorizontalIcon />
-											</Button>
-										}
-									/>
+									<Tooltip>
+										<TooltipTrigger
+											render={
+												<DropdownMenuTrigger
+													render={
+														<Button
+															variant="ghost"
+															size="icon-xs"
+															aria-label={t("previewSheetTabMenu")}
+															className="shrink-0"
+														>
+															<MoreHorizontalIcon />
+														</Button>
+													}
+												/>
+											}
+										/>
+										<TooltipContent>{t("previewSheetTabMenu")}</TooltipContent>
+									</Tooltip>
 									<DropdownMenuContent data-preview-surface>{items(sheet, DROPDOWN_PARTS)}</DropdownMenuContent>
 								</DropdownMenu>
 							) : null}

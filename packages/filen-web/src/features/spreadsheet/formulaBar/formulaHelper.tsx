@@ -5,6 +5,7 @@ import { cellName } from "@filen/office/core/sheet"
 import type { SheetGridState } from "@filen/office/react/sheet"
 import { FORMULA_ASK_MAX_CHARS } from "@filen/shared/assistant"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Progress } from "@/components/ui/progress"
@@ -167,23 +168,29 @@ export function FormulaHelper({ grid }: { grid: SheetGridState }) {
 				}
 			}}
 		>
-			<PopoverTrigger
-				render={
-					<Button
-						variant="ghost"
-						size="icon-xs"
-						className="shrink-0"
-						aria-label={t("assistantFormulaOpen")}
-						title={t("assistantFormulaOpen")}
-						data-sheet-formula-helper=""
-					>
-						<SparklesIcon
-							aria-hidden="true"
-							className="size-3.5"
+			<Tooltip>
+				<TooltipTrigger
+					render={
+						<PopoverTrigger
+							render={
+								<Button
+									variant="ghost"
+									size="icon-xs"
+									className="shrink-0"
+									aria-label={t("assistantFormulaOpen")}
+									data-sheet-formula-helper=""
+								>
+									<SparklesIcon
+										aria-hidden="true"
+										className="size-3.5"
+									/>
+								</Button>
+							}
 						/>
-					</Button>
-				}
-			/>
+					}
+				/>
+				<TooltipContent>{t("assistantFormulaOpen")}</TooltipContent>
+			</Tooltip>
 			<PopoverContent
 				align="start"
 				aria-label={t("assistantFormulaLabel")}

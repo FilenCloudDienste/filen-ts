@@ -4,6 +4,7 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 import { XIcon } from "lucide-react"
 import type { RedactionMark } from "@filen/office/core/pdfedit/redactVerify"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { markLabel } from "@/features/pdf/redact/redaction.logic"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 
@@ -157,6 +158,7 @@ function MarkRows({
 					const index = row.index
 					const label = markLabel(mark)
 					const name = t(label.key, label.params)
+					const removeLabel = t("previewPdfRedactRemoveMark", { index: index + 1, mark: name, page: mark.page + 1 })
 
 					return (
 						<li
@@ -178,19 +180,26 @@ function MarkRows({
 								<span className="max-w-full truncate">{name}</span>
 								<span className="text-xs text-muted-foreground">{t("previewPdfPageNumber", { page: mark.page + 1 })}</span>
 							</button>
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								data-mark-remove=""
-								aria-label={t("previewPdfRedactRemoveMark", { index: index + 1, mark: name, page: mark.page + 1 })}
-								disabled={disabled === true}
-								onClick={() => {
-									removed.current = { id: mark.id, index }
-									onRemove(mark)
-								}}
-							>
-								<XIcon aria-hidden />
-							</Button>
+							<Tooltip>
+								<TooltipTrigger
+									render={
+										<Button
+											variant="ghost"
+											size="icon-sm"
+											data-mark-remove=""
+											aria-label={removeLabel}
+											disabled={disabled === true}
+											onClick={() => {
+												removed.current = { id: mark.id, index }
+												onRemove(mark)
+											}}
+										>
+											<XIcon aria-hidden />
+										</Button>
+									}
+								/>
+								<TooltipContent>{removeLabel}</TooltipContent>
+							</Tooltip>
 						</li>
 					)
 				})}

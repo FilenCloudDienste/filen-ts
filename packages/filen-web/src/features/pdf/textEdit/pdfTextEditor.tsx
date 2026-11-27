@@ -12,6 +12,7 @@ import {
 	type TextEditorSource
 } from "@/features/pdf/textEdit/textEdit.logic"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
 
@@ -91,17 +92,24 @@ export function PdfTextEditor({ source, scale, busy, clear, onDone, onCancel }: 
 				</span>
 				{font.substitute ? (
 					<Popover>
-						<PopoverTrigger
-							render={
-								<Button
-									variant="ghost"
-									size="icon-xs"
-									aria-label={t("previewPdfTextEditFontInfo")}
-								/>
-							}
-						>
-							<InfoIcon aria-hidden="true" />
-						</PopoverTrigger>
+						<Tooltip>
+							<TooltipTrigger
+								render={
+									<PopoverTrigger
+										render={
+											<Button
+												variant="ghost"
+												size="icon-xs"
+												aria-label={t("previewPdfTextEditFontInfo")}
+											/>
+										}
+									>
+										<InfoIcon aria-hidden="true" />
+									</PopoverTrigger>
+								}
+							/>
+							<TooltipContent>{t("previewPdfTextEditFontInfo")}</TooltipContent>
+						</Tooltip>
 						<PopoverContent
 							side="top"
 							className="text-xs"
