@@ -56,6 +56,7 @@ import { audioEngine } from "@/features/audio/lib/audioEngine"
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import {
 	useDirectoryListingQuery,
+	useDirectoryNamesQuery,
 	useHiddenDotFilenRoot,
 	useHideHiddenItemsPreferenceQuery,
 	useSortPreferencesQuery,
@@ -83,7 +84,8 @@ import {
 	isVisibleSharedInItem,
 	listingSlideshowSource,
 	reconcileSelectedItems,
-	resolveListingDisplayItems
+	resolveListingDisplayItems,
+	searchInputScope
 } from "@/features/drive/components/directoryListing.logic"
 import { useDriveRootUuidQuery } from "@/queries/driveRoot"
 import type { SlideshowSource } from "@/features/preview/lib/slideshowTree"
@@ -133,6 +135,7 @@ import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 const GRID_LISTBOX_STYLE = { padding: GRID_INSET }
 
 const EMPTY_LISTING: DriveItem[] = []
+const EMPTY_UUIDS: string[] = []
 
 // Stable identity so a disabled/empty directorySizes read never re-derives the display items — module
 // scope, not recreated per render (a fresh `new Map()` every render would bust that useMemo).
@@ -344,6 +347,18 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		runPendingSearch(pendingSearch.query)
 	}, [pendingSearch, variant, splat])
 
+	// The search box names the subtree it searches. The open directory's name comes from the breadcrumb's
+	// own name entries (the same query keys), so it costs no request of its own.
+	const rootLabel = t("driveMyDrive")
+	const currentDirectoryNames = useDirectoryNamesQuery(variant === "drive" ? pathUuids : EMPTY_UUIDS, variant)
+	const searchScope = searchInputScope({
+		variant,
+		uuid,
+		rootLabel,
+		names: currentDirectoryNames.data
+	})
+	const searchLabel = searchScope === null ? t("driveSearch") : t("driveSearchIn", { directory: searchScope })
+
 	// Local-substring fallback for every non-"drive" variant (favorites/recents/trash/sharedIn/
 	// sharedOut/links) — those have no navigable subtree of their own for the cache-backed engine above,
 	// so they get an instant, already-loaded-only name filter instead (filterDriveItemsByLocalSearch's
@@ -495,7 +510,6 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	const driveRootUuid = useDriveRootUuidQuery().data ?? ""
 	// Recents, Favorites and Trash rows name their parent directory from the cache alone, rebuilt only when
 	// the listing's rows change (a cursor move or a scroll keeps the value and every cell's render).
-	const rootLabel = t("driveMyDrive")
 	const itemLocations = useMemo(
 		() => (showsItemLocation(variant) ? cachedItemLocations({ items: visibleItems, rootUuid: driveRootUuid, rootLabel }) : null),
 		[variant, visibleItems, driveRootUuid, rootLabel]
@@ -1158,6 +1172,8 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			<EmptyState
 				variant="empty"
 				driveVariant={variant}
+				// The listing's dropzone uploads here exactly when the New menu below is offered.
+				droppable={!writeDisabled}
 				// Inline affordance for an empty, writable location — the toolbar's own New menu (not a second
 				// create/upload implementation), so it can never drift from what the toolbar offers. Hidden wherever
 				// the toolbar's is disabled (writeDisabled covers non-writable variants, a still-loading listing and
@@ -1411,7 +1427,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 					state it's bound to differs. */}
 				<SearchInput
 					action="drive.search"
-					label={t("driveSearch")}
+					label={searchLabel}
 					onFocusList={focusCursor}
 					value={variant === "drive" ? search.input : localFilter}
 					onChange={variant === "drive" ? search.setInput : setLocalFilter}

@@ -43,6 +43,26 @@ export function isEmptyTrashTriggerVisible(variant: DriveVariant, itemCount: num
 	return variant === "trash" && itemCount > 0
 }
 
+// What Cloud Drive's search box names as its scope: the open directory (the root label at the root), whose
+// subtree it searches. null for the other listings' local filter, and while the directory's name resolves.
+export function searchInputScope({
+	variant,
+	uuid,
+	rootLabel,
+	names
+}: {
+	variant: DriveVariant
+	uuid: string | null
+	rootLabel: string
+	names: Readonly<Record<string, string>> | undefined
+}): string | null {
+	if (variant !== "drive") {
+		return null
+	}
+
+	return uuid === null ? rootLabel : (names?.[uuid] ?? null)
+}
+
 // Search results only get re-sorted once the whole match set is actually in hand (total <=
 // results.length) — the search engine's own window is a fixed 1,000-item ceiling (mirrors mobile), so
 // while more matches exist than currently landed, re-sorting the PARTIAL set every time a new one

@@ -198,7 +198,8 @@ vi.mock("@/features/drive/queries/drive", async importOriginal => ({
 	useSortPreferencesQuery: () => ({ data: undefined, refetch: vi.fn() }),
 	useViewModePreferencesQuery: () => ({ data: undefined, refetch: vi.fn() }),
 	useHideHiddenItemsPreferenceQuery: () => ({ data: hiddenPref.current, refetch: vi.fn() }),
-	useHiddenDotFilenRoot: () => null
+	useHiddenDotFilenRoot: () => null,
+	useDirectoryNamesQuery: () => ({ status: "pending", data: undefined, error: null })
 }))
 
 import "@/lib/i18n"

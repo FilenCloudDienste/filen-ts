@@ -18,11 +18,13 @@ export const drive = {
 	// ── Toolbar ──────────────────────────────────────────────────────────────
 	/** Directory item menu — submenu holding New directory, New text file, Upload files and Upload directory for that directory */
 	driveNew: "New",
-	/** Drive toolbar — search input placeholder/aria-label, shared by every listing variant: the
-	 * cache-backed recursive search on "drive" itself, and the local name filter on every other variant
-	 * (favorites/recents/trash/sharedIn/sharedOut/links) — kept variant-neutral rather than "Search this
-	 * directory" so it still reads correctly on a flat listing that has no "directory" of its own. */
+	/** Drive toolbar — search input placeholder/aria-label of the local name filter on every listing but Cloud
+	 * Drive's own (favorites/recents/trash/sharedIn/sharedOut/links), and of Cloud Drive's search while the open
+	 * directory's name is still resolving. */
 	driveSearch: "Search",
+	/** Drive toolbar — Cloud Drive's search input placeholder/aria-label; it searches the open directory and
+	 * everything below it. {{directory}} = the open directory's name, or "Cloud Drive" at the root */
+	driveSearchIn: "Search in {{directory}}",
 	/** Drive toolbar — accessible label on the list-view toggle button */
 	driveViewList: "List view",
 	/** Drive toolbar — accessible label on the grid-view toggle button */
@@ -102,6 +104,8 @@ export const drive = {
 	driveEmptyTitle: "Nothing here yet",
 	/** Drive page — empty-state body under the title, for a directory (or the move/copy picker) */
 	driveEmptyBody: "Files and directories you add will appear here.",
+	/** Drive page — empty-state body for a directory the user can write into, where files can be dropped */
+	driveEmptyDropBody: "Drag files here to upload them, or use New to add files and directories.",
 	/** Drive file picker (a picture for a document, a chat attachment) — the open directory has content, but no file of the kind asked for */
 	drivePickerNoMatchingFiles: "No matching files",
 	/** Trash — empty-state title when nothing is trashed */

@@ -16,11 +16,18 @@ import { EmptyMessage } from "@/components/emptyMessage"
 // driveVariant="drive" (it only ever browses the owned directory tree) and no action (the picker is
 // read-only browsing, never a write surface).
 export type EmptyStateProps =
-	{ variant: "empty"; driveVariant: DriveVariant; action?: ReactNode } | { variant: "error"; error: ErrorDTO; onRetry: () => void }
+	// `droppable`: the listing's dropzone takes files here, so the body says so.
+	| { variant: "empty"; driveVariant: DriveVariant; action?: ReactNode; droppable?: boolean }
+	| { variant: "error"; error: ErrorDTO; onRetry: () => void }
 
 export function EmptyState(props: EmptyStateProps) {
 	const { t } = useTranslation(["drive", "common"])
-	const copy = props.variant === "empty" ? driveEmptyStateCopy(props.driveVariant) : null
+	const copy =
+		props.variant === "empty"
+			? props.droppable === true
+				? { ...driveEmptyStateCopy(props.driveVariant), bodyKey: "driveEmptyDropBody" as const }
+				: driveEmptyStateCopy(props.driveVariant)
+			: null
 	const Icon = copy?.icon ?? FolderClosedIcon
 
 	return (

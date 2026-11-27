@@ -166,7 +166,7 @@ test.describe("drive copy", () => {
 
 			await keptRow.click()
 			await expect(keptRow).toHaveAttribute("aria-selected", "true")
-			await page.getByRole("searchbox", { name: "Search" }).focus()
+			await page.getByRole("searchbox", { name: /^Search in / }).focus()
 			await page.keyboard.press(`${mod}+c`)
 			await keptRow.focus()
 			await page.keyboard.press(`${mod}+c`)
