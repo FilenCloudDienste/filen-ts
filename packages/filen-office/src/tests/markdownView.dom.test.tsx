@@ -102,6 +102,18 @@ describe("MarkdownView math (opt-in)", () => {
 		expect(html("> $5 and\n> $10 c", undefined, MATH)).toBe("<blockquote>\n<p>$5 and\n$10 c</p>\n</blockquote>")
 	})
 
+	it("reads a ```math fence as display math, as GitHub does, and only with the extension", () => {
+		const display = '<pre><code class="language-math math-display">x = 1\ny &lt; 2</code></pre>'
+
+		expect(html("```math\nx = 1\ny < 2\n```", undefined, MATH)).toBe(display)
+		expect(html("~~~Math\nx = 1\ny < 2\n~~~", undefined, MATH)).toBe(display)
+		expect(html("> ```math\n> a\n> ```", undefined, MATH)).toBe(
+			'<blockquote>\n<pre><code class="language-math math-display">a</code></pre>\n</blockquote>'
+		)
+		expect(html("```math\nx\n```")).toBe('<pre><code class="language-math">x\n</code></pre>')
+		expect(html("```mathematica\nx\n```", undefined, MATH)).toBe('<pre><code class="language-mathematica">x\n</code></pre>')
+	})
+
 	it("keeps a math span whose closing sign a line ending follows", () => {
 		expect(html("$x$\nnext", undefined, MATH)).toBe('<p><code class="language-math math-inline">x</code>\nnext</p>')
 	})

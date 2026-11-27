@@ -3,7 +3,8 @@ import remarkMath from "remark-math"
 // remark-math with inline math as GitHub reads it: `$…$` is math only when the dollar signs hug the formula (no space
 // or line break right inside either one) and the closing one is not followed by a digit, so prices ("$5 and $10")
 // stay text. The check runs in the tokenizer: a span it refuses never becomes math, so micromark reads the `$` as a
-// plain character and parses what follows as usual (links, code, emphasis, a blockquote's continuation).
+// plain character and parses what follows as usual (links, code, emphasis, a blockquote's continuation). A ```math fence
+// is display math too, as on GitHub.
 
 // The parts of micromark's tokenizer API the guard touches (micromark-util-types, not a dependency here).
 type Code = number | null
@@ -67,7 +68,45 @@ interface Processor {
 	data(): { micromarkExtensions?: { text?: Record<number, Construct> }[] }
 }
 
-export function remarkGuardedMath(this: unknown): void {
+// The parts of an mdast tree the fence pass touches (mdast's types are not a dependency here).
+interface MdNode {
+	type: string
+	lang?: string | null
+	meta?: string | null
+	value?: string
+	data?: Record<string, unknown>
+	children?: MdNode[]
+}
+
+// A ```math fence as the display math node remark-math makes of `$$…$$` (mdast-util-math's math: pre > code.math-display).
+function mathFences(node: MdNode): void {
+	if (node.type === "code" && node.lang?.toLowerCase() === "math") {
+		const value = node.value ?? ""
+
+		node.type = "math"
+		node.meta = null
+		delete node.lang
+		node.data = {
+			hName: "pre",
+			hChildren: [
+				{
+					type: "element",
+					tagName: "code",
+					properties: { className: ["language-math", "math-display"] },
+					children: [{ type: "text", value }]
+				}
+			]
+		}
+
+		return
+	}
+
+	for (const child of node.children ?? []) {
+		mathFences(child)
+	}
+}
+
+export function remarkGuardedMath(this: unknown): (tree: MdNode) => void {
 	const processor = this as Processor
 
 	;(remarkMath as unknown as (this: Processor) => void).call(processor)
@@ -81,4 +120,6 @@ export function remarkGuardedMath(this: unknown): void {
 	}
 
 	text[DOLLAR] = guard(inline)
+
+	return mathFences
 }

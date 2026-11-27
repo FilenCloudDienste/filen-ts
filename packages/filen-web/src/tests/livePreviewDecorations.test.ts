@@ -291,6 +291,30 @@ describe("live preview decorations", () => {
 		expect(widgets(plain.found, EmbedWidget)).toEqual([])
 	})
 
+	it("draws a ```math fence as display math, its source shown while the cursor is in it", () => {
+		const doc = "```math\nx = 1\ny = 2\n```\n\n~~~Math\nz\n~~~"
+		const { found, blocks } = decorate(doc)
+		const embeds = widgets(found, EmbedWidget).map(({ widget }) => [widget.source, widget.display, widget.render === renderMath])
+
+		expect(embeds).toEqual([
+			["x = 1\ny = 2", true, true],
+			["z", true, true]
+		])
+		expect(blocks.length).toBe(2)
+		expect(widgets(found, FenceLabelWidget)).toEqual([])
+
+		const editing = decorate(doc, { cursor: 9 })
+
+		expect(widgets(editing.found, EmbedWidget).map(({ widget }) => widget.source)).toEqual(["z"])
+		expect(classesAt(editing.found, 0)).toEqual(["cm-lp-fence", "cm-lp-fence-start"])
+
+		// Without math, a code block like any other.
+		const plain = decorate(doc, { config: { ...CONFIG, math: null } })
+
+		expect(widgets(plain.found, EmbedWidget)).toEqual([])
+		expect(widgets(plain.found, FenceLabelWidget).map(({ widget }) => widget.language)).toEqual(["math", "Math"])
+	})
+
 	it("decorates only the stretch asked for", () => {
 		const doc = Array.from({ length: 2000 }, (_, index) => `# Heading ${String(index)}`).join("\n")
 		const state = stateOf(doc)

@@ -51,17 +51,21 @@ describe("the preview's markdown", () => {
 		expect(source.getAttribute("title")).not.toBe("")
 	})
 
-	it("keeps a fence whose language is math a code block", () => {
+	it("paints a ```math fence as display math, as GitHub does", () => {
 		const { container } = render(
 			<PreviewMarkdown
-				text={"```math\n\\frac{a}{b}\n```"}
+				text={"```math\n\\frac{a}{b}\n```\n\n```mathematica\nx\n```"}
 				alt="notes.md"
 			/>,
 			{ wrapper: queryClientWrapper(createTestQueryClient()) }
 		)
 
-		expect(container.querySelector("span[role=math]")).toBeNull()
-		expect(container.querySelector("pre > code")?.textContent).toBe("\\frac{a}{b}\n")
+		const formulas = [...container.querySelectorAll("span[role=math]")]
+
+		expect(formulas.map(formula => formula.getAttribute("aria-label"))).toEqual(["\\frac{a}{b}"])
+		expect(formulas[0]?.firstElementChild?.getAttribute("display")).toBe("block")
+		// Only the other fence is a code block.
+		expect([...container.querySelectorAll("pre")].map(pre => pre.textContent)).toEqual(["x\n"])
 	})
 
 	it("keeps prices text", () => {

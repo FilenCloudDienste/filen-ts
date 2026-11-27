@@ -14,7 +14,7 @@ export type MarkdownComponents = Components
 export type MarkdownUrlTransform = UrlTransform
 
 // Opt-in syntax beyond GFM. `math`: inline math between single dollar signs (GitHub's rule, remarkGuardedMath) and
-// display math between double ones, emitted as `code.language-math` with `math-inline`, or `math-display` inside a
+// display math between double ones or in a ```math fence, emitted as `code.language-math` with `math-inline`, or `math-display` inside a
 // `pre`, for the host's code slot to render. `mermaid`: each ```mermaid fence's `code` carries its place among the
 // document's diagrams as `data-mermaid` (remarkMermaidFences), for the host's slots to draw it.
 export interface MarkdownExtensions {

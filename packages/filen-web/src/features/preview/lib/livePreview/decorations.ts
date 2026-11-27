@@ -31,7 +31,7 @@ export interface LivePreviewConfig {
 		readonly task: string
 		readonly openLink: string
 	}
-	// Formulas ($…$, $$…$$) and ```mermaid fences, where the host's Read view draws them.
+	// Formulas ($…$, $$…$$, ```math fences) and ```mermaid fences, where the host's Read view draws them.
 	readonly math: EmbedRenderer | null
 	readonly mermaid: EmbedRenderer | null
 }
@@ -462,10 +462,14 @@ class Builder {
 		const closed = last.number > first.number && last.text.trim().startsWith(marker?.[1] ?? "```")
 		const touched = this.touches(node.from, node.to)
 
-		if (!touched && this.config.mermaid !== null && language.toLowerCase() === "mermaid" && closed && this.blockable(node)) {
+		// A ```mermaid fence is a diagram, a ```math one display math (as on GitHub).
+		const kind = language.toLowerCase()
+		const embed = kind === "mermaid" ? this.config.mermaid : kind === "math" ? this.config.math : null
+
+		if (!touched && embed !== null && closed && this.blockable(node)) {
 			const source = doc.sliceString(first.to + 1, last.from - 1)
 
-			this.block(node.from, node.to, new EmbedWidget(source, true, this.config.mermaid, 200))
+			this.block(node.from, node.to, new EmbedWidget(source, true, embed, kind === "mermaid" ? 200 : 48))
 
 			return
 		}
