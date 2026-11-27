@@ -25,6 +25,7 @@ vi.mock("@/lib/media/mediaSessionOwner", async importOriginal => {
 
 import { mediaSessionOwners } from "@/lib/media/mediaSessionOwner"
 import { usePreviewMediaSession } from "@/features/preview/hooks/usePreviewMediaSession"
+import { PreviewMediaPagerContext, type PreviewMediaPager } from "@/features/preview/lib/mediaPager"
 
 describe("usePreviewMediaSession", () => {
 	it("takes the session from the music on its first play and gives it back on close", () => {
@@ -74,6 +75,25 @@ describe("usePreviewMediaSession", () => {
 
 		expect(pause).toHaveBeenCalledTimes(1)
 		other.release()
+		unmount()
+	})
+
+	it("hands next/previous track to the overlay's pager, clearing a direction it cannot go", () => {
+		const audio = document.createElement("audio")
+		const next = vi.fn()
+		const pager: PreviewMediaPager = { next, previous: null }
+		const { unmount } = renderHook(
+			() => {
+				usePreviewMediaSession(audio, "song.flac")
+			},
+			{ wrapper: ({ children }) => <PreviewMediaPagerContext value={pager}>{children}</PreviewMediaPagerContext> }
+		)
+
+		audio.dispatchEvent(new Event("play"))
+		;(fake.handlers.get("nexttrack") as MediaSessionHandler)?.({ action: "nexttrack" })
+
+		expect(next).toHaveBeenCalledTimes(1)
+		expect(fake.handlers.get("previoustrack")).toBeNull()
 		unmount()
 	})
 })

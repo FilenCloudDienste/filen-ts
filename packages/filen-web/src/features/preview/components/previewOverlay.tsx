@@ -64,6 +64,7 @@ import { stableUuidOf } from "@/features/drive/store/useDriveClipboardStore"
 import { PreviewLoading } from "@/features/preview/components/previewErrorState"
 import { PreviewErrorBoundary } from "@/features/preview/components/previewErrorBoundary"
 import { usePreviewSwipe } from "@/features/preview/hooks/usePreviewSwipe"
+import { NO_MEDIA_PAGER, PreviewMediaPagerContext, type PreviewMediaPager } from "@/features/preview/lib/mediaPager"
 import { useSettledSlot } from "@/features/preview/hooks/useSettledSlot"
 import {
 	isMediaTarget,
@@ -838,26 +839,49 @@ export function PreviewOverlay({
 			: { bytes: encoded.bytes, commit: null, encoding: slotText.encoding }
 	}
 
-	// A touch swipe on a picture or a video pages as the header's arrows do; never while editing, saving, a dialog is up
-	// or a slideshow runs.
-	const swipe = usePreviewSwipe(
-		items.length > 1 &&
-			editing === null &&
-			videoEditing === null &&
-			!saving &&
-			!dialogOpen &&
-			!slideshow.running &&
-			swipePagesCategory(pin?.category),
-		delta => {
-			if (index + delta < 0 || index + delta >= items.length) {
-				return
-			}
+	// The header arrows' step, for a touch swipe and the media keys: never while editing, saving, a dialog is up or a
+	// slideshow runs; the unsaved-changes prompt first.
+	const pagerHeld = editing !== null || videoEditing !== null || saving || dialogOpen || slideshow.running
 
-			requestOrRun(delta === 1 ? "next" : "prev", () => {
-				onStep(delta)
-			})
+	function stepPager(delta: 1 | -1): void {
+		if (index + delta < 0 || index + delta >= items.length) {
+			return
 		}
-	)
+
+		requestOrRun(delta === 1 ? "next" : "prev", () => {
+			onStep(delta)
+		})
+	}
+
+	// A touch swipe on a picture or a video pages as the header's arrows do.
+	const swipe = usePreviewSwipe(items.length > 1 && !pagerHeld && swipePagesCategory(pin?.category), stepPager)
+	// The OS's next/previous track keys while a previewed video or audio file holds the Media Session: the pager, or a
+	// running slideshow's own steps.
+	const mediaPager: PreviewMediaPager = slideshow.running
+		? {
+				next: () => {
+					slideshow.go(1)
+				},
+				previous: () => {
+					slideshow.go(-1)
+				}
+			}
+		: pagerHeld
+			? NO_MEDIA_PAGER
+			: {
+					next:
+						index < items.length - 1
+							? () => {
+									stepPager(1)
+								}
+							: null,
+					previous:
+						index > 0
+							? () => {
+									stepPager(-1)
+								}
+							: null
+				}
 	const startImageEditRef = useLatestRef(startImageEdit)
 	const startVideoEditRef = useLatestRef(startVideoEdit)
 	// A video export's end, as things stand when it comes (the export may outlive the editor that started it).
@@ -1558,123 +1582,126 @@ export function PreviewOverlay({
 							onPointerCancel={swipe.onPointerCancel}
 							onClickCapture={swipe.onClickCapture}
 						>
-							<ArchiveListingScope>
-								{/* Mid-run (a held arrow key) the slots stepped through show only their header. */}
-								{editing !== null ? (
-									<PreviewErrorBoundary
-										key={`edit:${editing.uuid}`}
-										item={driveItem}
-									>
-										<ImageEditor
-											source={editing.source}
-											info={editing.info}
-											locked={saving}
-											onDirtyChange={setPreviewDirty}
-											onLoadFailed={() => {
-												exitImageEdit()
-												toast.error(t("previewImageSaveOpenFailed"))
-											}}
-											saveRef={imageSaveRef}
-											commandsRef={imageCommandsRef}
-											session={editing.session}
-											capabilities={editing.capabilities}
-										/>
-									</PreviewErrorBoundary>
-								) : videoEditing !== null ? (
-									<PreviewErrorBoundary
-										key={`videoEdit:${videoEditing.uuid}`}
-										item={driveItem}
-									>
-										<VideoEditor
-											client={videoEditing.client}
-											info={videoEditing.info}
-											item={driveItem}
-											name={name}
-											title={
-												<DialogPrimitive.Title className="min-w-0">
-													<SplitTitle
-														text={name}
-														tailLength={16}
-													/>
-												</DialogPrimitive.Title>
-											}
-											onDirtyChange={setPreviewDirty}
-											onCancel={requestExitVideoEdit}
-											onExit={exitVideoEdit}
-											onSaveStarted={videoSaveStarted}
-											onSaveFrame={saveVideoFrame}
-											commandsRef={videoCommandsRef}
-										/>
-									</PreviewErrorBoundary>
-								) : !slotSettled ? (
-									<PreviewLoading />
-								) : (
-									<PreviewDownloadableProvider
-										downloadable={previewDownloadable(downloadable, variant)}
-										onDownload={download}
-									>
+							<PreviewMediaPagerContext value={mediaPager}>
+								<ArchiveListingScope>
+									{/* Mid-run (a held arrow key) the slots stepped through show only their header. */}
+									{editing !== null ? (
 										<PreviewErrorBoundary
-											key={slotKey}
+											key={`edit:${editing.uuid}`}
 											item={driveItem}
 										>
-											<SlideshowSlot value={slideshow.running ? slideshow.slot : null}>
-												<ContentSniffGate
-													item={driveItem}
-													asText={asText}
-													render={() => (
-														<PreviewReplaceContext value={replaceInSlot}>
-															<PasswordDraftContext value={passwordDraft.draft}>
-																<PreviewBody
-																	item={driveItem}
-																	variant={variant}
-																	category={pin?.category}
-																	documentKey={currentDocumentKey}
-																	editable={slotWritable}
-																	renamedReadOnly={renamedReadOnly}
-																	neverEditable={
-																		!ownsWritableFile(driveItem, variant) || isViewOnlyPdf(driveItem)
-																	}
-																	locked={saving}
-																	onDirtyChange={setPreviewDirty}
-																	readAs={readAs}
-																	onTextState={state => {
-																		if (rawDriveItem !== undefined) {
-																			const forUuid = rawDriveItem.data.uuid
-
-																			setTextState(current =>
-																				current?.forUuid === forUuid &&
-																				current.writable === state.writable &&
-																				current.encoding === state.encoding &&
-																				current.readEncoding === state.readEncoding
-																					? current
-																					: { ...state, forUuid }
-																			)
-																		}
-																	}}
-																	contentRef={contentRef}
-																	spreadsheetRef={spreadsheetRef}
-																	docxRef={docxRef}
-																	presentationRef={presentationRef}
-																	imageRef={imageRef}
-																	imagePageRef={imagePageRef}
-																	onSave={() => performSaveRef.current()}
-																	onAutosave={() => performSaveRef.current(true)}
-																	canSaveCopy={canSaveCopyBeside(driveItem, variant)}
-																	onOpenFile={opened => {
-																		if (rawDriveItem !== undefined) {
-																			commitSaved(rawDriveItem.data.uuid, opened)
-																		}
-																	}}
-																/>
-															</PasswordDraftContext>
-														</PreviewReplaceContext>
-													)}
-												/>
-											</SlideshowSlot>
+											<ImageEditor
+												source={editing.source}
+												info={editing.info}
+												locked={saving}
+												onDirtyChange={setPreviewDirty}
+												onLoadFailed={() => {
+													exitImageEdit()
+													toast.error(t("previewImageSaveOpenFailed"))
+												}}
+												saveRef={imageSaveRef}
+												commandsRef={imageCommandsRef}
+												session={editing.session}
+												capabilities={editing.capabilities}
+											/>
 										</PreviewErrorBoundary>
-									</PreviewDownloadableProvider>
-								)}
-							</ArchiveListingScope>
+									) : videoEditing !== null ? (
+										<PreviewErrorBoundary
+											key={`videoEdit:${videoEditing.uuid}`}
+											item={driveItem}
+										>
+											<VideoEditor
+												client={videoEditing.client}
+												info={videoEditing.info}
+												item={driveItem}
+												name={name}
+												title={
+													<DialogPrimitive.Title className="min-w-0">
+														<SplitTitle
+															text={name}
+															tailLength={16}
+														/>
+													</DialogPrimitive.Title>
+												}
+												onDirtyChange={setPreviewDirty}
+												onCancel={requestExitVideoEdit}
+												onExit={exitVideoEdit}
+												onSaveStarted={videoSaveStarted}
+												onSaveFrame={saveVideoFrame}
+												commandsRef={videoCommandsRef}
+											/>
+										</PreviewErrorBoundary>
+									) : !slotSettled ? (
+										<PreviewLoading />
+									) : (
+										<PreviewDownloadableProvider
+											downloadable={previewDownloadable(downloadable, variant)}
+											onDownload={download}
+										>
+											<PreviewErrorBoundary
+												key={slotKey}
+												item={driveItem}
+											>
+												<SlideshowSlot value={slideshow.running ? slideshow.slot : null}>
+													<ContentSniffGate
+														item={driveItem}
+														asText={asText}
+														render={() => (
+															<PreviewReplaceContext value={replaceInSlot}>
+																<PasswordDraftContext value={passwordDraft.draft}>
+																	<PreviewBody
+																		item={driveItem}
+																		variant={variant}
+																		category={pin?.category}
+																		documentKey={currentDocumentKey}
+																		editable={slotWritable}
+																		renamedReadOnly={renamedReadOnly}
+																		neverEditable={
+																			!ownsWritableFile(driveItem, variant) ||
+																			isViewOnlyPdf(driveItem)
+																		}
+																		locked={saving}
+																		onDirtyChange={setPreviewDirty}
+																		readAs={readAs}
+																		onTextState={state => {
+																			if (rawDriveItem !== undefined) {
+																				const forUuid = rawDriveItem.data.uuid
+
+																				setTextState(current =>
+																					current?.forUuid === forUuid &&
+																					current.writable === state.writable &&
+																					current.encoding === state.encoding &&
+																					current.readEncoding === state.readEncoding
+																						? current
+																						: { ...state, forUuid }
+																				)
+																			}
+																		}}
+																		contentRef={contentRef}
+																		spreadsheetRef={spreadsheetRef}
+																		docxRef={docxRef}
+																		presentationRef={presentationRef}
+																		imageRef={imageRef}
+																		imagePageRef={imagePageRef}
+																		onSave={() => performSaveRef.current()}
+																		onAutosave={() => performSaveRef.current(true)}
+																		canSaveCopy={canSaveCopyBeside(driveItem, variant)}
+																		onOpenFile={opened => {
+																			if (rawDriveItem !== undefined) {
+																				commitSaved(rawDriveItem.data.uuid, opened)
+																			}
+																		}}
+																	/>
+																</PasswordDraftContext>
+															</PreviewReplaceContext>
+														)}
+													/>
+												</SlideshowSlot>
+											</PreviewErrorBoundary>
+										</PreviewDownloadableProvider>
+									)}
+								</ArchiveListingScope>
+							</PreviewMediaPagerContext>
 							{/* On the stage it watches the pointer over. */}
 							{slideshow.running ? (
 								<SlideshowBar
