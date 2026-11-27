@@ -24,6 +24,9 @@ vi.mock("@/features/drive/hooks/useUploadMenuActions", () => ({
 	})
 }))
 vi.mock("@/features/drive/queries/drive", () => ({ driveListingQueryUpdate: vi.fn() }))
+vi.mock("@/features/drive/hooks/useNameFieldCheck", () => ({
+	useNameFieldCheck: () => ({ error: null, warning: null, blocked: () => false })
+}))
 vi.mock("@/components/dialogs/inputDialog", () => ({
 	InputDialog: (props: { open: boolean }) => (props.open ? <div data-testid="new-directory-dialog" /> : null)
 }))

@@ -15,8 +15,13 @@ export interface NewDirectoryDialogProps {
 	hiddenNotice: boolean
 }
 
-// The name dialog behind New directory — the toolbar's New menu, the move dialog and the tree's menus.
-export function NewDirectoryDialog({ open, onOpenChange, parentUuid, hiddenNotice }: NewDirectoryDialogProps) {
+// The name dialog behind New directory — the toolbar's New menu, the move dialog and the tree's menus. Mounted only
+// while open, so a closed one (every New menu holds one) observes no listing.
+export function NewDirectoryDialog(props: NewDirectoryDialogProps) {
+	return props.open ? <NewDirectoryPrompt {...props} /> : null
+}
+
+function NewDirectoryPrompt({ onOpenChange, parentUuid, hiddenNotice }: NewDirectoryDialogProps) {
 	const { t } = useTranslation("drive")
 	const [pending, setPending] = useState(false)
 	const [value, setValue] = useState("")
@@ -45,7 +50,7 @@ export function NewDirectoryDialog({ open, onOpenChange, parentUuid, hiddenNotic
 
 	return (
 		<InputDialog
-			open={open}
+			open
 			pending={pending}
 			title={t("driveNewDirectoryTitle")}
 			body={t("driveNewDirectoryBody")}
@@ -55,15 +60,9 @@ export function NewDirectoryDialog({ open, onOpenChange, parentUuid, hiddenNotic
 			validate={name => name.trim().length > 0 && !check.blocked(name)}
 			errorFor={() => check.error}
 			onValueChange={setValue}
-			onOpenChange={next => {
-				if (!next) {
-					setValue("")
-				}
-
-				onOpenChange(next)
-			}}
-			onSubmit={value => {
-				void handleSubmit(value)
+			onOpenChange={onOpenChange}
+			onSubmit={next => {
+				void handleSubmit(next)
 			}}
 		/>
 	)

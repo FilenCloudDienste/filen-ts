@@ -35,6 +35,9 @@ vi.mock("@/lib/keymap/useAction", () => ({
 	IN_EDITORS_AND_FIELDS: {}
 }))
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
+vi.mock("@/features/drive/hooks/useNameFieldCheck", () => ({
+	useNameFieldCheck: () => ({ error: null, warning: null, blocked: () => false })
+}))
 vi.mock("@/features/preview/lib/previewCache", async () => ({
 	...(await vi.importActual<typeof import("@/features/preview/lib/previewCache")>("@/features/preview/lib/previewCache")),
 	loadPreviewBytes: () => Promise.resolve()
