@@ -56,10 +56,16 @@ function BarTooltip({
 // when a mouse enters it and dropped when it leaves: entering swaps each button for its tooltip trigger before the
 // pointer can click, and an open ⋯ menu holds them until it closes, so its trigger is never remounted under it. Touch and
 // pen never switch them on: a tap's pointerenter would remount the button it is pressing.
-export function MessageActionBar({ descriptors, runAction }: MessageActionsHandle) {
+//
+// Its ⋯ menu's open state is the row's, which also opens it on a touch long-press (messageRow.tsx).
+export function MessageActionBar({
+	descriptors,
+	runAction,
+	menuOpen,
+	onMenuOpenChange
+}: MessageActionsHandle & { menuOpen: boolean; onMenuOpenChange: (open: boolean) => void }) {
 	const { t } = useTranslation(["chats", "common"])
 	const toolbarRef = useRef<HTMLDivElement | null>(null)
-	const [menuOpen, setMenuOpen] = useState(false)
 	// Switched on by the pointer only: the menu opening never swaps the trigger it is opening from.
 	const [tooltips, setTooltips] = useState(false)
 
@@ -118,8 +124,9 @@ export function MessageActionBar({ descriptors, runAction }: MessageActionsHandl
 				)
 			})}
 			<DropdownMenu
+				open={menuOpen}
 				onOpenChange={open => {
-					setMenuOpen(open)
+					onMenuOpenChange(open)
 
 					// The pointer may have left the bar for the menu and then the menu itself, which fires no pointerleave on
 					// the bar: whether it is still over the bar is read from the hover state the moment the menu closes.

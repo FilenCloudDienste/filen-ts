@@ -23,6 +23,7 @@ import { useChatSendState } from "@/features/chats/store/useChatsInflight"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { UserAvatar } from "@/components/userAvatar"
+import { useTouchLongPress } from "@/lib/useTouchLongPress"
 
 // Compact reply reference above a reply's line: the quoted sender + a one-line snippet of the referenced
 // message (denormalized snapshot on message.replyTo). Undecryptable reference bodies (message undefined)
@@ -171,6 +172,17 @@ export function MessageRow({
 		onRequestDelete: requestDelete
 	})
 
+	// The action bar's ⋯ menu, also opened by a touch long-press on the row: the bar shows on hover and focus only, which
+	// a touch never gives. It replaces the context menu's own long-press, so a touch opens one menu, at the bar.
+	const [actionsMenuOpen, setActionsMenuOpen] = useState(false)
+	const press = useTouchLongPress<HTMLDivElement>({
+		onLongPress: () => {
+			if (actions.descriptors.length > 0) {
+				setActionsMenuOpen(true)
+			}
+		}
+	})
+
 	// The active row hands the thread its action model for the message keys (keymap.ts chats.message.*), so the keys
 	// and the menus share one set of gates. A hidden blocked message offers none, as its menu does.
 	useEffect(() => {
@@ -232,6 +244,7 @@ export function MessageRow({
 							<div
 								data-message-focus=""
 								tabIndex={active ? 0 : -1}
+								{...press.handlers}
 								className={cn(
 									"group relative px-4 py-px focus-ring-row outline-none focus-visible:ring-inset",
 									failed ? FAILED_ROW_HIGHLIGHT : addressing !== null ? ADDRESSED_ROW_HIGHLIGHT : ROW_HIGHLIGHT,
@@ -326,7 +339,11 @@ export function MessageRow({
 								{/* Over the row's top edge, out of flow so it adds no height. Only the bar itself is
 								    hit-testable, and only while revealed. */}
 								<div className="pointer-events-none absolute -top-4 right-4 z-10">
-									<MessageActionBar {...actions} />
+									<MessageActionBar
+										{...actions}
+										menuOpen={actionsMenuOpen}
+										onMenuOpenChange={setActionsMenuOpen}
+									/>
 								</div>
 							</div>
 						}

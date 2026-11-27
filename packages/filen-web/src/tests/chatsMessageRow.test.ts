@@ -283,3 +283,64 @@ describe("MessageRow layout", () => {
 		expect(container.querySelector("svg.fill-current")).toBeNull()
 	})
 })
+
+// The action bar shows on hover and focus, which a touch never gives: a long-press on the message opens its actions.
+describe("MessageRow touch long-press", () => {
+	function messageBody(container: HTMLElement): HTMLElement {
+		const body = container.querySelector("[data-message-focus] .select-text")
+
+		if (!(body instanceof HTMLElement)) {
+			throw new Error("no message body")
+		}
+
+		return body
+	}
+
+	it("opens the message's actions after a held touch, and swallows the click its lift produces", async () => {
+		vi.useFakeTimers()
+
+		try {
+			const { container } = renderRow()
+			const body = messageBody(container)
+
+			fireEvent.pointerDown(body, { pointerType: "touch", isPrimary: true, pointerId: 1, clientX: 10, clientY: 10 })
+			vi.advanceTimersByTime(500)
+			vi.useRealTimers()
+
+			await waitFor(() => {
+				expect(screen.getByRole("menuitem", { name: "Reply" })).toBeTruthy()
+			})
+
+			fireEvent.pointerUp(body, { pointerType: "touch", pointerId: 1 })
+
+			expect(fireEvent.click(body)).toBe(false)
+			expect(screen.getByRole("menuitem", { name: "Reply" })).toBeTruthy()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("opens nothing for a touch that moves (a scroll) or lifts early, nor for a mouse press", () => {
+		vi.useFakeTimers()
+
+		try {
+			const { container } = renderRow()
+			const body = messageBody(container)
+
+			fireEvent.pointerDown(body, { pointerType: "touch", isPrimary: true, pointerId: 1, clientX: 10, clientY: 10 })
+			fireEvent.pointerMove(body, { pointerType: "touch", pointerId: 1, clientX: 10, clientY: 40 })
+			vi.advanceTimersByTime(600)
+
+			fireEvent.pointerDown(body, { pointerType: "touch", isPrimary: true, pointerId: 2, clientX: 10, clientY: 10 })
+			fireEvent.pointerUp(body, { pointerType: "touch", pointerId: 2 })
+			vi.advanceTimersByTime(600)
+
+			fireEvent.pointerDown(body, { pointerType: "mouse", isPrimary: true, pointerId: 3, clientX: 10, clientY: 10 })
+			vi.advanceTimersByTime(600)
+
+			expect(screen.queryByRole("menuitem")).toBeNull()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+})
