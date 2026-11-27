@@ -8,7 +8,7 @@ import { driveRowKey } from "@/features/drive/lib/rowKey"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { runOp } from "@/lib/actions/outcome"
 import { runBulk, type BulkOutcome, type BulkProgress } from "@/lib/actions/bulk"
-import { createShareProgress } from "@/features/drive/lib/share/progress.logic"
+import { createShareProgress, type ShareProgress } from "@/features/drive/lib/share/progress.logic"
 
 // Shares each item with every chosen contact — the outward-facing write of the sharing domain,
 // zero-`useMutation` (typed async helper + a cache invalidate on success), LABEL-FIRST error shaping
@@ -25,12 +25,12 @@ import { createShareProgress } from "@/features/drive/lib/share/progress.logic"
 // The Rust SDK owns networking/retries/rate-limiting/concurrency — this only iterates the user's N×M
 // chosen shares (mobile parity; there is no AbortSignal on the wasm share ops). Item-level parallelism
 // reuses the established runBulk runner; each item's contacts share in a plain sequential loop, catching
-// per-contact so one rejection never stops the loop early. `onProgress` gets the fraction of the N×M
-// pairs done, a directory's pair following the bytes its share re-encrypts (progress.logic.ts).
+// per-contact so one rejection never stops the loop early. `onProgress` gets one directory share's phases,
+// or the fraction of the N×M pairs done, a directory's pair following its items shared (progress.logic.ts).
 export async function shareItems(
 	items: DriveItem[],
 	contacts: Contact[],
-	onProgress: (fraction: number) => void
+	onProgress: (progress: ShareProgress) => void
 ): Promise<BulkOutcome<DriveItem>> {
 	const nextPair = createShareProgress(items.length * contacts.length, onProgress)
 
@@ -39,12 +39,12 @@ export async function shareItems(
 		let firstError: unknown
 
 		for (const contact of contacts) {
-			const pair = nextPair()
+			const pair = nextPair(base.type === "directory")
 
 			try {
 				await runOp(
 					base.type === "directory"
-						? sdkApi.shareDirectory(base.data, contact, Comlink.proxy(pair.progress))
+						? sdkApi.shareDirectory(base.data, contact, Comlink.proxy(pair.bytes), Comlink.proxy(pair.items))
 						: sdkApi.shareFile(base.data, contact)
 				)
 			} catch (error) {

@@ -20,7 +20,7 @@ const {
 	getFileLinkStatus: vi.fn<(file: unknown) => Promise<FilePublicLink | undefined>>(),
 	getDirectoryLinkStatus: vi.fn<(dir: unknown) => Promise<DirPublicLinkRW | undefined>>(),
 	createFileLink: vi.fn<(file: unknown) => Promise<FilePublicLink>>(),
-	createDirectoryLink: vi.fn<(dir: unknown, onProgress: unknown) => Promise<DirPublicLinkRW>>(),
+	createDirectoryLink: vi.fn<(dir: unknown, onProgress: unknown, onItems: unknown) => Promise<DirPublicLinkRW>>(),
 	getUserInfo: vi.fn<() => Promise<UserInfo>>()
 }))
 

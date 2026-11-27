@@ -26,6 +26,7 @@ import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { useActivityStore } from "@/lib/activity/activityStore"
 import { ContactPickerDialog } from "@/features/drive/components/contactPickerDialog"
+import type { ShareProgress } from "@/features/drive/lib/share/progress.logic"
 
 function contact(label: string): Contact {
 	return {
@@ -107,8 +108,8 @@ describe("ContactPickerDialog sharing", () => {
 	it("hands a directory's share to the toast at once, reporting its progress as a fraction", async () => {
 		const shared = dir("Photos")
 		let finish: (outcome: unknown) => void = () => undefined
-		let progress: (fraction: number) => void = () => undefined
-		shareItems.mockImplementation((_items: DriveItem[], _contacts: Contact[], onProgress: (fraction: number) => void) => {
+		let progress: (progress: ShareProgress) => void = () => undefined
+		shareItems.mockImplementation((_items: DriveItem[], _contacts: Contact[], onProgress: (progress: ShareProgress) => void) => {
 			progress = onProgress
 
 			return new Promise(resolve => {
@@ -125,7 +126,7 @@ describe("ContactPickerDialog sharing", () => {
 		expect(onClose).toHaveBeenCalledTimes(1)
 		expect(toast).toHaveBeenCalledWith("Sharing Photos with 2 contacts", expect.objectContaining({ duration: Infinity }))
 
-		progress(0.4)
+		progress({ kind: "fraction", value: 0.4 })
 
 		expect(Object.values(useActivityStore.getState().progress)).toEqual([{ kind: "fraction", value: 0.4 }])
 
@@ -137,6 +138,36 @@ describe("ContactPickerDialog sharing", () => {
 		expect(toast.success).toHaveBeenCalledExactlyOnceWith("Shared Photos with 2 contacts", expect.anything())
 		expect(useDriveStore.getState().selectedItems).toEqual([])
 		expect(useActivityStore.getState().progress).toEqual({})
+	})
+
+	it("words one directory's share with one contact by its phases: reading, then items shared", () => {
+		const shared = dir("Photos")
+		let progress: (progress: ShareProgress) => void = () => undefined
+		shareItems.mockImplementation((_items: DriveItem[], _contacts: Contact[], onProgress: (progress: ShareProgress) => void) => {
+			progress = onProgress
+
+			return new Promise(() => undefined)
+		})
+		open([shared])
+
+		pick("alice@example.com")
+		share()
+
+		act(() => {
+			progress({ kind: "directory", progress: { phase: "reading", fraction: undefined } })
+		})
+
+		expect(Object.values(useActivityStore.getState().progress)).toEqual([
+			{ kind: "phase", label: "Reading directory…", value: undefined }
+		])
+
+		act(() => {
+			progress({ kind: "directory", progress: { phase: "items", done: 3, total: 12 } })
+		})
+
+		expect(Object.values(useActivityStore.getState().progress)).toEqual([
+			{ kind: "phase", label: "Sharing 3 of 12 items", value: 0.25 }
+		])
 	})
 
 	it("hands several files to the toast at once", () => {

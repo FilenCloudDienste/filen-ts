@@ -4,6 +4,7 @@ import { removeByUuid } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { i18n } from "@/lib/i18n"
 import { settleGuard } from "@/lib/workers/settleGuard"
+import { directoryProgress, type DirectoryProgress } from "@/features/drive/lib/directoryProgress"
 import { queryClient } from "@/queries/client"
 import { accountQueryGet, markAccountStale } from "@/queries/account"
 import {
@@ -500,23 +501,26 @@ export function deleteVersions(file: FileItem, versions: FileVersion[], onSettle
 
 export type LinkActionOutcome = { status: "success"; link: DriveItemLinkStatus } | { status: "error"; dto: ErrorDTO }
 
-// The dir tree re-encrypt crosses Comlink with a progress callback — Comlink.proxy marks it so the
-// worker can invoke it directly instead of the call attempting (and failing) to structured-clone a
-// function.
-export async function createLink(
-	item: DriveItem,
-	onProgress: (downloadedBytes: number, totalBytes: number | undefined) => void
-): Promise<LinkActionOutcome> {
+// A directory link reports its two phases (directoryProgress.ts) through two Comlink.proxy callbacks, so
+// the worker can invoke them directly instead of the call attempting (and failing) to structured-clone
+// a function. A file link reports nothing.
+export async function createLink(item: DriveItem, onProgress: (progress: DirectoryProgress) => void): Promise<LinkActionOutcome> {
 	const base = asDirectoryOrFile(item)
 	// A report that arrives after the link was made (or failed) would show it being made again.
 	const progress = settleGuard(onProgress)
 	let link: DriveItemLinkStatus
 
 	try {
-		link =
-			base.type === "directory"
-				? { type: "directory", status: await runOp(sdkApi.createDirectoryLink(base.data, Comlink.proxy(progress.callback))) }
-				: { type: "file", status: await runOp(sdkApi.createFileLink(base.data)) }
+		if (base.type === "directory") {
+			const callbacks = directoryProgress(progress.callback)
+
+			link = {
+				type: "directory",
+				status: await runOp(sdkApi.createDirectoryLink(base.data, Comlink.proxy(callbacks.bytes), Comlink.proxy(callbacks.items)))
+			}
+		} else {
+			link = { type: "file", status: await runOp(sdkApi.createFileLink(base.data)) }
+		}
 	} catch (e) {
 		return { status: "error", dto: asErrorDTO(e) }
 	} finally {

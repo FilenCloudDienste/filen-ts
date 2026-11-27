@@ -1,15 +1,23 @@
-// How far a share of N items with M contacts is, as one fraction over its N×M item-contact pairs: a
-// pair is 0 until it settles at 1, and a directory's pair follows its bytes in between. Reported only
-// when the whole percent changes, so a run makes at most ~100 reports however often its pairs tick.
+import { directoryProgress, type DirectoryProgress } from "@/features/drive/lib/directoryProgress"
+
+// How far a share of N items with M contacts is. A run of one directory with one contact shows that
+// share's own phases (reading its tree, then its items shared). Any other run is one fraction over its
+// N×M item-contact pairs: a pair is 0 until it settles at 1, and a directory's pair follows its items
+// shared in between (its listing counts as 0). The fraction is reported only when the whole percent
+// changes, so a run makes at most ~100 reports however often its pairs tick.
+export type ShareProgress = { kind: "fraction"; value: number } | { kind: "directory"; progress: DirectoryProgress }
+
 export interface SharePair {
-	// A directory pair's bytes so far, of a total the SDK may not know yet.
-	progress: (bytes: number, totalBytes: number | undefined) => void
+	// A directory pair's listing bytes, of a total the SDK may not know yet.
+	bytes: (bytes: number, totalBytes: number | undefined) => void
+	// A directory pair's items shared, of its total.
+	items: (done: number, total: number) => void
 	// Succeeded or failed: done either way. Later progress for it is ignored (its ticks can arrive after
 	// its result, on their own message port).
 	settle: () => void
 }
 
-export function createShareProgress(pairs: number, report: (fraction: number) => void): () => SharePair {
+export function createShareProgress(pairs: number, report: (progress: ShareProgress) => void): (directory: boolean) => SharePair {
 	let sum = 0
 	let reportedPercent = 0
 
@@ -21,13 +29,33 @@ export function createShareProgress(pairs: number, report: (fraction: number) =>
 
 		if (percent !== reportedPercent) {
 			reportedPercent = percent
-			report(fraction)
+			report({ kind: "fraction", value: fraction })
 		}
 	}
 
-	return () => {
-		let value = 0
+	return directory => {
 		let settled = false
+
+		if (directory && pairs === 1) {
+			const phases = directoryProgress(progress => {
+				if (!settled) {
+					report({ kind: "directory", progress })
+				}
+			})
+
+			// Reading starts with the call, before the SDK's first report.
+			report({ kind: "directory", progress: { phase: "reading", fraction: undefined } })
+
+			return {
+				bytes: phases.bytes,
+				items: phases.items,
+				settle: () => {
+					settled = true
+				}
+			}
+		}
+
+		let value = 0
 
 		function set(next: number): void {
 			if (settled || next <= value) {
@@ -41,9 +69,12 @@ export function createShareProgress(pairs: number, report: (fraction: number) =>
 		}
 
 		return {
-			progress: (bytes, totalBytes) => {
-				if (totalBytes !== undefined && totalBytes > 0) {
-					set(Math.min(1, bytes / totalBytes))
+			bytes: () => {
+				// The listing moves no pair: only its items count.
+			},
+			items: (done, total) => {
+				if (total > 0) {
+					set(Math.min(1, done / total))
 				}
 			},
 			settle: () => {

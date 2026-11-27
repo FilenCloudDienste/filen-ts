@@ -806,8 +806,12 @@ export const drive = {
 	driveLinkPasswordRemoveAction: "Remove password",
 	/** Public-link dialog — button confirming a typed password while the password field is open */
 	driveLinkPasswordSaveAction: "Save",
-	/** Public-link dialog — progress text shown while a directory link is being created; {{percent}} = 0-100 */
-	driveLinkCreatingProgress: "Encrypting… {{percent}}%",
+	/** Progress text while a directory's tree is read before it is linked or shared */
+	driveDirectoryReading: "Reading directory…",
+	/** Public-link dialog — progress text while a directory's items are linked; {{done}} linked so far of {{count}} (the directory itself counted) */
+	driveLinkCreatingItems_one: "Linking {{done}} of {{count}} item",
+	/** Public-link dialog — progress text while a directory's items are linked; {{done}} linked so far of {{count}} (the directory itself counted) */
+	driveLinkCreatingItems_other: "Linking {{done}} of {{count}} items",
 	/** Public-link dialog — expiration option: the link never expires */
 	driveLinkExpirationNever: "Never",
 	/** Public-link dialog — expiration option: 1 hour */
@@ -1050,6 +1054,10 @@ export const drive = {
 	driveUnfavoritePartial_one: "Removed {{count}} item from favorites, {{failed}} failed",
 	/** Activity toast — removing from favorites partly failed; {{count}} succeeded, {{failed}} failed */
 	driveUnfavoritePartial_other: "Removed {{count}} items from favorites, {{failed}} failed",
+	/** Activity toast — progress text while a directory's items are shared with a contact; {{done}} shared so far of {{count}} (the directory itself counted) */
+	driveShareItemsProgress_one: "Sharing {{done}} of {{count}} item",
+	/** Activity toast — progress text while a directory's items are shared with a contact; {{done}} shared so far of {{count}} (the directory itself counted) */
+	driveShareItemsProgress_other: "Sharing {{done}} of {{count}} items",
 	/** Activity toast — sharing with contacts ({{recipients}}: the one contact's name, or driveShareRecipients) running; one item named ({{name}}) */
 	driveShareRunningNamed: "Sharing {{name}} with {{recipients}}",
 	/** Activity toast — sharing with contacts ({{recipients}}: the one contact's name, or driveShareRecipients) running; {{count}} items */

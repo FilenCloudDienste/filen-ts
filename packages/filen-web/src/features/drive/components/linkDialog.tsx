@@ -31,6 +31,8 @@ import { SecretInput } from "@/components/ui/secretInput"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { Spinner } from "@/components/ui/spinner"
+import { Progress } from "@/components/ui/progress"
+import { directoryProgressFraction, type DirectoryProgress } from "@/features/drive/lib/directoryProgress"
 import { LoadingState } from "@/components/loadingState"
 import { Switch } from "@/components/ui/switch"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -79,6 +81,27 @@ function LinkItemHero({ item }: { item: DriveItem }) {
 	)
 }
 
+// Under the Enable button while a directory link is made: reading the tree, then linking its items.
+function LinkCreateProgress({ progress }: { progress: DirectoryProgress }) {
+	const { t } = useTranslation("drive")
+	const fraction = directoryProgressFraction(progress)
+	const label =
+		progress.phase === "reading"
+			? t("driveDirectoryReading")
+			: t("driveLinkCreatingItems", { done: progress.done, count: progress.total })
+
+	return (
+		<div className="flex w-full max-w-64 flex-col items-center gap-1.5">
+			<Progress
+				value={fraction === undefined ? null : Math.floor(fraction * 100)}
+				aria-label={label}
+				className="w-full gap-0"
+			/>
+			<p className="text-xs text-muted-foreground tabular-nums">{label}</p>
+		</div>
+	)
+}
+
 // Public-link management panel — mounted-when-active by the listing's dialog host. Handles BOTH item
 // types in one component (unlike color/versions, which are type-specific): status-check first
 // (no link yet vs. an existing one to configure), each field edit applies immediately (no batched
@@ -97,7 +120,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 	const premiumGate = resolvePremiumGateState(accountQuery.data ? isProAccount(accountQuery.data.subs) : undefined, accountQuery.status)
 	const isOnline = useIsOnline()
 	const [pending, setPending] = useState(false)
-	const [createProgress, setCreateProgress] = useState<{ downloaded: number; total: number | undefined } | null>(null)
+	const [createProgress, setCreateProgress] = useState<DirectoryProgress | null>(null)
 	const [passwordEditing, setPasswordEditing] = useState(false)
 	const [passwordDraft, setPasswordDraft] = useState("")
 	const [confirmDisableOpen, setConfirmDisableOpen] = useState(false)
@@ -110,10 +133,9 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 
 	async function handleCreate(): Promise<void> {
 		setPending(true)
-		setCreateProgress(null)
-		const outcome = await createLink(item, (downloaded, total) => {
-			setCreateProgress({ downloaded, total })
-		})
+		// A directory starts reading its tree at once; a file link has no phases to show.
+		setCreateProgress(item.type === "directory" ? { phase: "reading", fraction: undefined } : null)
+		const outcome = await createLink(item, setCreateProgress)
 		setPending(false)
 		setCreateProgress(null)
 
@@ -178,10 +200,6 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 	const current = linkStatusQuery.status === "success" ? linkStatusQuery.data : undefined
 	const form = current ? readLinkForm(current.status) : null
 	const url = current ? buildPublicLinkUrl(item, current) : null
-	const createProgressPercent =
-		createProgress?.total !== undefined && createProgress.total > 0
-			? Math.round((createProgress.downloaded / createProgress.total) * 100)
-			: null
 
 	return (
 		<>
@@ -271,11 +289,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 											{pending && <Spinner data-icon="inline-start" />}
 											{t("driveLinkEnableAction")}
 										</Button>
-										{createProgressPercent !== null ? (
-											<p className="text-xs text-muted-foreground">
-												{t("driveLinkCreatingProgress", { percent: createProgressPercent })}
-											</p>
-										) : null}
+										{createProgress !== null ? <LinkCreateProgress progress={createProgress} /> : null}
 									</EmptyContent>
 								</Empty>
 							) : current && form ? (

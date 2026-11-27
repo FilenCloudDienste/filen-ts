@@ -48,9 +48,12 @@ export function activityKeys(prefix: ActivityPrefix): ActivityKeys {
 // Extra interpolation an action's words take besides the count and name (a move's destination).
 export type ActivityValues = Readonly<Record<string, string>>
 
-// How far along a running activity is: items settled of a bulk run, or a fraction of work (a directory
-// share's bytes).
-export type ActivityProgress = { kind: "count"; settled: number; total: number } | { kind: "fraction"; value: number }
+// How far along a running activity is: items settled of a bulk run, a fraction of work, or a phase the run
+// words itself ("Reading directory…"), with a fraction or none yet (an indeterminate bar).
+export type ActivityProgress =
+	| { kind: "count"; settled: number; total: number }
+	| { kind: "fraction"; value: number }
+	| { kind: "phase"; label: string; value: number | undefined }
 
 export interface ActivityLine {
 	key: ActivityKeys[keyof ActivityKeys]
@@ -115,8 +118,12 @@ export function bulkResult<T>(
 	return { tone: "error", line: { key: keys.partial, values: { ...values, count: succeeded, failed } }, failures }
 }
 
-// 0-100 for the toast's bar.
-export function progressPercent(progress: ActivityProgress): number {
+// 0-100 for the toast's bar; null for an indeterminate one.
+export function progressPercent(progress: ActivityProgress): number | null {
+	if (progress.kind === "phase") {
+		return progress.value === undefined ? null : Math.min(100, Math.max(0, progress.value * 100))
+	}
+
 	if (progress.kind === "fraction") {
 		return Math.min(100, Math.max(0, progress.value * 100))
 	}
@@ -126,5 +133,5 @@ export function progressPercent(progress: ActivityProgress): number {
 
 // Only a run of several items counts its items; one item has nothing to count.
 export function showsProgress(progress: ActivityProgress | undefined): progress is ActivityProgress {
-	return progress !== undefined && (progress.kind === "fraction" || progress.total > 1)
+	return progress !== undefined && (progress.kind !== "count" || progress.total > 1)
 }

@@ -4,7 +4,7 @@ import { useActivityStore } from "@/lib/activity/activityStore"
 import { progressPercent, showsProgress } from "@/lib/activity/activity.logic"
 import { percentFormat } from "@/features/transfers/components/transferRow.logic"
 
-// A running activity's bar and figure ("5 of 12", "41%"), read live so a tick never re-issues its toast.
+// A running activity's bar and figure ("5 of 12", "41%", "Sharing 5 of 12 items"), read live so a tick never re-issues its toast.
 export function ActivityProgressLine({ id }: { id: string }) {
 	const { t } = useTranslation("common")
 	const progress = useActivityStore(state => state.progress[id])
@@ -23,9 +23,11 @@ export function ActivityProgressLine({ id }: { id: string }) {
 				className="min-w-0 flex-1 gap-0"
 			/>
 			<span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-				{progress.kind === "count"
-					? t("activityProgressCount", { settled: progress.settled, total: progress.total })
-					: percentFormat(undefined).format(Math.floor(percent) / 100)}
+				{progress.kind === "phase"
+					? progress.label
+					: progress.kind === "count"
+						? t("activityProgressCount", { settled: progress.settled, total: progress.total })
+						: percentFormat(undefined).format(Math.floor(percent ?? 0) / 100)}
 			</span>
 		</div>
 	)

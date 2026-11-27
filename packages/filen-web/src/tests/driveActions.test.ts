@@ -137,6 +137,7 @@ import {
 } from "@/features/drive/lib/actions"
 import { testUuid } from "@/tests/support/uuid"
 import { receiverRole } from "@/tests/fixtures/sdk"
+import type { DirectoryProgress } from "@/features/drive/lib/directoryProgress"
 
 beforeEach(() => {
 	vi.clearAllMocks()
@@ -1358,19 +1359,31 @@ describe("createLink", () => {
 		expect(createFileLink).not.toHaveBeenCalled()
 	})
 
-	it("directory: the progress callback passed to createDirectoryLink still calls through to the caller's onProgress", async () => {
+	it("directory: reports the listing's bytes, then the items linked, through two proxied callbacks", async () => {
 		const dir = dirItem({ uuid: testUuid("a") })
-		createDirectoryLink.mockImplementationOnce((_dir: Dir, onProgress: (a: number, b: number | undefined) => void) => {
-			onProgress(50, 100)
-			return mockDirLink()
-		})
-		const seen: [number, number | undefined][] = []
+		createDirectoryLink.mockImplementationOnce(
+			(_dir: Dir, onBytes: (a: number, b: number | undefined) => void, onItems: (done: number, total: number) => void) => {
+				onBytes(0, undefined)
+				onBytes(50, 100)
+				onItems(0, 4)
+				// A listing tick crossing after the first items report never takes the phase back.
+				onBytes(100, 100)
+				onItems(4, 4)
+				return mockDirLink()
+			}
+		)
+		const seen: DirectoryProgress[] = []
 
-		await createLink(dir, (downloaded, total) => {
-			seen.push([downloaded, total])
+		await createLink(dir, progress => {
+			seen.push(progress)
 		})
 
-		expect(seen).toEqual([[50, 100]])
+		expect(seen).toEqual([
+			{ phase: "reading", fraction: undefined },
+			{ phase: "reading", fraction: 0.5 },
+			{ phase: "items", done: 0, total: 4 },
+			{ phase: "items", done: 4, total: 4 }
+		])
 	})
 
 	it.each([
@@ -1378,18 +1391,23 @@ describe("createLink", () => {
 		["refused", () => Promise.reject(new Error("refused"))]
 	])("directory: ignores progress that arrives after the link was %s", async (_label, answer) => {
 		const dir = dirItem({ uuid: testUuid("a") })
-		let late: (a: number, b: number | undefined) => void = () => undefined
+		let lateBytes: (a: number, b: number | undefined) => void = () => undefined
+		let lateItems: (done: number, total: number) => void = () => undefined
 
-		createDirectoryLink.mockImplementationOnce((_dir: Dir, onProgress: (a: number, b: number | undefined) => void) => {
-			late = onProgress
+		createDirectoryLink.mockImplementationOnce(
+			(_dir: Dir, onBytes: (a: number, b: number | undefined) => void, onItems: (done: number, total: number) => void) => {
+				lateBytes = onBytes
+				lateItems = onItems
 
-			return answer()
-		})
+				return answer()
+			}
+		)
 		const onProgress = vi.fn()
 
 		await createLink(dir, onProgress)
-		// The callback's own port keeps no order with the result's: its report comes in last.
-		late(90, 100)
+		// The callbacks' own ports keep no order with the result's: their reports come in last.
+		lateBytes(90, 100)
+		lateItems(3, 4)
 
 		expect(onProgress).not.toHaveBeenCalled()
 	})

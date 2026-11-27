@@ -2590,8 +2590,30 @@ const api = {
 	getFileLinkStatus(file: File): Promise<FilePublicLink | undefined> {
 		return requireClient().getFileLinkStatus(file)
 	},
-	createDirectoryLink(dir: Dir, onProgress: (downloadedBytes: number, totalBytes: number | undefined) => void): Promise<DirPublicLinkRW> {
-		return requireClient().publicLinkDir(dir, onProgress)
+	// Two phases, both Comlink proxies throttled worker-side: the listing's bytes, then the items linked
+	// ((0, total) once the listing is in, then after each). finish() posts the last of each before returning.
+	async createDirectoryLink(
+		dir: Dir,
+		onProgress: (downloadedBytes: number, totalBytes: number | undefined) => void,
+		onItems: (linkedItems: number, totalItems: number) => void
+	): Promise<DirPublicLinkRW> {
+		const bytes = throttledProgress(onProgress)
+		const items = throttledProgress(onItems)
+
+		try {
+			return await requireClient().publicLinkDir(
+				dir,
+				(downloadedBytes, totalBytes) => {
+					bytes.progress(downloadedBytes, totalBytes)
+				},
+				(linkedItems, totalItems) => {
+					items.progress(linkedItems, totalItems)
+				}
+			)
+		} finally {
+			bytes.finish()
+			items.finish()
+		}
 	},
 	createFileLink(file: File): Promise<FilePublicLink> {
 		return requireClient().publicLinkFile(file)
@@ -3081,18 +3103,32 @@ const api = {
 		return requireClient().sendTypingSignal(chat, signalType)
 	},
 	// ── Sharing ──────────────────────────────────────────────────────────────
-	// shareDir reports the bytes of the tree it re-encrypts for the contact; `onProgress` is the caller's
-	// Comlink.proxy, wrapped in a plain worker-side fn like uploadFile's and throttled the same way, so a
-	// large tree's ticks don't each cross the boundary.
-	async shareDirectory(dir: Dir, contact: Contact, onProgress: (bytes: number, totalBytes: number | undefined) => void): Promise<void> {
-		const { progress, finish } = throttledProgress(onProgress)
+	// shareDir reports the bytes of the tree it lists, then the items it shares ((0, total) once the listing
+	// is in, then after each). Both are the caller's Comlink proxies, wrapped in plain worker-side fns like
+	// uploadFile's and throttled the same way, so a large tree's ticks don't each cross the boundary.
+	async shareDirectory(
+		dir: Dir,
+		contact: Contact,
+		onProgress: (bytes: number, totalBytes: number | undefined) => void,
+		onItems: (sharedItems: number, totalItems: number) => void
+	): Promise<void> {
+		const bytes = throttledProgress(onProgress)
+		const items = throttledProgress(onItems)
 
 		try {
-			await requireClient().shareDir(dir, contact, (bytes, totalBytes) => {
-				progress(bytes, totalBytes)
-			})
+			await requireClient().shareDir(
+				dir,
+				contact,
+				(downloadedBytes, totalBytes) => {
+					bytes.progress(downloadedBytes, totalBytes)
+				},
+				(sharedItems, totalItems) => {
+					items.progress(sharedItems, totalItems)
+				}
+			)
 		} finally {
-			finish()
+			bytes.finish()
+			items.finish()
 		}
 	},
 	async shareFile(file: File, contact: Contact): Promise<void> {

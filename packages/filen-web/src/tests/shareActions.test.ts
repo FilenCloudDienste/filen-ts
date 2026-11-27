@@ -30,6 +30,7 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 import { queryClient as testQueryClient } from "@/queries/client"
 import { driveListingQueryKey, driveListingQueryOptions } from "@/features/drive/queries/drive"
 import { shareItems, unshareItems } from "@/features/drive/lib/share/actions"
+import type { ShareProgress } from "@/features/drive/lib/share/progress.logic"
 import { mockDirItem, mockFileItem, mockSharedFile, mockSharedRootDir, receiverRole } from "@/tests/fixtures/sdk"
 import { testUuid } from "@/tests/support/uuid"
 
@@ -116,7 +117,7 @@ describe("shareItems", () => {
 		expect(shareDirectory).toHaveBeenCalledTimes(3)
 		expect(shareFile).toHaveBeenCalledTimes(3)
 		for (const contact of [alice, bob, carol]) {
-			expect(shareDirectory).toHaveBeenCalledWith(dir.data, contact, expect.any(Function))
+			expect(shareDirectory).toHaveBeenCalledWith(dir.data, contact, expect.any(Function), expect.any(Function))
 			expect(shareFile).toHaveBeenCalledWith(file.data, contact)
 		}
 	})
@@ -193,9 +194,9 @@ describe("shareItems", () => {
 		// all three contacts were attempted despite bad's mid-list rejection — the item still fails
 		// overall, but alsoGood is never stranded behind bad the way it used to be.
 		expect(shareDirectory).toHaveBeenCalledTimes(3)
-		expect(shareDirectory).toHaveBeenNthCalledWith(1, dir.data, good, expect.any(Function))
-		expect(shareDirectory).toHaveBeenNthCalledWith(2, dir.data, bad, expect.any(Function))
-		expect(shareDirectory).toHaveBeenNthCalledWith(3, dir.data, alsoGood, expect.any(Function))
+		expect(shareDirectory).toHaveBeenNthCalledWith(1, dir.data, good, expect.any(Function), expect.any(Function))
+		expect(shareDirectory).toHaveBeenNthCalledWith(2, dir.data, bad, expect.any(Function), expect.any(Function))
+		expect(shareDirectory).toHaveBeenNthCalledWith(3, dir.data, alsoGood, expect.any(Function), expect.any(Function))
 	})
 
 	it("keeps the FIRST failing contact's error when multiple contacts fail (LABEL-FIRST)", async () => {
@@ -215,29 +216,64 @@ describe("shareItems", () => {
 		expect(outcome.failed).toEqual([{ item: dir, error: firstDto }])
 	})
 
-	it("reports the fraction of item-contact pairs done, a directory's pair following its bytes", async () => {
+	it("reports the fraction of item-contact pairs done, a directory's pair following its items shared", async () => {
 		const dir = mockDirItem({ uuid: testUuid("d") })
 		const file = mockFileItem({ uuid: testUuid("f") })
-		const fractions: number[] = []
+		const reports: ShareProgress[] = []
 		shareDirectory.mockImplementation(
-			(_dir: Dir, _contact: Contact, onProgress: (bytes: number, total: number | undefined) => void) => {
-				onProgress(50, 100)
-				// A tick the SDK sends before it knows the total moves nothing.
-				onProgress(10, undefined)
+			(
+				_dir: Dir,
+				_contact: Contact,
+				onBytes: (bytes: number, total: number | undefined) => void,
+				onItems: (done: number, total: number) => void
+			) => {
+				// The listing moves nothing in a run of several pairs.
+				onBytes(50, 100)
+				onItems(5, 10)
 
 				return Promise.resolve()
 			}
 		)
 		shareFile.mockResolvedValue(undefined)
 
-		await shareItems([dir, file], [mockContact("alice")], fraction => {
-			fractions.push(fraction)
+		await shareItems([dir, file], [mockContact("alice")], progress => {
+			reports.push(progress)
 		})
 
-		// Two pairs: half of the directory's is a quarter of the whole, then each settled pair is half.
-		expect(fractions[0]).toBe(0.25)
-		expect(fractions).toHaveLength(3)
-		expect(fractions.at(-1)).toBe(1)
+		// Two pairs: half of the directory's items is a quarter of the whole, then each settled pair is half.
+		expect(reports[0]).toEqual({ kind: "fraction", value: 0.25 })
+		expect(reports).toHaveLength(3)
+		expect(reports.at(-1)).toEqual({ kind: "fraction", value: 1 })
+	})
+
+	it("reports one directory shared with one contact by its own phases", async () => {
+		const dir = mockDirItem({ uuid: testUuid("d") })
+		const reports: ShareProgress[] = []
+		shareDirectory.mockImplementation(
+			(
+				_dir: Dir,
+				_contact: Contact,
+				onBytes: (bytes: number, total: number | undefined) => void,
+				onItems: (done: number, total: number) => void
+			) => {
+				onBytes(50, 100)
+				onItems(0, 2)
+				onItems(2, 2)
+
+				return Promise.resolve()
+			}
+		)
+
+		await shareItems([dir], [mockContact("alice")], progress => {
+			reports.push(progress)
+		})
+
+		expect(reports).toEqual([
+			{ kind: "directory", progress: { phase: "reading", fraction: undefined } },
+			{ kind: "directory", progress: { phase: "reading", fraction: 0.5 } },
+			{ kind: "directory", progress: { phase: "items", done: 0, total: 2 } },
+			{ kind: "directory", progress: { phase: "items", done: 2, total: 2 } }
+		])
 	})
 
 	it("invalidates the shared-with-others root listing after at least one item succeeds", async () => {

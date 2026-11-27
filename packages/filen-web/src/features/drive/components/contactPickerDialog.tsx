@@ -4,8 +4,11 @@ import { singleOrCountKey } from "@/lib/i18n"
 import { contactDisplayName, toggleInSet } from "@filen/shared"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { shareItems } from "@/features/drive/lib/share/actions"
+import type { ShareProgress } from "@/features/drive/lib/share/progress.logic"
+import { directoryProgressFraction } from "@/features/drive/lib/directoryProgress"
 import { DRIVE_SHARE, driveActivity } from "@/features/drive/lib/activity"
 import { runBulkActivity } from "@/lib/activity/activity"
+import type { ActivityProgress } from "@/lib/activity/activity.logic"
 import { useContactsQuery } from "@/features/contacts/queries/contacts"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { pendingGuardedOpenChange } from "@/components/dialogs/dismissal.logic"
@@ -48,6 +51,24 @@ export function ContactPickerDialog({ items, onClose, onShared }: ContactPickerD
 		setSelected(prev => toggleInSet(prev, uuid))
 	}
 
+	// One directory share's phases word themselves in the toast; any other run is a bare fraction.
+	function shareActivityProgress(progress: ShareProgress): ActivityProgress {
+		if (progress.kind === "fraction") {
+			return progress
+		}
+
+		const phase = progress.progress
+
+		return {
+			kind: "phase",
+			label:
+				phase.phase === "reading"
+					? t("driveDirectoryReading")
+					: t("driveShareItemsProgress", { done: phase.done, count: phase.total }),
+			value: directoryProgressFraction(phase)
+		}
+	}
+
 	async function handleShare(): Promise<void> {
 		const chosen = resolveSelectedContacts(contacts, selected)
 		const [onlyContact] = chosen
@@ -63,8 +84,8 @@ export function ContactPickerDialog({ items, onClose, onShared }: ContactPickerD
 			items,
 			DRIVE_SHARE,
 			(targets, _onSettled, report) =>
-				shareItems(targets, chosen, value => {
-					report({ kind: "fraction", value })
+				shareItems(targets, chosen, progress => {
+					report(shareActivityProgress(progress))
 				}),
 			{
 				values: {
