@@ -17,6 +17,7 @@ The Rust SDK is the backbone of all Filen apps. It handles everything below the 
 ### Rules
 
 - **Never reimplement crypto or API calls in JS/TS** — always delegate to the SDK
+- The crypto rule covers Filen's protocol and file encryption; sealing a local at-rest cache with WebCrypto under a non-extractable per-tab key is allowed
 - **Never add retry/rate-limit/concurrency logic in JS** — the SDK handles this internally
 
 ## Repository layout
