@@ -228,14 +228,13 @@ export function FileHero({
 				{running ? null : (
 					<div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 sm:px-4">
 						{onBack !== undefined && (
-							<Button
-								variant="ghost"
-								size="icon-sm"
+							<TooltipIconButton
+								label={t("backToDirectory")}
+								shortcut={<Kbd action="links.back" />}
 								onClick={onBack}
-								aria-label={t("backToDirectory")}
 							>
 								<ArrowLeftIcon />
-							</Button>
+							</TooltipIconButton>
 						)}
 						<div className="flex min-w-0 flex-1 flex-col">
 							<MiddleEllipsis

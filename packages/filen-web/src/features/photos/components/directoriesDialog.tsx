@@ -12,6 +12,7 @@ import { SettingsBlock, SettingsGroup } from "@/features/settings/components/set
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 
 // The Directories dialog: every photos directory with its path and Remove, Add directory (the chooser, over this
 // dialog) and Done. Mounted only while open; the names and paths come from the directories' chains, usually from
@@ -95,17 +96,16 @@ export function PhotosDirectoriesDialog({
 													</p>
 												)}
 											</div>
-											<Button
-												variant="ghost"
-												size="icon-sm"
+											<TooltipIconButton
 												disabled={pending || readOnly || !isOnline}
-												aria-label={t("photosRemoveDirectory", { name: root.name })}
+												label={t("photosRemoveDirectory", { name: root.name })}
+												title={isOnline ? undefined : t("common:offlineActionDisabled")}
 												onClick={() => {
 													setRemoving(root)
 												}}
 											>
 												<XIcon />
-											</Button>
+											</TooltipIconButton>
 										</SettingsBlock>
 									)
 								})}

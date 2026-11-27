@@ -12,6 +12,7 @@ import { log } from "@/lib/log"
 import { loadSavedSignatures, savedSignatures, useSavedSignatures } from "@/features/pdf/fillSign/savedSignatures"
 import { SignaturePreview } from "@/features/pdf/fillSign/signatureDialog"
 import { OcrLanguagesRow } from "@/features/pdf/ocr/ocrLanguagesRow"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 
 // Office → PDF: PDFs are only ever saved with Save (no autosave), the visual signatures and initials saved in Fill &
 // Sign (synced, features/pdf/fillSign/savedSignatures.ts), each deletable, and the text recognition languages.
@@ -145,19 +146,17 @@ function SavedSignaturesDialog({
 										<div className="flex h-14 flex-1 items-center justify-center rounded-xl border border-input bg-white p-1.5">
 											<SignaturePreview item={item} />
 										</div>
-										<Button
-											type="button"
-											variant="ghost"
+										<TooltipIconButton
 											size="icon"
 											disabled={!canDelete}
 											title={offlineReason}
-											aria-label={t(section.deleteKey, { index: index + 1 })}
+											label={t(section.deleteKey, { index: index + 1 })}
 											onClick={() => {
 												setDeleting({ id: item.id, initials: section.initials })
 											}}
 										>
 											<Trash2Icon />
-										</Button>
+										</TooltipIconButton>
 									</li>
 								))}
 							</ul>

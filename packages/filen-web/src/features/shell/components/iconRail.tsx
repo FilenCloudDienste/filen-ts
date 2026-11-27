@@ -111,6 +111,10 @@ export function AccountMenu() {
 	// Withdrawal lives with web billing, never in the desktop app.
 	const { now, notice: withdrawal } = useWithdrawalNotice(IS_DESKTOP ? NO_SUBS : (accountQuery.data?.subs ?? NO_SUBS))
 	const withdrawUntil = withdrawal?.until
+	const accountLabel =
+		withdrawUntil === undefined
+			? t("account")
+			: t("accountWithStatus", { status: t("settings:settingsBillingWithdrawStatus", { date: withdrawUntil }) })
 
 	function confirmSignOut(): void {
 		// Anything still queued has until the confirm is answered to reach the server; past that the wipe destroys it.
@@ -153,42 +157,46 @@ export function AccountMenu() {
 				open={menuOpen}
 				onOpenChange={setMenuOpen}
 			>
-				<DropdownMenuTrigger
-					render={
-						<Button
-							variant="ghost"
-							size="icon-lg"
-							aria-label={
-								withdrawUntil === undefined
-									? t("account")
-									: t("accountWithStatus", {
-											status: t("settings:settingsBillingWithdrawStatus", { date: withdrawUntil })
-										})
-							}
-							className="relative rounded-full app-region-no-drag"
-						>
-							<Avatar size="sm">
-								{/* CORS-mode request: require-corp COEP (see UserAvatar). */}
-								{avatarSrc !== undefined ? (
-									<AvatarImage
-										src={avatarSrc}
-										alt=""
-										crossOrigin="anonymous"
-									/>
-								) : null}
-								<AvatarFallback>
-									<UserIcon className="size-4" />
-								</AvatarFallback>
-							</Avatar>
-							{withdrawUntil === undefined ? null : (
-								<RailStatusDot
-									dot="notice"
-									className="absolute top-1 right-1 ring-2 ring-canvas"
-								/>
-							)}
-						</Button>
-					}
-				/>
+				<Tooltip>
+					<TooltipTrigger
+						render={
+							<DropdownMenuTrigger
+								render={
+									<Button
+										variant="ghost"
+										size="icon-lg"
+										aria-label={accountLabel}
+										className="relative rounded-full app-region-no-drag"
+									>
+										<Avatar size="sm">
+											{/* CORS-mode request: require-corp COEP (see UserAvatar). */}
+											{avatarSrc !== undefined ? (
+												<AvatarImage
+													src={avatarSrc}
+													alt=""
+													crossOrigin="anonymous"
+												/>
+											) : null}
+											<AvatarFallback>
+												<UserIcon className="size-4" />
+											</AvatarFallback>
+										</Avatar>
+										{withdrawUntil === undefined ? null : (
+											<RailStatusDot
+												dot="notice"
+												className="absolute top-1 right-1 ring-2 ring-canvas"
+											/>
+										)}
+									</Button>
+								}
+							/>
+						}
+					/>
+					<TooltipContent side="right">
+						{accountLabel}
+						<Kbd action="app.openAccountMenu" />
+					</TooltipContent>
+				</Tooltip>
 				<DropdownMenuContent
 					side="right"
 					align="end"
@@ -653,14 +661,21 @@ export function IconRail() {
 					{...action}
 				/>
 			))}
-			<Link
-				to="/drive/$"
-				params={{ _splat: "" }}
-				aria-label={t("moduleDrive")}
-				className="mb-1.5 flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground focus-ring outline-none app-region-no-drag dark:bg-rail-chip dark:text-rail-chip-foreground"
-			>
-				<Logo className="size-5" />
-			</Link>
+			<Tooltip>
+				<TooltipTrigger
+					render={
+						<Link
+							to="/drive/$"
+							params={{ _splat: "" }}
+							aria-label={t("moduleDrive")}
+							className="mb-1.5 flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground focus-ring outline-none app-region-no-drag dark:bg-rail-chip dark:text-rail-chip-foreground"
+						>
+							<Logo className="size-5" />
+						</Link>
+					}
+				/>
+				<TooltipContent side="right">{t("moduleDrive")}</TooltipContent>
+			</Tooltip>
 
 			{/* Narrow viewports only (md:hidden): opens the drawer holding the current module's sidebar.
 			    Sits with the section entries it reaches, below the brand. Above the breakpoint the same slot shows

@@ -10,6 +10,7 @@ import { useIsOnline } from "@/lib/useIsOnline"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { UserAvatar } from "@/components/userAvatar"
 import { Spinner } from "@/components/ui/spinner"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
 interface AvatarPickerProps {
 	accountQuery: AccountQuerySuccess
@@ -61,36 +62,44 @@ function AvatarPicker({ accountQuery }: AvatarPickerProps) {
 
 	return (
 		<div className="relative shrink-0">
-			<button
-				type="button"
-				aria-label={t("settingsAvatarChangeAction")}
-				disabled={disabled}
-				title={!isOnline ? t("common:offlineActionDisabled") : undefined}
-				className="group/avatar-picker relative block rounded-full focus-ring outline-none disabled:cursor-not-allowed"
-				onClick={() => {
-					inputRef.current?.click()
-				}}
-			>
-				<UserAvatar
-					src={avatarUrl}
-					name={nickName ?? email}
-					size="lg"
-					className="size-14"
-					fallbackClassName="text-lg"
+			{/* Offline, the disabled button's native title says why instead. */}
+			<Tooltip disabled={!isOnline}>
+				<TooltipTrigger
+					render={
+						<button
+							type="button"
+							aria-label={t("settingsAvatarChangeAction")}
+							disabled={disabled}
+							title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+							className="group/avatar-picker relative block rounded-full focus-ring outline-none disabled:cursor-not-allowed"
+							onClick={() => {
+								inputRef.current?.click()
+							}}
+						>
+							<UserAvatar
+								src={avatarUrl}
+								name={nickName ?? email}
+								size="lg"
+								className="size-14"
+								fallbackClassName="text-lg"
+							/>
+							{pending ? (
+								<span className="absolute inset-0 flex items-center justify-center rounded-full bg-background/60">
+									<Spinner />
+								</span>
+							) : (
+								<span
+									aria-hidden="true"
+									className="absolute -right-0.5 -bottom-0.5 flex size-6 items-center justify-center rounded-full bg-background text-muted-foreground shadow-sm ring-1 ring-foreground/10 transition-colors group-hover/avatar-picker:text-foreground group-disabled/avatar-picker:opacity-50"
+								>
+									<CameraIcon className="size-3.5" />
+								</span>
+							)}
+						</button>
+					}
 				/>
-				{pending ? (
-					<span className="absolute inset-0 flex items-center justify-center rounded-full bg-background/60">
-						<Spinner />
-					</span>
-				) : (
-					<span
-						aria-hidden="true"
-						className="absolute -right-0.5 -bottom-0.5 flex size-6 items-center justify-center rounded-full bg-background text-muted-foreground shadow-sm ring-1 ring-foreground/10 transition-colors group-hover/avatar-picker:text-foreground group-disabled/avatar-picker:opacity-50"
-					>
-						<CameraIcon className="size-3.5" />
-					</span>
-				)}
-			</button>
+				<TooltipContent>{t("settingsAvatarChangeAction")}</TooltipContent>
+			</Tooltip>
 			<input
 				ref={inputRef}
 				type="file"

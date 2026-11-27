@@ -106,6 +106,6 @@ describe("Office › PDF settings", () => {
 		render(createElement(OfficePdfRows))
 		fireEvent.click(screen.getByRole("button", { name: EN.settingsOfficeSavedSignaturesManageLabel }))
 
-		expect(await screen.findByRole("button", { name: "Delete signature 1" })).toHaveProperty("disabled", true)
+		expect((await screen.findByRole("button", { name: "Delete signature 1" })).getAttribute("aria-disabled")).toBe("true")
 	})
 })

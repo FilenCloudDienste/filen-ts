@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { cn } from "@filen/shared"
 import { SearchIcon, XIcon } from "lucide-react"
 import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 
 export interface ListFilterInputProps {
 	value: string
@@ -72,17 +72,16 @@ export function ListFilterInput({
 				className="pr-8 pl-8 [&::-webkit-search-cancel-button]:appearance-none"
 			/>
 			{value.length > 0 ? (
-				<Button
-					variant="ghost"
+				<TooltipIconButton
 					size="icon-xs"
-					aria-label={t("clearFilter")}
+					label={t("clearFilter")}
 					className="absolute top-1/2 right-1.5 -translate-y-1/2"
 					onClick={() => {
 						onChange("")
 					}}
 				>
 					<XIcon />
-				</Button>
+				</TooltipIconButton>
 			) : null}
 		</div>
 	)

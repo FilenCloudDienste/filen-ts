@@ -29,6 +29,7 @@ import { Field, FieldContent, FieldGroup, FieldLabel } from "@/components/ui/fie
 import { Input } from "@/components/ui/input"
 import { SecretInput } from "@/components/ui/secretInput"
 import { Button, buttonVariants } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { Spinner } from "@/components/ui/spinner"
 import { LoadingState } from "@/components/loadingState"
 import { Switch } from "@/components/ui/switch"
@@ -413,12 +414,11 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 												value={url ?? ""}
 												className="flex-1"
 											/>
-											<Button
-												type="button"
+											<TooltipIconButton
 												variant="outline"
 												size="icon"
 												disabled={url === null}
-												aria-label={t("driveActionCopyLink")}
+												label={t("driveActionCopyLink")}
 												onClick={() => {
 													if (url !== null) {
 														void handleCopy(url)
@@ -426,7 +426,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 												}}
 											>
 												<CopyIcon />
-											</Button>
+											</TooltipIconButton>
 										</div>
 									</Field>
 								</FieldGroup>

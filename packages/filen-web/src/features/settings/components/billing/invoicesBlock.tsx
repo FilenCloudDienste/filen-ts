@@ -8,9 +8,9 @@ import { billingErrorLabel, downloadInvoice } from "@/features/settings/lib/bill
 import { formatShortDate } from "@/lib/formatDate"
 import { useIsOnline } from "@/lib/useIsOnline"
 import type { AccountQuerySuccess } from "@/queries/account"
-import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { SettingsTableBlock } from "@/features/settings/components/billing/billingTable"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 
 interface InvoicesBlockProps {
 	accountQuery: AccountQuerySuccess
@@ -62,19 +62,16 @@ function InvoicesBlock({ accountQuery }: InvoicesBlockProps) {
 					header: t("settingsBillingColumnDownload"),
 					className: "text-end",
 					cell: invoice => (
-						<Button
-							type="button"
-							variant="ghost"
-							size="icon-sm"
+						<TooltipIconButton
 							disabled={downloadingId !== null || !isOnline}
 							title={isOnline ? undefined : t("common:offlineActionDisabled")}
-							aria-label={t("settingsBillingInvoiceDownload", { date: invoiceDate(invoice) })}
+							label={t("settingsBillingInvoiceDownload", { date: invoiceDate(invoice) })}
 							onClick={() => {
 								void handleDownload(invoice)
 							}}
 						>
 							{downloadingId === invoice.id ? <Spinner /> : <DownloadIcon />}
-						</Button>
+						</TooltipIconButton>
 					)
 				}
 			]}

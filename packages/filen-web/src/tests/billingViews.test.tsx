@@ -548,7 +548,9 @@ describe("InvoicesBlock", () => {
 		onlineManager.setOnline(false)
 		render(createElement(InvoicesBlock, { accountQuery: query(info({ subsInvoices: invoices })) }))
 
-		expect(screen.getAllByRole("button", { name: /Download invoice/ }).every(button => button.hasAttribute("disabled"))).toBe(true)
+		expect(
+			screen.getAllByRole("button", { name: /Download invoice/ }).every(button => button.getAttribute("aria-disabled") === "true")
+		).toBe(true)
 	})
 })
 

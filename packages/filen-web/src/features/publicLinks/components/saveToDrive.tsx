@@ -7,6 +7,8 @@ import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
 import { startLinkedCopyWithCard } from "@/features/transfers/lib/copyToast"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { Button } from "@/components/ui/button"
+import { Kbd } from "@/lib/keymap/kbd"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 
 export interface SaveToDriveButtonProps {
@@ -46,19 +48,30 @@ export function SaveToDriveButton({ item, name, glyph, compact: compactProp }: S
 
 	return (
 		<>
-			<Button
-				variant="outline"
-				size={compact ? "sm" : "default"}
-				disabled={!isOnline}
-				title={isOnline ? undefined : t("common:offlineActionDisabled")}
-				aria-label={compact ? t("saveToDrive") : undefined}
-				onClick={() => {
-					setOpen(true)
-				}}
-			>
-				<Icon data-icon="inline-start" />
-				{compact ? <span className="hidden sm:inline">{t("saveToDrive")}</span> : t("saveToDrive")}
-			</Button>
+			<Tooltip disabled={!compact}>
+				<TooltipTrigger
+					render={
+						<Button
+							variant="outline"
+							size={compact ? "sm" : "default"}
+							disabled={!isOnline}
+							title={isOnline ? undefined : t("common:offlineActionDisabled")}
+							aria-label={compact ? t("saveToDrive") : undefined}
+							onClick={() => {
+								setOpen(true)
+							}}
+						>
+							<Icon data-icon="inline-start" />
+							{compact ? <span className="hidden sm:inline">{t("saveToDrive")}</span> : t("saveToDrive")}
+						</Button>
+					}
+				/>
+				{/* Only while the label is shed. */}
+				<TooltipContent className="sm:hidden">
+					{t("saveToDrive")}
+					<Kbd action="links.saveToDrive" />
+				</TooltipContent>
+			</Tooltip>
 			{open ? (
 				<SaveToDriveDialog
 					items={[item]}

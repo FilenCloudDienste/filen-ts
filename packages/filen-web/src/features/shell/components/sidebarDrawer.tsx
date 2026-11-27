@@ -81,18 +81,25 @@ export function SidebarDrawerTrigger({ className }: { className?: string }) {
 	const { t } = useTranslation("common")
 
 	return (
-		<DrawerPrimitive.Trigger
-			handle={sidebarDrawerHandle}
-			render={
-				<button
-					type="button"
-					aria-label={t("openNavigation")}
-					className={cn(className, "md:hidden")}
-				>
-					<PanelLeftIcon />
-				</button>
-			}
-		/>
+		<Tooltip>
+			<TooltipTrigger
+				render={
+					<DrawerPrimitive.Trigger
+						handle={sidebarDrawerHandle}
+						render={
+							<button
+								type="button"
+								aria-label={t("openNavigation")}
+								className={cn(className, "md:hidden")}
+							>
+								<PanelLeftIcon />
+							</button>
+						}
+					/>
+				}
+			/>
+			<TooltipContent side="right">{t("openNavigation")}</TooltipContent>
+		</Tooltip>
 	)
 }
 

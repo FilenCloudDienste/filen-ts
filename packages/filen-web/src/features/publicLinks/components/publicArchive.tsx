@@ -14,6 +14,7 @@ import type { DriveItem } from "@/features/drive/lib/item"
 import { usePublicVisitorSignedIn } from "@/features/publicLinks/queries/publicLink"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
 // A public link's archive actions, for signed-in visitors only: the SDK lists, extracts and compresses
 // through the authed client alone, with the anon-resolved file or `{dir, link}` as copy's "Save to Cloud
@@ -194,16 +195,24 @@ function LinkActionButton({
 	const isOnline = useIsOnline()
 
 	return (
-		<Button
-			variant="outline"
-			size={compact ? "sm" : "default"}
-			disabled={!isOnline}
-			title={isOnline ? undefined : t("offlineActionDisabled")}
-			aria-label={compact ? label : undefined}
-			onClick={onClick}
-		>
-			<Icon data-icon="inline-start" />
-			{compact ? <span className="hidden sm:inline">{label}</span> : label}
-		</Button>
+		<Tooltip disabled={!compact}>
+			<TooltipTrigger
+				render={
+					<Button
+						variant="outline"
+						size={compact ? "sm" : "default"}
+						disabled={!isOnline}
+						title={isOnline ? undefined : t("offlineActionDisabled")}
+						aria-label={compact ? label : undefined}
+						onClick={onClick}
+					>
+						<Icon data-icon="inline-start" />
+						{compact ? <span className="hidden sm:inline">{label}</span> : label}
+					</Button>
+				}
+			/>
+			{/* Only while the label is shed. */}
+			<TooltipContent className="sm:hidden">{label}</TooltipContent>
+		</Tooltip>
 	)
 }

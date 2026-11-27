@@ -4,6 +4,7 @@ import { CircleAlertIcon, EllipsisIcon, PlusIcon, XIcon } from "lucide-react"
 import { combosOverlap, formatChord, isCharacterChord, parseCombo, UNBOUND_COMBO, type KeyboardLayout } from "@filen/shared/keymap"
 import { cn } from "@filen/shared"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -139,43 +140,57 @@ export function ShortcutRow({
 										{t("settings:keyboardCharacterKeyOff")}
 									</span>
 								)}
-								<button
-									type="button"
-									className="inline-flex size-6 items-center justify-center rounded-r-md text-muted-foreground focus-ring outline-none hover:bg-muted hover:text-foreground"
-									aria-label={t("settings:keyboardRemoveKeys", { keys })}
-									aria-describedby={nameId}
-									onClick={() => {
-										const rest = withoutChord(action.combo, slot)
+								<Tooltip>
+									<TooltipTrigger
+										render={
+											<button
+												type="button"
+												className="inline-flex size-6 items-center justify-center rounded-r-md text-muted-foreground focus-ring outline-none hover:bg-muted hover:text-foreground"
+												aria-label={t("settings:keyboardRemoveKeys", { keys })}
+												aria-describedby={nameId}
+												onClick={() => {
+													const rest = withoutChord(action.combo, slot)
 
-										void updateOverrides({ [action.id]: rest === "" ? UNBOUND_COMBO : rest })
-									}}
-								>
-									<XIcon
-										aria-hidden="true"
-										className="size-3"
+													void updateOverrides({ [action.id]: rest === "" ? UNBOUND_COMBO : rest })
+												}}
+											>
+												<XIcon
+													aria-hidden="true"
+													className="size-3"
+												/>
+											</button>
+										}
 									/>
-								</button>
+									<TooltipContent>{t("settings:keyboardRemoveKeys", { keys })}</TooltipContent>
+								</Tooltip>
 							</span>
 						)
 					})}
 					{recordingSlot === null && prompt}
 					{/* One button that toggles, never two that swap: React keeps this element (and the focus on it) across
 					    the change, which is what lets the list's Escape capture handler see the keypress. */}
-					<Button
-						variant="ghost"
-						size={recording ? "sm" : "icon-sm"}
-						aria-label={recording ? t("common:cancel") : t("settings:keyboardAdd")}
-						aria-describedby={nameId}
-						onClick={() => {
-							if (recording) {
-								onCancel()
-							} else {
-								onRecord(null)
+					<Tooltip disabled={recording}>
+						<TooltipTrigger
+							render={
+								<Button
+									variant="ghost"
+									size={recording ? "sm" : "icon-sm"}
+									aria-label={recording ? t("common:cancel") : t("settings:keyboardAdd")}
+									aria-describedby={nameId}
+									onClick={() => {
+										if (recording) {
+											onCancel()
+										} else {
+											onRecord(null)
+										}
+									}}
+								>
+									{recording ? t("common:cancel") : <PlusIcon />}
+								</Button>
 							}
-						}}
-					>
-						{recording ? t("common:cancel") : <PlusIcon />}
-					</Button>
+						/>
+						<TooltipContent>{t("settings:keyboardAdd")}</TooltipContent>
+					</Tooltip>
 					{conflicts !== undefined && !recording && (
 						<Button
 							variant="ghost"
@@ -192,18 +207,25 @@ export function ShortcutRow({
 						</Button>
 					)}
 					<DropdownMenu>
-						<DropdownMenuTrigger
-							render={
-								<Button
-									variant="ghost"
-									size="icon-sm"
-									aria-label={t("settings:keyboardMore")}
-									aria-describedby={nameId}
-								>
-									<EllipsisIcon />
-								</Button>
-							}
-						/>
+						<Tooltip>
+							<TooltipTrigger
+								render={
+									<DropdownMenuTrigger
+										render={
+											<Button
+												variant="ghost"
+												size="icon-sm"
+												aria-label={t("settings:keyboardMore")}
+												aria-describedby={nameId}
+											>
+												<EllipsisIcon />
+											</Button>
+										}
+									/>
+								}
+							/>
+							<TooltipContent>{t("settings:keyboardMore")}</TooltipContent>
+						</Tooltip>
 						<DropdownMenuContent align="end">
 							<DropdownMenuGroup>
 								<DropdownMenuItem onClick={onSpecial}>{t("settings:keyboardAddSpecial")}</DropdownMenuItem>

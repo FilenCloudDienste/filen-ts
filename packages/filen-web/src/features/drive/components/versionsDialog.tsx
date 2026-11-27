@@ -19,6 +19,7 @@ import { isCurrentVersion, nonCurrentVersions } from "@/features/drive/component
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import { LoadingState } from "@/components/loadingState"
@@ -278,30 +279,26 @@ export function VersionsDialog({ file, onClose }: VersionsDialogProps) {
 							) : (
 								<div className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm">
 									{meta}
-									<Button
-										variant="ghost"
-										size="icon-sm"
+									<TooltipIconButton
 										disabled={pending || current || !isOnline}
-										aria-label={t("driveVersionsRestoreAction")}
+										label={t("driveVersionsRestoreAction")}
 										title={offlineTitle}
 										onClick={() => {
 											setConfirming({ kind: "restore", version })
 										}}
 									>
 										<RotateCcwIcon />
-									</Button>
-									<Button
-										variant="ghost"
-										size="icon-sm"
+									</TooltipIconButton>
+									<TooltipIconButton
 										disabled={pending || current || !isOnline}
-										aria-label={t("driveVersionsDeleteAction")}
+										label={t("driveVersionsDeleteAction")}
 										title={offlineTitle}
 										onClick={() => {
 											setConfirming({ kind: "delete", version })
 										}}
 									>
 										<Trash2Icon />
-									</Button>
+									</TooltipIconButton>
 								</div>
 							)
 						}}

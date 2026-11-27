@@ -7,7 +7,7 @@ import { Kbd } from "@/lib/keymap/kbd"
 import { hasCommandModifier } from "@/lib/rowKeys"
 import { KEEP_SELECTION_PROPS } from "@/features/drive/lib/clickAway.logic"
 import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 
 export interface SearchInputProps {
 	// The registered action that focuses this box (mod+f by default), shown as its hint.
@@ -87,14 +87,13 @@ export function SearchInput({ action, label, value, onChange, onClear, onFocusLi
 			{/* Flex, not a block: a block would seat the Kbd badge on a text line's baseline, off-center. */}
 			<div className="absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center">
 				{value.length > 0 ? (
-					<Button
-						variant="ghost"
+					<TooltipIconButton
 						size="icon-xs"
-						aria-label={t("driveSearchClear")}
+						label={t("driveSearchClear")}
 						onClick={onClear}
 					>
 						<XIcon />
-					</Button>
+					</TooltipIconButton>
 				) : (
 					<Kbd action={action} />
 				)}

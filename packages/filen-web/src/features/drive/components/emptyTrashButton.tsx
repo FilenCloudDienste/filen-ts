@@ -2,6 +2,7 @@ import { createElement } from "react"
 import { useTranslation } from "react-i18next"
 import { ACTION_DEFS } from "@/features/drive/lib/actionDefs"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
 export interface EmptyTrashButtonProps {
 	onClick: () => void
@@ -21,18 +22,26 @@ export function EmptyTrashButton({ onClick, disabled, offlineTitle }: EmptyTrash
 	const { labelKey, icon } = ACTION_DEFS.emptyTrash
 
 	return (
-		<Button
-			variant="destructive"
-			size="sm"
-			// Label sheds below sm — see uploadMenu.tsx's matching trigger for why the aria-label is the
-			// same key.
-			aria-label={t(labelKey)}
-			disabled={disabled}
-			title={offlineTitle}
-			onClick={onClick}
-		>
-			{createElement(icon, { "aria-hidden": true })}
-			<span className="hidden sm:inline">{t(labelKey)}</span>
-		</Button>
+		<Tooltip>
+			<TooltipTrigger
+				render={
+					<Button
+						variant="destructive"
+						size="sm"
+						// Label sheds below sm — see uploadMenu.tsx's matching trigger for why the aria-label is the
+						// same key.
+						aria-label={t(labelKey)}
+						disabled={disabled}
+						title={offlineTitle}
+						onClick={onClick}
+					>
+						{createElement(icon, { "aria-hidden": true })}
+						<span className="hidden sm:inline">{t(labelKey)}</span>
+					</Button>
+				}
+			/>
+			{/* Only while the label is shed. */}
+			<TooltipContent className="sm:hidden">{t(labelKey)}</TooltipContent>
+		</Tooltip>
 	)
 }

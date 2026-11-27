@@ -4,8 +4,8 @@ import { CheckIcon, CopyIcon } from "lucide-react"
 import { buildId, buildLabel } from "@/lib/buildId"
 import { copyText } from "@/lib/copyText"
 import { desktopBridge } from "@/lib/desktop"
-import { Button } from "@/components/ui/button"
 import { SettingsRow } from "@/features/settings/components/settingsLayout"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 
 // Enough of the commit to name it; the copy carries all of it.
 const SHORT_BUILD_LENGTH = 12
@@ -42,17 +42,16 @@ function VersionRow() {
 			>
 				{build === null ? t("settingsVersionLocal") : build.slice(0, SHORT_BUILD_LENGTH)}
 			</span>
-			<Button
-				type="button"
+			<TooltipIconButton
 				variant="outline"
 				size="icon"
-				aria-label={t("settingsVersionCopy")}
+				label={t("settingsVersionCopy")}
 				onClick={() => {
 					void handleCopy()
 				}}
 			>
 				{copied ? <CheckIcon /> : <CopyIcon />}
-			</Button>
+			</TooltipIconButton>
 		</SettingsRow>
 	)
 }

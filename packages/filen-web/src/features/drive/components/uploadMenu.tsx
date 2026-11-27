@@ -10,6 +10,7 @@ import { NewDirectoryDialog } from "@/features/drive/components/newDirectory"
 import { DestinationEntries, type DestinationActions } from "@/features/drive/components/destinationMenu"
 import { CONTEXT_TREE_MENU_FAMILY, DROPDOWN_TREE_MENU_FAMILY } from "@/features/drive/components/directoryTreeSubmenu"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu"
 import type { DrivePasteAction } from "@/features/drive/hooks/useDriveClipboard"
@@ -149,22 +150,30 @@ export function NewMenu({
 				hiddenNotice={hiddenNotice}
 			/>
 			<DropdownMenu>
-				<DropdownMenuTrigger
-					render={
-						<Button
-							size="sm"
-							// Label sheds below sm so this cluster stops pushing the breadcrumb — and itself — past
-							// the card edge; the aria-label is the same key, so the accessible name is unchanged at
-							// every width.
-							aria-label={t("driveNewMenuTrigger")}
-							disabled={disabled}
-							title={offline && disabled ? t("common:offlineActionDisabled") : undefined}
-						>
-							<PlusIcon />
-							<span className="hidden sm:inline">{t("driveNewMenuTrigger")}</span>
-						</Button>
-					}
-				/>
+				<Tooltip>
+					<TooltipTrigger
+						render={
+							<DropdownMenuTrigger
+								render={
+									<Button
+										size="sm"
+										// Label sheds below sm so this cluster stops pushing the breadcrumb — and itself — past
+										// the card edge; the aria-label is the same key, so the accessible name is unchanged at
+										// every width.
+										aria-label={t("driveNewMenuTrigger")}
+										disabled={disabled}
+										title={offline && disabled ? t("common:offlineActionDisabled") : undefined}
+									>
+										<PlusIcon />
+										<span className="hidden sm:inline">{t("driveNewMenuTrigger")}</span>
+									</Button>
+								}
+							/>
+						}
+					/>
+					{/* Only while the label is shed. */}
+					<TooltipContent className="sm:hidden">{t("driveNewMenuTrigger")}</TooltipContent>
+				</Tooltip>
 				<DropdownMenuContent align="end">
 					<DestinationEntries
 						family={DROPDOWN_TREE_MENU_FAMILY}

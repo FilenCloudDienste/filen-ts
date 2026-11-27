@@ -5,6 +5,9 @@ import type { BlockedContact, Contact, ContactRequestIn, ContactRequestOut } fro
 import { ContactMenuContent } from "@/features/contacts/components/contactMenu"
 import { UserAvatar } from "@/components/userAvatar"
 import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
+import { Tooltip, TooltipTrigger } from "@/components/ui/tooltip"
+import { RowTooltipContent } from "@/components/lazyTooltip"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { cn, contactDisplayName, type ContactLike } from "@filen/shared"
 import { onActivateKey } from "@/lib/rowKeys"
@@ -163,19 +166,17 @@ export function IncomingRequestActions({ request, onAccept, onDeny, disabled, ti
 				<CheckIcon aria-hidden="true" />
 				{t("contactsActionAccept")}
 			</Button>
-			<Button
-				variant="ghost"
-				size="icon-sm"
+			<TooltipIconButton
 				disabled={disabled}
-				aria-label={t("contactsActionDeny")}
-				title={title ?? t("contactsActionDeny")}
+				label={t("contactsActionDeny")}
+				title={title}
 				tabIndex={tabIndex}
 				onClick={() => {
 					onDeny(request)
 				}}
 			>
 				<XIcon aria-hidden="true" />
-			</Button>
+			</TooltipIconButton>
 		</>
 	)
 }
@@ -248,18 +249,25 @@ export function ContactActions({ contact, onMessage, onRemove, onBlock, disabled
 				{t("contactsActionMessage")}
 			</Button>
 			<DropdownMenu>
-				<DropdownMenuTrigger
-					render={
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							aria-label={t("contactsRowMenuTrigger")}
-							tabIndex={tabIndex}
-						>
-							<MoreHorizontalIcon aria-hidden="true" />
-						</Button>
-					}
-				/>
+				<Tooltip>
+					<TooltipTrigger
+						render={
+							<DropdownMenuTrigger
+								render={
+									<Button
+										variant="ghost"
+										size="icon-sm"
+										aria-label={t("contactsRowMenuTrigger")}
+										tabIndex={tabIndex}
+									>
+										<MoreHorizontalIcon aria-hidden="true" />
+									</Button>
+								}
+							/>
+						}
+					/>
+					<RowTooltipContent>{t("contactsRowMenuTrigger")}</RowTooltipContent>
+				</Tooltip>
 				<ContactMenuContent
 					contact={contact}
 					onMessage={onMessage}

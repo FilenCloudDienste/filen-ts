@@ -13,6 +13,7 @@ import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
 import type { ExtractTarget } from "@/features/archive/lib/extractSelection"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
 export interface ArchiveExtractMenuProps {
@@ -51,21 +52,29 @@ export function ArchiveExtractMenu({
 	return (
 		<>
 			<DropdownMenu>
-				<DropdownMenuTrigger
-					disabled={disabled}
-					render={
-						<Button
-							variant={variant}
-							size={label === null ? "icon" : "default"}
-							aria-label={label === null ? ariaLabel : undefined}
-							className={triggerClassName}
-							title={disabled ? disabledTitle : undefined}
-						/>
-					}
-				>
-					{label}
-					<ChevronDownIcon data-icon={label === null ? undefined : "inline-end"} />
-				</DropdownMenuTrigger>
+				{/* Only the icon-only trigger, whose name is otherwise unseen. */}
+				<Tooltip disabled={label !== null}>
+					<TooltipTrigger
+						render={
+							<DropdownMenuTrigger
+								disabled={disabled}
+								render={
+									<Button
+										variant={variant}
+										size={label === null ? "icon" : "default"}
+										aria-label={label === null ? ariaLabel : undefined}
+										className={triggerClassName}
+										title={disabled ? disabledTitle : undefined}
+									/>
+								}
+							>
+								{label}
+								<ChevronDownIcon data-icon={label === null ? undefined : "inline-end"} />
+							</DropdownMenuTrigger>
+						}
+					/>
+					<TooltipContent>{ariaLabel}</TooltipContent>
+				</Tooltip>
 				<DropdownMenuContent
 					align="end"
 					className="w-auto max-w-80"

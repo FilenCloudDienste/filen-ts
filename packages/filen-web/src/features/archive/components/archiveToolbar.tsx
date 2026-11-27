@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import { ChevronRightIcon, MoreHorizontalIcon, PackageIcon } from "lucide-react"
 import { ListFilterInput } from "@/components/listFilterInput"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
 export interface ArchiveCrumb {
@@ -73,17 +74,24 @@ export function ArchiveToolbar({ outer, rootName, shown, hidden, onNavigate, sea
 				{folded.length > 0 ? (
 					<>
 						<DropdownMenu>
-							<DropdownMenuTrigger
-								render={
-									<Button
-										variant="ghost"
-										size="icon-xs"
-										aria-label={t("previewArchiveHiddenLevels")}
-									/>
-								}
-							>
-								<MoreHorizontalIcon />
-							</DropdownMenuTrigger>
+							<Tooltip>
+								<TooltipTrigger
+									render={
+										<DropdownMenuTrigger
+											render={
+												<Button
+													variant="ghost"
+													size="icon-xs"
+													aria-label={t("previewArchiveHiddenLevels")}
+												/>
+											}
+										>
+											<MoreHorizontalIcon />
+										</DropdownMenuTrigger>
+									}
+								/>
+								<TooltipContent>{t("previewArchiveHiddenLevels")}</TooltipContent>
+							</Tooltip>
 							<DropdownMenuContent className="w-auto max-w-72">
 								{folded.map(crumb => (
 									<DropdownMenuItem
@@ -132,17 +140,24 @@ export function ArchiveToolbar({ outer, rootName, shown, hidden, onNavigate, sea
 					<>
 						<Separator />
 						<DropdownMenu>
-							<DropdownMenuTrigger
-								render={
-									<Button
-										variant="ghost"
-										size="icon-xs"
-										aria-label={t("previewArchiveHiddenLevels")}
-									/>
-								}
-							>
-								<MoreHorizontalIcon />
-							</DropdownMenuTrigger>
+							<Tooltip>
+								<TooltipTrigger
+									render={
+										<DropdownMenuTrigger
+											render={
+												<Button
+													variant="ghost"
+													size="icon-xs"
+													aria-label={t("previewArchiveHiddenLevels")}
+												/>
+											}
+										>
+											<MoreHorizontalIcon />
+										</DropdownMenuTrigger>
+									}
+								/>
+								<TooltipContent>{t("previewArchiveHiddenLevels")}</TooltipContent>
+							</Tooltip>
 							<DropdownMenuContent className="w-auto max-w-72">
 								{hidden.map(crumb => (
 									<DropdownMenuItem

@@ -2,8 +2,8 @@ import { useCallback, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { XIcon } from "lucide-react"
-import { Button } from "@/components/ui/button"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 
 const ROW_HEIGHT = 40
 const OVERSCAN = 10
@@ -55,18 +55,15 @@ export function DictionaryWords({
 							style={{ height: ROW_HEIGHT, transform: `translateY(${String(row.start)}px)` }}
 						>
 							<span className="min-w-0 truncate text-sm select-text">{word}</span>
-							<Button
-								type="button"
-								variant="ghost"
-								size="icon-sm"
+							<TooltipIconButton
 								disabled={!online}
-								aria-label={t("settingsOfficeDictionaryRemove", { word })}
+								label={t("settingsOfficeDictionaryRemove", { word })}
 								onClick={() => {
 									onRemove(word)
 								}}
 							>
 								<XIcon />
-							</Button>
+							</TooltipIconButton>
 						</li>
 					)
 				})}

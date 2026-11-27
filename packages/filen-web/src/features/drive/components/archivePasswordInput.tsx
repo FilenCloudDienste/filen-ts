@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import { EyeIcon, EyeOffIcon } from "lucide-react"
 import { SecretInput } from "@/components/ui/secretInput"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
 export type ArchivePasswordInputProps = Omit<ComponentProps<typeof SecretInput>, "revealed"> & {
 	revealed: boolean
@@ -24,20 +25,26 @@ export function ArchivePasswordInput({ revealed, onRevealedChange, revealControl
 				revealed={revealed}
 				className="flex-1"
 			/>
-			<Button
-				type="button"
-				variant="ghost"
-				size="icon"
-				aria-label={label}
-				title={label}
-				aria-pressed={revealed}
-				aria-controls={revealControls ?? props.id}
-				onClick={() => {
-					onRevealedChange(!revealed)
-				}}
-			>
-				{revealed ? <EyeOffIcon /> : <EyeIcon />}
-			</Button>
+			<Tooltip>
+				<TooltipTrigger
+					render={
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon"
+							aria-label={label}
+							aria-pressed={revealed}
+							aria-controls={revealControls ?? props.id}
+							onClick={() => {
+								onRevealedChange(!revealed)
+							}}
+						>
+							{revealed ? <EyeOffIcon /> : <EyeIcon />}
+						</Button>
+					}
+				/>
+				<TooltipContent>{label}</TooltipContent>
+			</Tooltip>
 		</div>
 	)
 }

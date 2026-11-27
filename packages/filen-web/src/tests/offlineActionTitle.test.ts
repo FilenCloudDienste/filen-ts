@@ -201,10 +201,17 @@ describe("offline-disabled controls surface a title explaining why", () => {
 		onlineManager.setOnline(false)
 		render(createElement(VersionsDialog, { file, onClose: vi.fn() }))
 
-		for (const name of triggerNames) {
-			const button = screen.getByRole("button", { name })
-			expect(button.hasAttribute("disabled")).toBe(true)
-			expect(button.getAttribute("title")).toBe(OFFLINE_TITLE)
+		// The row's icon buttons explain themselves through their tooltip and accessible description; the footer's
+		// labelled button keeps its native title.
+		const [restore, remove, deleteAll] = triggerNames.map(name => screen.getByRole("button", { name }))
+
+		for (const button of [restore, remove]) {
+			expect(button?.getAttribute("aria-disabled")).toBe("true")
+			expect(button?.getAttribute("title")).toBeNull()
+			expect(document.getElementById(button?.getAttribute("aria-describedby") ?? "")?.textContent).toBe(OFFLINE_TITLE)
 		}
+
+		expect(deleteAll?.hasAttribute("disabled")).toBe(true)
+		expect(deleteAll?.getAttribute("title")).toBe(OFFLINE_TITLE)
 	})
 })

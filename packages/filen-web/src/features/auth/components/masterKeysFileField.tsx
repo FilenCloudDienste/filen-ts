@@ -5,6 +5,7 @@ import { CircleCheckIcon, XIcon } from "lucide-react"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 
 interface MasterKeysFileFieldProps {
 	disabled: boolean
@@ -95,17 +96,15 @@ function MasterKeysFileField({ disabled, onChange }: MasterKeysFileFieldProps) {
 							<CircleCheckIcon className="size-4 shrink-0" />
 							<span className="truncate">{t("masterKeysFileImported", { fileName })}</span>
 						</span>
-						<Button
-							type="button"
-							variant="ghost"
+						<TooltipIconButton
 							size="icon-xs"
 							className="shrink-0"
-							aria-label={t("masterKeysFileRemove")}
+							label={t("masterKeysFileRemove")}
 							disabled={disabled}
 							onClick={clear}
 						>
 							<XIcon />
-						</Button>
+						</TooltipIconButton>
 					</>
 				)}
 			</div>

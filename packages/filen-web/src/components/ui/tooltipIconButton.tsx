@@ -35,7 +35,9 @@ export function TooltipIconButton(props: {
 	disabled?: boolean | undefined
 	pressed?: boolean | undefined
 	variant?: ButtonProps["variant"]
+	size?: ButtonProps["size"]
 	className?: string | undefined
+	tabIndex?: number | undefined
 	// Why a disabled button is: it replaces the label in the tooltip and becomes the accessible description.
 	title?: string | undefined
 	shortcut?: ReactNode
@@ -52,12 +54,13 @@ export function TooltipIconButton(props: {
 					<Button
 						id={props.id}
 						variant={props.variant ?? "ghost"}
-						size="icon-sm"
+						size={props.size ?? "icon-sm"}
 						aria-label={props.label}
 						aria-pressed={props.pressed}
 						aria-describedby={explained ? reasonId : undefined}
 						disabled={props.disabled}
 						focusableWhenDisabled={explained}
+						tabIndex={props.tabIndex}
 						className={explained ? cn(EXPLAINED_DISABLED_CLASS, props.className) : props.className}
 						onMouseDown={props.onMouseDown}
 						onClick={props.onClick}

@@ -5,6 +5,7 @@ import { ChevronDownIcon, ChevronRightIcon, KeyboardIcon, RotateCcwIcon, SearchI
 import { isImeKeydown, parseCombo, tokenOfCode } from "@filen/shared/keymap"
 import { cn } from "@filen/shared"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { CARD_SURFACE_CLASS } from "@/components/ui/surface"
@@ -362,43 +363,57 @@ export function ShortcutsList({ variant, initialText }: { variant: "page" | "dia
 										chord={keyQueryChord}
 										layout={layout}
 									/>
-									<button
-										type="button"
-										className="inline-flex size-5 items-center justify-center rounded text-muted-foreground focus-ring outline-none hover:text-foreground"
-										aria-label={t("settings:keyboardSearchClearKeys")}
-										onClick={() => {
-											setKeyQuery(null)
-										}}
-									>
-										<XIcon
-											aria-hidden="true"
-											className="size-3"
+									<Tooltip>
+										<TooltipTrigger
+											render={
+												<button
+													type="button"
+													className="inline-flex size-5 items-center justify-center rounded text-muted-foreground focus-ring outline-none hover:text-foreground"
+													aria-label={t("settings:keyboardSearchClearKeys")}
+													onClick={() => {
+														setKeyQuery(null)
+													}}
+												>
+													<XIcon
+														aria-hidden="true"
+														className="size-3"
+													/>
+												</button>
+											}
 										/>
-									</button>
+										<TooltipContent>{t("settings:keyboardSearchClearKeys")}</TooltipContent>
+									</Tooltip>
 								</span>
 							)}
-							<Button
-								variant={searchingKeys ? "secondary" : "ghost"}
-								size="icon-xs"
-								aria-label={t("settings:keyboardSearchByKeys")}
-								aria-pressed={searchingKeys}
-								onMouseDown={event => {
-									// Keeps focus in the field, which records the keys.
-									event.preventDefault()
-								}}
-								onClick={() => {
-									if (searchingKeys) {
-										endRecording(owner)
+							<Tooltip>
+								<TooltipTrigger
+									render={
+										<Button
+											variant={searchingKeys ? "secondary" : "ghost"}
+											size="icon-xs"
+											aria-label={t("settings:keyboardSearchByKeys")}
+											aria-pressed={searchingKeys}
+											onMouseDown={event => {
+												// Keeps focus in the field, which records the keys.
+												event.preventDefault()
+											}}
+											onClick={() => {
+												if (searchingKeys) {
+													endRecording(owner)
 
-										return
+													return
+												}
+
+												beginRecording(owner, null)
+												searchRef.current?.focus()
+											}}
+										>
+											<KeyboardIcon />
+										</Button>
 									}
-
-									beginRecording(owner, null)
-									searchRef.current?.focus()
-								}}
-							>
-								<KeyboardIcon />
-							</Button>
+								/>
+								<TooltipContent>{t("settings:keyboardSearchByKeys")}</TooltipContent>
+							</Tooltip>
 						</div>
 					</div>
 					{!compact && (

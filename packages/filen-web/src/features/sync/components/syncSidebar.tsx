@@ -2,6 +2,8 @@ import { useTranslation } from "react-i18next"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
 import { FolderSyncIcon, PlusIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
+import { Kbd } from "@/lib/keymap/kbd"
 import { LoadingState } from "@/components/loadingState"
 import { SidebarNotice } from "@/components/sidebarNotice"
 import { ResizableSidebarPanel } from "@/features/shell/components/sidebarPanel"
@@ -130,16 +132,14 @@ export function SyncSidebar() {
 			<div className="flex flex-col gap-2 p-3">
 				<div className="flex items-center justify-between gap-2">
 					<h2 className="truncate px-1 text-[15px] font-medium">{t("common:moduleSync")}</h2>
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						aria-label={t("syncAddPair")}
-						title={t("syncAddPair")}
+					<TooltipIconButton
+						label={t("syncAddPair")}
+						shortcut={<Kbd action="sync.addPair" />}
 						className="app-region-no-drag"
 						onClick={openAddPair}
 					>
 						<PlusIcon />
-					</Button>
+					</TooltipIconButton>
 				</div>
 				<HostBanner />
 				<ImportNote />
