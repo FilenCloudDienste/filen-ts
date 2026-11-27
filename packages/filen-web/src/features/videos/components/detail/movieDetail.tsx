@@ -29,7 +29,7 @@ import { DetailHeader, ResumeBar, SlotFade } from "@/features/videos/components/
 import { ExtrasShelf } from "@/features/videos/components/detail/extrasShelf"
 import { TitleMenu } from "@/features/videos/components/detail/titleMenu"
 import { DetailSynopsis } from "@/features/videos/components/detail/detailText"
-import { titleSubject } from "@/features/videos/lib/corrections.logic"
+import { titleSubject, type CorrectionKind } from "@/features/videos/lib/corrections.logic"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -121,12 +121,14 @@ export function MovieDetail({
 	detail,
 	headerMode,
 	onBack,
-	onEdit
+	onEdit,
+	onSetAs
 }: {
 	detail: Extract<VideoTitleDetail, { kind: "movie" | "other" }>
 	headerMode: DetailHeaderMode
 	onBack: () => void
 	onEdit: () => void
+	onSetAs: (kind: CorrectionKind) => void
 }) {
 	const { t } = useTranslation("videos")
 	const navigate = useNavigate()
@@ -261,6 +263,7 @@ export function MovieDetail({
 				setPicked(Number(value))
 			}}
 			onEdit={onEdit}
+			onSetAs={onSetAs}
 		/>
 	)
 

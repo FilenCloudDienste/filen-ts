@@ -68,10 +68,11 @@ export function videoTitleDetailQueryKey(id: string) {
 
 // A title's versions, seasons, episodes and extras, from the worker's classification (no request). Refetched when
 // the title changes in the index.
-export function useVideoTitleDetailQuery(id: string): UseQueryResult<VideoTitleDetail | null> {
+export function useVideoTitleDetailQuery(id: string, enabled = true): UseQueryResult<VideoTitleDetail | null> {
 	return useQuery({
 		queryKey: videoTitleDetailQueryKey(id),
 		queryFn: () => runOp<VideoTitleDetail | null>(sdkApi.videoTitleDetail(id)),
+		enabled,
 		staleTime: Infinity,
 		persister: noDiskPersister
 	})

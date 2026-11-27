@@ -193,6 +193,7 @@ import { opfsCatalogStore, opfsSnapshotStore } from "@/workers/videoIndex/snapsh
 import { dirName } from "@/workers/videoIndex/rootIndex.logic"
 import type {
 	TitleArtCandidates,
+	VideoCorrectionTarget,
 	VideoIndexUpdate,
 	VideoRootStatus,
 	VideoTitleDetail,
@@ -3593,6 +3594,13 @@ const api = {
 	// `ticket`: names the call for videoCatalogAbandon (sent when the page no longer shows the query).
 	videoCatalogGrid(query: GridQuery, start: number, count: number, ticket?: number): Promise<GridPage> {
 		return videoIndex.catalogGrid(query, start, count, ticket)
+	},
+	videoCatalogGridIds(query: GridQuery, start: number, end: number): Promise<string[]> {
+		return videoIndex.catalogGridIds(query, start, end)
+	},
+	// Where the titles' corrections are stored and what the classifier made of them (Set as, Hide), keyless.
+	videoCorrectionTargets(ids: string[]): Promise<VideoCorrectionTarget[]> {
+		return videoIndex.correctionTargets(ids)
 	},
 	videoCatalogAbandon(ticket: number): void {
 		videoIndex.catalogAbandon(ticket)

@@ -718,6 +718,41 @@ export function buildTitleDetail(files: LibraryFiles, title: VideoTitleView): Vi
 	}
 }
 
+// What Set as reads of a title: its correction context, without the versions, seasons and episodes a detail holds.
+export interface VideoCorrectionTarget {
+	title: VideoTitleView
+	overrideKey: string
+	original?: CorrectionOriginal
+	// A series': roots the classifier itself merged it from; 1 otherwise.
+	autoMergedRoots: number
+}
+
+export function buildCorrectionTarget(files: LibraryFiles, title: VideoTitleView): VideoCorrectionTarget | null {
+	if (title.kind === "series") {
+		const { original } = detailCorrection(files, title, [])
+
+		return {
+			title,
+			overrideKey: seriesOverrideKey(title.id),
+			...(original === undefined ? {} : { original }),
+			autoMergedRoots: files.autoMerged.get(title.id) ?? 1
+		}
+	}
+
+	const detail = buildTitleDetail(files, title)
+
+	if (detail?.overrideKey === undefined) {
+		return null
+	}
+
+	return {
+		title,
+		overrideKey: detail.overrideKey,
+		...(detail.original === undefined ? {} : { original: detail.original }),
+		autoMergedRoots: 1
+	}
+}
+
 function pushHomeItems({
 	out,
 	files,

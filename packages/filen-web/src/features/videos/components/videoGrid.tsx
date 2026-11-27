@@ -23,6 +23,9 @@ import { columnsForWidth } from "@/features/drive/lib/gridLayout"
 import { DEFAULT_DENSITY_INDEX, tileSizeForDensity } from "@/features/photos/lib/gridDensity"
 import { useVideoCardActions } from "@/features/videos/hooks/useVideoCardActions"
 import { useCardFocus } from "@/features/videos/hooks/useCardFocus"
+import { useVideoGridSelection } from "@/features/videos/hooks/useVideoGridSelection"
+import type { ClickModifiers } from "@/features/drive/lib/listbox"
+import type { GridSelection } from "@/features/videos/lib/gridSelection.logic"
 import { cardCommand, cardCommandAction } from "@/features/videos/lib/cardKeys"
 import { isRecordingCombo, useBindings } from "@/lib/keymap/registry"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
@@ -303,6 +306,7 @@ export function VideoGrid({ source, name, rootNames }: VideoGridProps) {
 	const historyKey = useHistoryEntryKey()
 	const scrollKey = `${historyKey}:grid:${gridPrefsKey(source)}`
 	const [restoreOffset] = useState(() => recallScroll(scrollKey))
+	const selection = useVideoGridSelection({ gridQuery, total })
 
 	// Cards within half a screen of the visible part may read and decode art; the overscan rows beyond wait.
 	const nearObserver = useMemo(
@@ -333,6 +337,7 @@ export function VideoGrid({ source, name, rootNames }: VideoGridProps) {
 	// A new order or query starts from its first card: the scroller stays mounted across them, its offset with it.
 	function resetView(): void {
 		pendingFocus.current = null
+		selection.clear()
 		setActiveIndex(0)
 		scrollElement?.scrollTo({ top: 0 })
 	}
@@ -559,10 +564,14 @@ export function VideoGrid({ source, name, rootNames }: VideoGridProps) {
 								setFocusedIndex(index)
 							}}
 							onAction={onAction}
+							selection={selection.selection}
+							onSelectClick={selection.cardClick}
+							onToggleSelect={selection.toggle}
 						/>
 					) : null}
 				</div>
 			)}
+			{selection.overlay}
 		</div>
 	)
 }
@@ -576,11 +585,28 @@ interface GridCardProps {
 	registerCard: (index: number, element: HTMLAnchorElement | null) => void
 	onFocusCard: (index: number) => void
 	onAction: (action: VideoCardAction, card: VideoCardModel) => void
+	selected: boolean
+	selecting: boolean
+	onSelectClick: (id: string, index: number, modifiers: ClickModifiers) => boolean
+	onToggleSelect: (id: string, index: number) => void
 }
 
-// Compiled, unlike the virtualizer host around it: builds the card's callbacks from what it is given, so a scroll step
-// or cursor move leaves every card whose props didn't change as it was.
-function GridCard({ card, index, setSize, active, nearObserver, registerCard, onFocusCard, onAction }: GridCardProps) {
+// Compiled, unlike the virtualizer host around it: builds the card's callbacks from what it is given, so a scroll step,
+// cursor move or selection change leaves every card whose props didn't change as it was.
+function GridCard({
+	card,
+	index,
+	setSize,
+	active,
+	nearObserver,
+	registerCard,
+	onFocusCard,
+	onAction,
+	selected,
+	selecting,
+	onSelectClick,
+	onToggleSelect
+}: GridCardProps) {
 	return (
 		<VideoCard
 			card={card}
@@ -595,6 +621,12 @@ function GridCard({ card, index, setSize, active, nearObserver, registerCard, on
 				onFocusCard(index)
 			}}
 			onAction={onAction}
+			selected={selected}
+			selecting={selecting}
+			onSelectClick={event => onSelectClick(card.title.id, index, event)}
+			onToggleSelect={() => {
+				onToggleSelect(card.title.id, index)
+			}}
 		/>
 	)
 }
@@ -617,6 +649,9 @@ interface VideoGridRowsProps {
 	virtualizerRef: RefObject<Virtualizer<HTMLDivElement, Element> | null>
 	onFocusCard: (index: number) => void
 	onAction: (action: VideoCardAction, card: VideoCardModel) => void
+	selection: GridSelection
+	onSelectClick: (id: string, index: number, modifiers: ClickModifiers) => boolean
+	onToggleSelect: (id: string, index: number) => void
 }
 
 // Owns the virtualizer, which opts its host out of the React Compiler and re-renders it on every range change; split
@@ -639,8 +674,12 @@ function VideoGridRows({
 	registerCard,
 	virtualizerRef,
 	onFocusCard,
-	onAction
+	onAction,
+	selection,
+	onSelectClick,
+	onToggleSelect
 }: VideoGridRowsProps) {
+	const selecting = selection.ids.size > 0
 	// Changing with the layout is what makes the virtualizer re-read row sizes; stable while scrolling.
 	const getRowKey = useCallback((index: number) => `${String(columns)}:${String(rowHeight)}:${String(index)}`, [columns, rowHeight])
 	const activeRow = Math.floor(activeIndex / columns)
@@ -733,6 +772,10 @@ function VideoGridRows({
 									registerCard={registerCard}
 									onFocusCard={onFocusCard}
 									onAction={onAction}
+									selected={selection.ids.has(card.title.id)}
+									selecting={selecting}
+									onSelectClick={onSelectClick}
+									onToggleSelect={onToggleSelect}
 								/>
 							)
 						})}

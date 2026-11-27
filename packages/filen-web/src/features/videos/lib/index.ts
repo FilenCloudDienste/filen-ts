@@ -21,7 +21,13 @@ import {
 import { queryClient } from "@/queries/client"
 import type { IndexRootConfig } from "@/workers/videoIndex/engine"
 import type { CatalogSummary, FactsResult, GridQuery } from "@/workers/videoIndex/catalog.logic"
-import type { TitleArtCandidates, VideoFileRef, VideoIndexUpdate, VideoRootStatus } from "@/workers/videoIndex/view.logic"
+import type {
+	TitleArtCandidates,
+	VideoCorrectionTarget,
+	VideoFileRef,
+	VideoIndexUpdate,
+	VideoRootStatus
+} from "@/workers/videoIndex/view.logic"
 import type { ArtFile } from "@/features/videos/lib/artwork"
 import type { ArtCandidate } from "@/features/videos/lib/artwork.logic"
 import type { ArtSlotCode } from "@/features/videos/lib/artStore.logic"
@@ -531,6 +537,16 @@ class VideoLibraryClient {
 	// every episode of its series.
 	public markTargets(titleId: string, group: string | null): Promise<string[]> {
 		return sdkApi.videoCatalogMarkTargets(titleId, group)
+	}
+
+	// The ids of a grid's titles in [start, end), for a range or select-all.
+	public gridIds(query: GridQuery, start: number, end: number): Promise<string[]> {
+		return sdkApi.videoCatalogGridIds(query, start, end)
+	}
+
+	// Where the titles' corrections are stored and what the classifier made of them.
+	public correctionTargets(ids: string[]): Promise<VideoCorrectionTarget[]> {
+		return sdkApi.videoCorrectionTargets(ids)
 	}
 
 	// Builds the worker's search index ahead of the first query (an empty one answers nothing).

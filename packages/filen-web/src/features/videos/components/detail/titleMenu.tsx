@@ -1,11 +1,12 @@
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
 import { toast } from "sonner"
-import { DownloadIcon, EyeIcon, EyeOffIcon, FolderSearchIcon, LayersIcon, MoreHorizontalIcon, PencilIcon } from "lucide-react"
+import { DownloadIcon, EyeIcon, EyeOffIcon, FolderSearchIcon, LayersIcon, MoreHorizontalIcon, PencilIcon, TagIcon } from "lucide-react"
 import { log } from "@/lib/log"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { downloadVideoFile, revealVideoFile } from "@/features/videos/lib/titleActions"
-import { hideEdit } from "@/features/videos/lib/corrections.logic"
+import { hideEdit, type CorrectionKind } from "@/features/videos/lib/corrections.logic"
+import { SetAsEntries } from "@/features/videos/components/setAsMenu"
 import { editLibraryConfig } from "@/features/videos/queries/library"
 import {
 	DropdownMenu,
@@ -23,7 +24,7 @@ import { Button } from "@/components/ui/button"
 import type { VideoTitleView } from "@/workers/videoIndex/view.logic"
 
 // A detail page's More menu: Versions (only with two or more), Reveal in Drive and Download for the chosen file,
-// then the manual corrections: Edit details and Hide / Unhide.
+// then the manual corrections: Edit details, Set as (a movie or another video; not a series) and Hide / Unhide.
 export function TitleMenu({
 	title,
 	overrideKey,
@@ -31,7 +32,8 @@ export function TitleMenu({
 	versions,
 	version,
 	onVersion,
-	onEdit
+	onEdit,
+	onSetAs
 }: {
 	title: VideoTitleView
 	overrideKey: string
@@ -40,6 +42,7 @@ export function TitleMenu({
 	version: string
 	onVersion: (value: string) => void
 	onEdit: () => void
+	onSetAs?: ((kind: CorrectionKind) => void) | undefined
 }) {
 	const { t } = useTranslation("videos")
 	const navigate = useNavigate()
@@ -131,6 +134,20 @@ export function TitleMenu({
 					<PencilIcon />
 					{t("detailEdit")}
 				</DropdownMenuItem>
+				{onSetAs === undefined || title.kind === "series" ? null : (
+					<DropdownMenuSub>
+						<DropdownMenuSubTrigger>
+							<TagIcon />
+							{t("setAsMenu")}
+						</DropdownMenuSubTrigger>
+						<DropdownMenuSubContent>
+							<SetAsEntries
+								current={title.kind}
+								onSetAs={onSetAs}
+							/>
+						</DropdownMenuSubContent>
+					</DropdownMenuSub>
+				)}
 				<DropdownMenuItem
 					onClick={() => {
 						editLibraryConfig(hideEdit(overrideKey, !hidden)).catch((e: unknown) => {

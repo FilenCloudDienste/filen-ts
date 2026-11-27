@@ -35,5 +35,8 @@ export const VIDEOS_CARD_ACTIONS = [
 export const VIDEOS_ACTIONS: readonly ActionDef[] = [
 	{ id: "videos.search", defaultCombo: "mod+f", scope: "videos", descriptionKey: "videos:videosSearchCommand" },
 	{ id: "videos.openSearch", defaultCombo: "slash", scope: "videos", descriptionKey: "videos:videosOpenSearchCommand" },
+	// A library grid's selection, as the drive listing's.
+	{ id: "videos.selectAll", defaultCombo: "mod+a", scope: "videos", descriptionKey: "drive:driveCommandSelectAll" },
+	{ id: "videos.clearSelection", defaultCombo: "escape", scope: "videos", descriptionKey: "common:clearSelection" },
 	...VIDEOS_CARD_ACTIONS
 ]

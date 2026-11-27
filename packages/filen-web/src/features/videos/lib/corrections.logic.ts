@@ -12,7 +12,7 @@ import {
 	type LibraryOverride,
 	type Stamp
 } from "@filen/shared/videos"
-import type { VideoEpisodeView, VideoTitleDetail } from "@/workers/videoIndex/view.logic"
+import type { VideoCorrectionTarget, VideoEpisodeView, VideoTitleDetail, VideoTitleView } from "@/workers/videoIndex/view.logic"
 
 // Manual corrections (title and year, movie / episode / other, merging and splitting series, hiding), as edits of
 // the synced library configuration. A correction is one register per key. An edit starts from the register as
@@ -50,12 +50,43 @@ export function titleSubject(detail: VideoTitleDetail): CorrectionSubject {
 	const key =
 		detail.overrideKey ?? (detail.kind === "series" ? seriesOverrideKey(title.id) : titleOverrideKey({ id: title.id, stableUuids }))
 
+	return subjectOf({
+		title,
+		key,
+		original: detail.original,
+		autoMergedRoots: detail.kind === "series" ? (detail.autoMergedRoots ?? 1) : 1
+	})
+}
+
+// A title's subject from the worker's correction context (Set as and Hide on several titles).
+export function targetSubject(target: VideoCorrectionTarget): CorrectionSubject {
+	return subjectOf({
+		title: target.title,
+		key: target.overrideKey,
+		original: target.original,
+		autoMergedRoots: target.autoMergedRoots
+	})
+}
+
+function subjectOf({
+	title,
+	key,
+	original,
+	autoMergedRoots
+}: {
+	title: VideoTitleView
+	key: string
+	original: CorrectionOriginal | undefined
+	autoMergedRoots: number
+}): CorrectionSubject {
+	const series = title.kind === "series"
+
 	return {
 		key,
-		original: detail.original ?? plainOriginal({ kind: detail.kind, title: title.title, year: title.year }),
-		seriesId: detail.kind === "series" ? title.id : "",
-		mergeKey: detail.kind === "series" ? title.mergeKey : "",
-		autoMergedRoots: detail.kind === "series" ? (detail.autoMergedRoots ?? 1) : 1
+		original: original ?? plainOriginal({ kind: title.kind, title: title.title, year: title.year }),
+		seriesId: series ? title.id : "",
+		mergeKey: series ? title.mergeKey : "",
+		autoMergedRoots: series ? autoMergedRoots : 1
 	}
 }
 
@@ -316,8 +347,29 @@ function without(fields: Fields, field: string): Fields {
 	return out
 }
 
+function hiddenAs(current: Fields, hidden: boolean): Fields {
+	return hidden ? { ...current, hidden: true } : without(current, "hidden")
+}
+
 export function hideEdit(key: string, hidden: boolean): ConfigEdit {
-	return patchEdit(key, current => (hidden ? { ...current, hidden: true } : without(current, "hidden")))
+	return patchEdit(key, current => hiddenAs(current, hidden))
+}
+
+// Hides (or shows) every title under `keys` in one write.
+export function hideManyEdit(keys: readonly string[], hidden: boolean): ConfigEdit {
+	return (doc, stamp) => {
+		let next = doc
+
+		for (const key of new Set(keys)) {
+			const override = changeOverride(next, key, current => hiddenAs(current, hidden))
+
+			if (!sameOverride(override, rawLibraryOverride(next, key))) {
+				next = withLibraryOverride({ doc: next, key, override, stamp, at: Date.now() })
+			}
+		}
+
+		return next
+	}
 }
 
 // Shows a hidden title again, whichever of its keys (`s:` or `d:` + its id) holds the hiding.

@@ -689,6 +689,31 @@ export const videos = {
 	detailHide: "Hide from Videos",
 	/** More menu — shows a hidden title again */
 	detailUnhide: "Show in Videos again",
+	/** More menu submenu and selection bar menu — shows the title(s) as a movie, a show's episodes or other videos */
+	setAsMenu: "Set as",
+	/** Set as entry — opens the dialog that asks for the show's name */
+	setAsShow: "Show…",
+	/** Selection bar — hides the selected titles from Videos */
+	setAsHideSelected: "Hide from Videos",
+	/** Toast — Set as leaves series as they are; {{count}} = how many were selected */
+	setAsSeriesSkipped_one: "{{count, number}} show was left as it is",
+	/** Toast — Set as leaves series as they are; plural */
+	setAsSeriesSkipped_other: "{{count, number}} shows were left as they are",
+	/** Grid card checkbox — accessible name; {{title}} = the card's title */
+	setAsSelectCard: "Select {{title}}",
+	/** Set as show dialog — title */
+	setAsShowTitle: "Set as episodes of a show",
+	/** Set as show dialog — description */
+	setAsShowDescription:
+		"Season and episode numbers are read from the file names; files without them get the next free numbers, in file name order.",
+	/** Set as show dialog — the show's name, for a new show */
+	setAsShowName: "Show name",
+	/** Set as show dialog — the list of episodes as they will be numbered */
+	setAsShowPreview: "Episodes",
+	/** Set as show dialog — marks an episode whose number was not in its file name */
+	setAsShowNumbered: "next free number",
+	/** Set as show dialog — save button */
+	setAsShowSave: "Set as episodes",
 	/** Toast — the file is no longer in the library */
 	detailFileGone: "This file is no longer in the library.",
 	/** Title page — what is left of the resume point; {{time}} = e.g. 1h 31m */

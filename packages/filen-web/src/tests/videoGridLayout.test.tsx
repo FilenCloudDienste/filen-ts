@@ -19,7 +19,7 @@ const { head, mounts } = vi.hoisted(() => ({
 vi.mock("@tanstack/react-router", () => ({ useRouter: () => ({ navigate: vi.fn() }) }))
 vi.mock("@/features/videos/hooks/useHistoryEntryKey", () => ({ useHistoryEntryKey: () => "entry" }))
 vi.mock("@/features/videos/hooks/useVideoCardActions", () => ({ useVideoCardActions: () => vi.fn() }))
-vi.mock("@/lib/keymap/registry", () => ({ useBindings: () => ({}), isRecordingCombo: () => false }))
+vi.mock("@/lib/keymap/registry", () => ({ useBindings: () => ({}), useComboFor: () => "", isRecordingCombo: () => false }))
 vi.mock("@/features/drive/components/searchInput", () => ({
 	SearchInput: ({
 		label,
@@ -94,7 +94,7 @@ function setWidth(width: number): void {
 }
 
 function card(index: number): VideoCardModel {
-	return { key: `card-${String(index)}` } as VideoCardModel
+	return { key: `card-${String(index)}`, title: { id: `title-${String(index)}` } } as VideoCardModel
 }
 
 // jsdom lays nothing out: the scroller's viewport, which the virtualizer reads its range from.

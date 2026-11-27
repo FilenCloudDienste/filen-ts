@@ -6,6 +6,7 @@ import { cn } from "@filen/shared"
 import type { Rgb } from "@/lib/media/framePick.logic"
 import { useTouchLongPress } from "@/lib/useTouchLongPress"
 import { stopRowPropagation } from "@/lib/domEvents"
+import { selectionAwareLinkClick } from "@/features/drive/lib/listbox"
 import { useVideoArt, type VideoArt } from "@/features/videos/hooks/useVideoArt"
 import type { CardObserver } from "@/features/videos/lib/cardObserver"
 import type { VideoCardModel } from "@/features/videos/lib/homeRows.logic"
@@ -32,6 +33,13 @@ export interface VideoCardProps {
 	// Position in a virtualized grid, which mounts only part of its cards.
 	posInSet?: number | undefined
 	setSize?: number | undefined
+	// A selectable grid's: whether the card is selected, whether anything is (every card shows its checkbox then),
+	// what a click on the card selects (true when it took the click, which then doesn't open the title) and the
+	// checkbox's toggle. Without `onToggleSelect` the card has no checkbox.
+	selected?: boolean | undefined
+	selecting?: boolean | undefined
+	onSelectClick?: ((event: MouseEvent<HTMLAnchorElement>) => boolean) | undefined
+	onToggleSelect?: (() => void) | undefined
 }
 
 // No iOS link preview or text selection on a long-press, which opens the card's menu instead.
@@ -145,7 +153,21 @@ function CardArt({ card, art }: { card: VideoCardModel; art: VideoArt }) {
 // A poster (2:3) or landscape (16:9) card: art with its badges and progress, the caption below. The card itself is
 // the link to the title's page (its name says title, year, progress and badges); Play, which opens the player
 // straight away, and the menu are separate controls.
-export function VideoCard({ card, width, nearObserver, active, registerRef, onFocusCard, onAction, posInSet, setSize }: VideoCardProps) {
+export function VideoCard({
+	card,
+	width,
+	nearObserver,
+	active,
+	registerRef,
+	onFocusCard,
+	onAction,
+	posInSet,
+	setSize,
+	selected,
+	selecting,
+	onSelectClick,
+	onToggleSelect
+}: VideoCardProps) {
 	const { t } = useTranslation("videos")
 	const [element, setElement] = useState<HTMLDivElement | null>(null)
 	const [artElement, setArtElement] = useState<HTMLDivElement | null>(null)
@@ -188,6 +210,7 @@ export function VideoCard({ card, width, nearObserver, active, registerRef, onFo
 				className={cn(
 					"relative w-full overflow-hidden rounded-xl bg-muted/40 transition-[transform,box-shadow] duration-200 motion-reduce:transition-none",
 					"group-has-[a:focus-visible]/tile:ring-2 group-has-[a:focus-visible]/tile:ring-ring",
+					selected === true && "ring-2 ring-primary",
 					"motion-safe:group-has-[a:focus-visible]/tile:scale-105 motion-safe:group-has-[a:focus-visible]/tile:shadow-lg motion-safe:pointer-fine:group-hover/tile:scale-105 motion-safe:pointer-fine:group-hover/tile:shadow-lg",
 					card.shape === "poster" ? "aspect-[2/3]" : "aspect-video"
 				)}
@@ -263,9 +286,37 @@ export function VideoCard({ card, width, nearObserver, active, registerRef, onFo
 				draggable={false}
 				className={LINK_CLASS}
 				onFocus={onFocusCard}
+				onClick={onSelectClick === undefined ? undefined : selectionAwareLinkClick(onSelectClick)}
 			>
 				{face}
 			</Link>
+			{onToggleSelect === undefined ? null : (
+				<button
+					type="button"
+					role="checkbox"
+					tabIndex={-1}
+					aria-checked={selected === true}
+					aria-label={t("setAsSelectCard", { title: heading })}
+					className={cn(
+						"absolute top-1.5 left-1.5 flex size-6 items-center justify-center rounded-full border-2 shadow-sm transition-opacity duration-150 pointer-coarse:size-8",
+						selected === true
+							? "border-primary bg-primary text-primary-foreground"
+							: "border-white/90 bg-black/30 text-transparent",
+						selected === true || selecting === true
+							? "opacity-100"
+							: "pointer-events-none opacity-0 pointer-fine:group-hover/tile:pointer-events-auto pointer-fine:group-hover/tile:opacity-100"
+					)}
+					onClick={event => {
+						stopRowPropagation(event)
+						onToggleSelect()
+					}}
+				>
+					<CheckIcon
+						aria-hidden="true"
+						className="size-3.5"
+					/>
+				</button>
+			)}
 			{card.play === null ? null : (
 				<button
 					type="button"

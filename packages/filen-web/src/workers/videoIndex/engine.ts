@@ -35,6 +35,7 @@ import {
 } from "@/workers/videoIndex/snapshot.logic"
 import {
 	LibraryFiles,
+	buildCorrectionTarget,
 	buildTitleDetail,
 	buildTitlesSteps,
 	buildHomeItemsSteps,
@@ -43,6 +44,7 @@ import {
 	type TitleArtCandidates,
 	type VideoHomeItem,
 	type VideoIndexUpdate,
+	type VideoCorrectionTarget,
 	type VideoRootStatus,
 	type VideoTitleDetail,
 	type VideoTitleView
@@ -1992,21 +1994,31 @@ export class VideoIndexEngine {
 		const gone = this.ticket(ticket)
 
 		try {
-			await Promise.race([this.catalogReady(), gone.abandoned])
-
-			for (;;) {
-				if (this.catalog.hasGrid(query)) {
-					await freshSlice(this.deps.yieldSlice)
-
-					if (this.catalog.hasGrid(query)) {
-						return this.catalog.grid(query, start, count)
-					}
-				}
-
-				await this.warm(`grid:${gridKey(query)}`, cancelled => this.catalog.gridWarmSteps(query, cancelled), true, gone.abandoned)
-			}
+			return await this.onGrid(query, gone.abandoned, () => this.catalog.grid(query, start, count))
 		} finally {
 			gone.release()
+		}
+	}
+
+	// The ids of a grid order's titles in [start, end): a range or select-all of the grid.
+	public catalogGridIds(query: GridQuery, start: number, end: number): Promise<string[]> {
+		return this.onGrid(query, new Promise<never>(() => undefined), () => this.catalog.gridIds(query, start, end))
+	}
+
+	// Reads a grid order once it is held and current (warmed in slices first).
+	private async onGrid<T>(query: GridQuery, abandoned: Promise<never>, read: () => T): Promise<T> {
+		await Promise.race([this.catalogReady(), abandoned])
+
+		for (;;) {
+			if (this.catalog.hasGrid(query)) {
+				await freshSlice(this.deps.yieldSlice)
+
+				if (this.catalog.hasGrid(query)) {
+					return read()
+				}
+			}
+
+			await this.warm(`grid:${gridKey(query)}`, cancelled => this.catalog.gridWarmSteps(query, cancelled), true, abandoned)
 		}
 	}
 
@@ -2359,6 +2371,29 @@ export class VideoIndexEngine {
 		const title = this.catalog.title(id)
 
 		return current === null || title === null ? null : buildTitleDetail(current.files, title)
+	}
+
+	// Set as's view of titles, in the order asked; ids no longer in the library are left out.
+	public async correctionTargets(ids: readonly string[]): Promise<VideoCorrectionTarget[]> {
+		await this.whenClassified()
+
+		const current = this.current
+		const out: VideoCorrectionTarget[] = []
+
+		if (current === null) {
+			return out
+		}
+
+		for (const id of ids) {
+			const title = this.catalog.title(id)
+			const target = title === null ? null : buildCorrectionTarget(current.files, title)
+
+			if (target !== null) {
+				out.push(target)
+			}
+		}
+
+		return out
 	}
 
 	// Playable drive files rebuilt from the index, for the ones it holds live. These carry key material and are

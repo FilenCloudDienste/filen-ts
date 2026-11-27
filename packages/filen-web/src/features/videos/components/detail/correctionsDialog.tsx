@@ -48,7 +48,7 @@ interface Option {
 	label: string
 }
 
-function OptionSelect({
+export function OptionSelect({
 	id,
 	options,
 	value,

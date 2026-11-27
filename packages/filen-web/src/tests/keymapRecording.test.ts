@@ -79,10 +79,10 @@ describe("chords of one action", { timeout: CATALOG_TIMEOUT_MS }, () => {
 	it("adds a special key the recorder cannot take (Escape)", async () => {
 		const { beginRecording, commitRecordedChord, comboFor, isRecordingCombo } = await fresh()
 
-		beginRecording("list", "videos.openSearch", null)
+		beginRecording("list", "settings.nextSection", null)
 
 		expect(await commitRecordedChord("list", "escape", WEB)).toBe("saved")
-		expect(comboFor("videos.openSearch")).toBe("slash,escape")
+		expect(comboFor("settings.nextSection")).toBe("alt+arrowdown,escape")
 		expect(isRecordingCombo()).toBe(false)
 	})
 })

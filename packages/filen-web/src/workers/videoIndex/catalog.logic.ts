@@ -1295,6 +1295,13 @@ export class VideoCatalog {
 		}
 	}
 
+	// The ids of a grid order's titles from `start` up to `end` (excluded): what a range or select-all selects.
+	public gridIds(query: GridQuery, start: number, end: number): string[] {
+		return this.gridResult(query)
+			.titles.slice(Math.max(0, start), Math.max(0, end))
+			.map(title => title.id)
+	}
+
 	// What a grid order was built from: the content, and the watch state or probe facts when its prefs read them.
 	private gridStamp(prefs: GridPrefs): string {
 		const watch = gridReadsWatch(prefs) ? String(this.watchGeneration) : ""

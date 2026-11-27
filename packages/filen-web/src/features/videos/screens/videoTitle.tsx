@@ -2,23 +2,29 @@ import { useLayoutEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate, useRouter } from "@tanstack/react-router"
 import { ClapperboardIcon } from "lucide-react"
+import { toast } from "sonner"
+import { log } from "@/lib/log"
+import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useFollowMovedTitle } from "@/features/videos/hooks/useFollowMovedTitle"
-import { useVideoLibrary, useVideoTitleDetailQuery } from "@/features/videos/queries/library"
+import { editLibraryConfig, useVideoLibrary, useVideoTitleDetailQuery } from "@/features/videos/queries/library"
 import { useCatalogSeriesQuery, useCatalogTitleQuery } from "@/features/videos/queries/catalog"
 import { useHistoryEntryKey } from "@/features/videos/hooks/useHistoryEntryKey"
 import { recallScroll, rememberScroll, restoreScroll } from "@/features/videos/lib/scrollMemory"
 import { TitleScrollContext } from "@/features/videos/lib/titleScroll"
-import { titleSubject, type CorrectionSubject } from "@/features/videos/lib/corrections.logic"
+import { titleSubject, type CorrectionKind, type CorrectionSubject } from "@/features/videos/lib/corrections.logic"
+import { setKindEdit, type SetAsSource } from "@/features/videos/lib/setAs.logic"
 import { detailHeaderMode } from "@/features/videos/lib/titleDetail.logic"
 import { probeLandscapeCover } from "@/features/videos/lib/artwork.logic"
 import { useStoredProbesQuery } from "@/features/videos/queries/detail"
 import { MovieDetail } from "@/features/videos/components/detail/movieDetail"
 import { SeriesDetail } from "@/features/videos/components/detail/seriesDetail"
 import { CorrectionsDialog } from "@/features/videos/components/detail/correctionsDialog"
+import { SetAsShowDialog } from "@/features/videos/components/setAsShowDialog"
 import { VideosLoadError } from "@/features/videos/screens/videosHome"
 import { LoadingState } from "@/components/loadingState"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Button } from "@/components/ui/button"
+import type { VideoTitleDetail } from "@/workers/videoIndex/view.logic"
 
 // /videos/title/$uuid: a movie's, another video's or a series' page, from the local index (no listing).
 export function VideoTitleScreen({ titleId }: { titleId: string }) {
@@ -32,6 +38,7 @@ export function VideoTitleScreen({ titleId }: { titleId: string }) {
 	const detailQuery = useVideoTitleDetailQuery(titleId)
 	const detail = detailQuery.data ?? null
 	const [editing, setEditing] = useState<CorrectionSubject | null>(null)
+	const [showing, setShowing] = useState<SetAsSource[] | null>(null)
 	const seriesQuery = useCatalogSeriesQuery(editing !== null)
 	// A Matroska movie without a backdrop image may carry a landscape cover its stored probe located (a local read,
 	// waited for so the header never switches form after it shows).
@@ -63,6 +70,23 @@ export function VideoTitleScreen({ titleId }: { titleId: string }) {
 		}
 
 		void navigate({ to: title?.kind === "series" ? "/videos/shows" : title?.kind === "other" ? "/videos/other" : "/videos/movies" })
+	}
+
+	// Set as from the More menu: a movie or another video at once (the page stays: the id stays), a show's episode through
+	// the dialog asking for the show.
+	function setAs(movie: Extract<VideoTitleDetail, { kind: "movie" | "other" }>, kind: CorrectionKind): void {
+		const subject = titleSubject(movie)
+
+		if (kind === "episode") {
+			setShowing([{ id: movie.title.id, title: movie.title.title, fileName: movie.title.primary?.name ?? "", subject }])
+
+			return
+		}
+
+		editLibraryConfig(setKindEdit([subject], kind)).catch((e: unknown) => {
+			log.warn("videos.setAs", "setting the title's kind failed", e)
+			toast.error(errorLabel(e))
+		})
 	}
 
 	// A failed read without data to show is an error with a retry, never "not in your library" (and never a spinner
@@ -151,6 +175,9 @@ export function VideoTitleScreen({ titleId }: { titleId: string }) {
 					onEdit={() => {
 						setEditing(titleSubject(detail))
 					}}
+					onSetAs={kind => {
+						setAs(detail, kind)
+					}}
 				/>
 			)}
 			{editing === null ? null : (
@@ -162,6 +189,19 @@ export function VideoTitleScreen({ titleId }: { titleId: string }) {
 						setEditing(null)
 					}}
 					onMoved={followMoved}
+				/>
+			)}
+			{showing === null ? null : (
+				<SetAsShowDialog
+					sources={showing}
+					onClose={() => {
+						setShowing(null)
+					}}
+					onSaved={id => {
+						if (id !== null) {
+							followMoved(id)
+						}
+					}}
 				/>
 			)}
 		</div>
