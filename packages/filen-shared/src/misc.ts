@@ -127,15 +127,18 @@ const HAS_CASELESS_RE = /[\p{Lo}\p{Lm}]/u
 const HAS_DIGIT_RE = /\p{Nd}/u
 const HAS_SPECIAL_CHARS_RE = /[^\p{L}\p{Nd}]/u
 
+// Below this length a password is always "weak".
+export const PASSWORD_MIN_LENGTH = 10
+
 // At this length a password rates at least "normal" whatever it holds.
-const LONG_PASSWORD_LENGTH = 20
+export const PASSWORD_LONG_LENGTH = 20
 
 export type PasswordStrength = "weak" | "normal" | "strong" | "best"
 
 export function ratePasswordStrength(password: string): PasswordStrength {
 	const length = password.length
 
-	if (length < 10) {
+	if (length < PASSWORD_MIN_LENGTH) {
 		return "weak"
 	}
 
@@ -150,7 +153,7 @@ export function ratePasswordStrength(password: string): PasswordStrength {
 		return length >= 16 ? "best" : "strong"
 	}
 
-	if (classes === 2 || length >= LONG_PASSWORD_LENGTH) {
+	if (classes === 2 || length >= PASSWORD_LONG_LENGTH) {
 		return "normal"
 	}
 

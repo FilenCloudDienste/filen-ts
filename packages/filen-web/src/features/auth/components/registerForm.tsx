@@ -159,6 +159,7 @@ function RegisterForm() {
 						>
 							{passwordStrength && <StrengthMeter tier={passwordStrength} />}
 						</PasswordInput>
+						<p className="text-xs text-muted-foreground">{t("registerPasswordWarning")}</p>
 					</Field>
 					<Field>
 						<FieldLabel htmlFor="register-confirm-password">{t("registerConfirmPassword")}</FieldLabel>

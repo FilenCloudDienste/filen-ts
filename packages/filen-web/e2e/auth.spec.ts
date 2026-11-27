@@ -1,7 +1,7 @@
 import type { BrowserContext, Page } from "@playwright/test"
 import { test, expect, readHarvestedSession, seedSession } from "./fixtures"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
-import { BOOT_SETTLE_TIMEOUT_MS, bootTo, bootToSignIn, reloadToShell, SIGN_IN_HEADING, toasts } from "./helpers/listing"
+import { BOOT_SETTLE_TIMEOUT_MS, bootTo, bootToSignIn, reloadToShell, SIGN_IN_HEADING } from "./helpers/listing"
 import { menuItemName } from "./helpers/menu"
 
 // Used with readHarvestedSession instead of the injectedSession fixture: that fixture serves the blob to
@@ -34,7 +34,7 @@ const SDK_HOST_RE = /(^|\.)filen(-[1-6])?\.(io|net)$/
 const email = process.env["FILEN_WEB_E2E_TEST_EMAIL"] ?? ""
 
 // The wrong-password attempt is a live, un-retryable round trip: v3/auth/info, wasm key derivation,
-// v3/login, and only then the toast. The 10s expect default governs UI responsiveness and never covered network.
+// v3/login, and only then the inline error. The 10s expect default governs UI responsiveness and never covered network.
 const LIVE_LOGIN_TIMEOUT_MS = 30_000
 
 test.describe("auth", () => {
@@ -69,16 +69,17 @@ test.describe("auth", () => {
 			try {
 				await expect(page.getByText("Wrong email or password. Please try again.")).toBeVisible({ timeout: LIVE_LOGIN_TIMEOUT_MS })
 			} catch (cause) {
-				// loginForm.tsx surfaces this through toast.error(errorLabel(...)), so the toast is the sole
-				// carrier of the reason — and the other outcome this real, rate-limited endpoint can return
-				// is a rate-limit error whose toast reads nothing like the string above. Unattached, that
+				// loginForm.tsx renders this inline (an alert) from errorLabel(...) — and the other outcome
+				// this real, rate-limited endpoint can return is a rate-limit error whose text reads nothing
+				// like the string above. Unattached, that
 				// failure reports only "expected 'Wrong email or password…' to be visible" and points the
 				// next reader at the error catalog instead of at the rate limit.
-				const toastTexts = await toasts(page)
+				const alertTexts = await page
+					.getByRole("alert")
 					.allInnerTexts()
 					.catch(() => [])
 
-				throw new Error(`the wrong-password toast never rendered; toasts on the page: ${JSON.stringify(toastTexts)}`, { cause })
+				throw new Error(`the wrong-password error never rendered; alerts on the page: ${JSON.stringify(alertTexts)}`, { cause })
 			}
 
 			// A rejected attempt never navigates — still on the sign-in form.

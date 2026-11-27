@@ -67,6 +67,8 @@ export const auth = {
 	twoFactorUseRecoveryKey: "Use your recovery key instead",
 	/** Login two-factor step — field label after switching to recovery-key mode (the two-factor backup code, never the exported master keys) */
 	twoFactorRecoveryKeyInput: "Recovery key",
+	/** Login two-factor step — link that switches the recovery-key field back to the authenticator code */
+	twoFactorUseCode: "Use authenticator code",
 	/** Login two-factor step — inline error shown when the submitted code or recovery key is rejected */
 	twoFactorWrongCode: "Incorrect code. Please try again.",
 
@@ -99,6 +101,8 @@ export const auth = {
 	registerConfirmPassword: "Confirm password",
 	/** Register screen — submit button */
 	registerSubmit: "Create account",
+	/** Register screen — muted note under the password field: the account is end-to-end encrypted, so a forgotten password cannot be reset without losing data */
+	registerPasswordWarning: "Filen can't reset your password. If you forget it, your data can't be recovered.",
 	/** Register screen — split-sentence link to the login screen; <a> wraps "Sign in" */
 	alreadyHaveAccount: "Already have an account? <a>Sign in</a>",
 
@@ -111,8 +115,9 @@ export const auth = {
 	passwordStrengthStrong: "Strong",
 	/** Password-strength rating: strongest tier */
 	passwordStrengthBest: "Very strong",
-	/** Helper line under the strength meter (register and reset forms) when the entered password is below the minimum strength required to submit; never names a specific tier */
-	passwordStrengthTooWeak: "Choose a stronger password to continue",
+	/** Helper line under the strength meter (register and reset forms) when the entered password is below the minimum strength required to submit; states the enforced rule; {{min}} and {{long}} interpolate the shared length thresholds */
+	passwordStrengthTooWeak:
+		"Use at least {{min}} characters including two of: uppercase, lowercase, numbers, symbols. Or use {{long}} or more characters.",
 	/** Inline helper text shown once both password fields are non-empty and don't match — register, reset, and change-password forms */
 	passwordsDoNotMatch: "Passwords do not match",
 	/** Warning shown under a focused account-password field while caps lock is on; shared by every account-password field in the app, settings included */

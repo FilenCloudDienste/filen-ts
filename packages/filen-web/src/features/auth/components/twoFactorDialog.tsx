@@ -1,10 +1,12 @@
-import { useState, type SubmitEvent } from "react"
+import { useRef, useState, type SubmitEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+
+const CODE_RE = /^\d{6}$/
 
 interface TwoFactorDialogProps {
 	open: boolean
@@ -17,8 +19,8 @@ interface TwoFactorDialogProps {
 	onSubmit: (code: string) => void
 }
 
-// Login two-factor step: an authenticator-code input plus a one-way toggle to a plain recovery-key
-// input — the SDK accepts either value as `twoFactorCode` (same field, same retry call). shadcn's
+// Login two-factor step: an authenticator-code input plus a toggle to a plain recovery-key
+// input (and back) — the SDK accepts either value as `twoFactorCode` (same field, same retry call). shadcn's
 // `input-otp` add resolves to the `input-otp` npm package (not a `@base-ui/react` primitive — Base
 // UI's own `otp-field` isn't wired into the registry's base-rhea style yet), so a plain numeric
 // `Input` stands in for a boxed OTP widget. Closing by any means (Escape/outside click/close button)
@@ -30,6 +32,7 @@ function TwoFactorDialog({ open, pending, error, onOpenChange, onSubmit }: TwoFa
 	const [code, setCode] = useState("")
 	const [recoveryKey, setRecoveryKey] = useState("")
 	const [useRecoveryKey, setUseRecoveryKey] = useState(false)
+	const inputRef = useRef<HTMLInputElement>(null)
 	const value = useRecoveryKey ? recoveryKey : code
 
 	function handleOpenChange(next: boolean): void {
@@ -41,17 +44,26 @@ function TwoFactorDialog({ open, pending, error, onOpenChange, onSubmit }: TwoFa
 		}
 	}
 
-	function handleSubmit(e: SubmitEvent): void {
-		e.preventDefault()
+	function submit(submitted: string): void {
 		// A retry is already in flight — Enter would double-submit past the disabled button.
-		if (pending) {
+		if (pending || submitted.trim().length === 0) {
 			return
 		}
-		onSubmit(value.trim())
+		onSubmit(submitted.trim())
 		// Cleared unconditionally: a right code closes the dialog anyway; a wrong one must present an
 		// empty field per the retry contract.
 		setCode("")
 		setRecoveryKey("")
+	}
+
+	function handleSubmit(e: SubmitEvent): void {
+		e.preventDefault()
+		submit(value)
+	}
+
+	function switchMode(recovery: boolean): void {
+		setUseRecoveryKey(recovery)
+		inputRef.current?.focus()
 	}
 
 	return (
@@ -74,6 +86,7 @@ function TwoFactorDialog({ open, pending, error, onOpenChange, onSubmit }: TwoFa
 						</FieldLabel>
 						<Input
 							id="two-factor-value"
+							ref={inputRef}
 							value={value}
 							autoFocus
 							autoComplete="one-time-code"
@@ -92,23 +105,26 @@ function TwoFactorDialog({ open, pending, error, onOpenChange, onSubmit }: TwoFa
 									setRecoveryKey(e.target.value)
 								} else {
 									setCode(e.target.value)
+									// A complete code needs no extra click; the field clears on submit, so a
+									// repeat needs six fresh digits and cannot double-submit.
+									if (CODE_RE.test(e.target.value)) {
+										submit(e.target.value)
+									}
 								}
 							}}
 						/>
 						{error !== undefined && <FieldError id="two-factor-value-error">{error}</FieldError>}
 					</Field>
-					{!useRecoveryKey && (
-						<Button
-							type="button"
-							variant="link"
-							className="h-auto self-start p-0 text-xs"
-							onClick={() => {
-								setUseRecoveryKey(true)
-							}}
-						>
-							{t("twoFactorUseRecoveryKey")}
-						</Button>
-					)}
+					<Button
+						type="button"
+						variant="link"
+						className="h-auto self-start p-0 text-xs"
+						onClick={() => {
+							switchMode(!useRecoveryKey)
+						}}
+					>
+						{useRecoveryKey ? t("twoFactorUseCode") : t("twoFactorUseRecoveryKey")}
+					</Button>
 					<DialogFooter>
 						<Button
 							type="submit"

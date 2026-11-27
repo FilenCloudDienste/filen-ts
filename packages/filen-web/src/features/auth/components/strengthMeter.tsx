@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next"
-import { cn, type PasswordStrength } from "@filen/shared"
+import { cn, PASSWORD_LONG_LENGTH, PASSWORD_MIN_LENGTH, type PasswordStrength } from "@filen/shared"
 
 const STRENGTH_STEP: Record<PasswordStrength, number> = {
 	weak: 1,
@@ -40,7 +40,7 @@ const STRENGTH_LABEL_KEY = {
 // Live strength feedback shared by the register and reset forms. Width steps in quarters rather
 // than a continuous scale, per a simple width-stepped bar. Both consuming forms gate their submit
 // on isPasswordStrongEnough (weak is the only blocked tier), so the weak tier also renders the
-// "choose a stronger password" helper here — the gate's explanation lives in one place and the
+// minimum-requirement helper here — the gate's explanation lives in one place and the
 // two forms cannot diverge.
 function StrengthMeter({ tier }: { tier: PasswordStrength }) {
 	const { t } = useTranslation("auth")
@@ -54,7 +54,14 @@ function StrengthMeter({ tier }: { tier: PasswordStrength }) {
 				/>
 			</div>
 			<p className={cn("text-xs font-medium", STRENGTH_TEXT_CLASS[tier])}>{t(STRENGTH_LABEL_KEY[tier])}</p>
-			{tier === "weak" && <p className="text-xs text-destructive">{t("passwordStrengthTooWeak")}</p>}
+			{/* Always mounted so the requirement is announced when it appears, not skipped as initial content. */}
+			<div aria-live="polite">
+				{tier === "weak" && (
+					<p className="text-xs text-destructive">
+						{t("passwordStrengthTooWeak", { min: PASSWORD_MIN_LENGTH, long: PASSWORD_LONG_LENGTH })}
+					</p>
+				)}
+			</div>
 		</div>
 	)
 }

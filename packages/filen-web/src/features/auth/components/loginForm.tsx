@@ -1,4 +1,4 @@
-import { useRef, useState, type SubmitEvent } from "react"
+import { useEffect, useRef, useState, type SubmitEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
 import { toast } from "sonner"
@@ -6,11 +6,12 @@ import { isValidEmail } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { persistSession, broadcastAuth } from "@/lib/sdk/session"
 import { errorLabel } from "@/lib/i18n/errorLabel"
+import type { SdkErrorKind } from "@/lib/sdk/errorKinds.gen"
 import { runLoginAttempt } from "@/features/auth/lib/loginAttempt"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { useSeededOnOpen } from "@/lib/useSeededOnOpen"
 import { Button } from "@/components/ui/button"
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -95,6 +96,16 @@ function ForgotPasswordDialog({
 	)
 }
 
+// `onField`: the message belongs to the credential fields (wrong email or password) rather than the form.
+interface LoginError {
+	message: string
+	onField: boolean
+}
+
+function isCredentialsError(kind: string | undefined): boolean {
+	return kind === ("EmailOrPasswordWrong" satisfies SdkErrorKind)
+}
+
 function LoginForm() {
 	const { t } = useTranslation(["auth", "common"])
 	const isOnline = useIsOnline()
@@ -105,10 +116,20 @@ function LoginForm() {
 	const [twoFactorOpen, setTwoFactorOpen] = useState(false)
 	const [twoFactorError, setTwoFactorError] = useState<string>()
 	const [forgotOpen, setForgotOpen] = useState(false)
+	const [loginError, setLoginError] = useState<LoginError>()
+	const passwordRef = useRef<HTMLInputElement>(null)
 	// Cancellation counter for in-flight attempts: bumped on every two-factor dialog dismissal, so an
 	// attempt that started under an older value is stale when it settles and its result is discarded
 	// (no dialog reopen, no toast, no navigation — a late success is logged out by the helper).
 	const attemptGeneration = useRef(0)
+
+	// Focus lands on the password field for every failure: it is where a wrong credential is retyped,
+	// and it is the field the inline message is attached to.
+	useEffect(() => {
+		if (loginError !== undefined) {
+			passwordRef.current?.focus()
+		}
+	}, [loginError])
 
 	function handleTwoFactorOpenChange(open: boolean): void {
 		if (!open) {
@@ -124,6 +145,7 @@ function LoginForm() {
 	// fails, so a failed attempt needs no compensation here.
 	async function attemptLogin(twoFactorCode?: string): Promise<void> {
 		setPending(true)
+		setLoginError(undefined)
 		try {
 			const trimmedEmail = email.trim()
 			const outcome = await runLoginAttempt(
@@ -157,12 +179,12 @@ function LoginForm() {
 					break
 				case "error":
 					setTwoFactorOpen(false)
-					toast.error(errorLabel(outcome.dto))
+					setLoginError({ message: errorLabel(outcome.dto), onField: isCredentialsError(outcome.dto.kind) })
 					break
 			}
 		} catch (e) {
 			// Only reachable from past the helper (it never throws) — e.g. a navigation failure.
-			toast.error(errorLabel(e))
+			setLoginError({ message: errorLabel(e), onField: false })
 		} finally {
 			// Unconditional reset is safe: every submit affordance is disabled while pending, so
 			// attempts can never overlap — this only ever clears THIS attempt's flag.
@@ -170,6 +192,7 @@ function LoginForm() {
 		}
 	}
 
+	const fieldError = loginError?.onField === true
 	const canSubmit = isValidEmail(email) && password.length > 0 && isOnline
 
 	return (
@@ -191,24 +214,30 @@ function LoginForm() {
 							placeholder={t("loginEmailPlaceholder")}
 							value={email}
 							disabled={pending}
+							aria-invalid={fieldError ? true : undefined}
 							onChange={e => {
 								setEmail(e.target.value)
+								setLoginError(undefined)
 							}}
 						/>
 					</Field>
-					<Field>
+					<Field data-invalid={fieldError}>
 						<FieldLabel htmlFor="password">{t("loginPassword")}</FieldLabel>
 						<PasswordInput
 							id="password"
+							ref={passwordRef}
 							autoComplete="current-password"
 							value={password}
 							disabled={pending}
+							error={fieldError ? loginError.message : false}
 							onChange={e => {
 								setPassword(e.target.value)
+								setLoginError(undefined)
 							}}
 						/>
 					</Field>
 				</FieldGroup>
+				{loginError !== undefined && !loginError.onField && <FieldError id="login-form-error">{loginError.message}</FieldError>}
 				<Button
 					type="submit"
 					className="w-full"
