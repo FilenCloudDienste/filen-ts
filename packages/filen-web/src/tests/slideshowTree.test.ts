@@ -13,10 +13,11 @@ import type {
 } from "@filen/sdk-rs"
 import type { SharedPathHint } from "@/features/drive/lib/sharedPath"
 import type { SharedNestedListing } from "@/workers/sdk.worker"
+import type { SlideshowOrderRules } from "@/features/preview/lib/slideshowOrder"
 
 const { listSlideshowOwned, listSlideshowShared, listSlideshowLinked } = vi.hoisted(() => ({
-	listSlideshowOwned: vi.fn<(dirUuid: string) => Promise<NormalDirsAndFiles>>(),
-	listSlideshowShared: vi.fn<(dirUuid: string, hint?: SharedPathHint) => Promise<SharedNestedListing>>(),
+	listSlideshowOwned: vi.fn<(dirUuid: string, rules: SlideshowOrderRules) => Promise<NormalDirsAndFiles>>(),
+	listSlideshowShared: vi.fn<(dirUuid: string, rules: SlideshowOrderRules, hint?: SharedPathHint) => Promise<SharedNestedListing>>(),
 	listSlideshowLinked: vi.fn<(dir: AnyLinkedDir, link: DirPublicLink) => Promise<LinkedDirsAndFiles>>()
 }))
 
@@ -77,7 +78,7 @@ describe("fetchSlideshowTree", () => {
 		const items = await fetchSlideshowTree({ kind: "owned", uuid: ROOT, hideDotFiles: false, dotFilenRoot: null }, signal())
 
 		expect(listSlideshowOwned).toHaveBeenCalledTimes(1)
-		expect(listSlideshowOwned).toHaveBeenCalledWith(ROOT)
+		expect(listSlideshowOwned).toHaveBeenCalledWith(ROOT, { hideDotFiles: false, dotFilenRoot: null })
 		expect(items.map(item => item.type)).toEqual(["file", "file"])
 		expect(names(items)).toEqual(["a.jpg", "b.mp4"])
 	})
@@ -93,13 +94,17 @@ describe("fetchSlideshowTree", () => {
 			signal()
 		)
 
-		expect(listSlideshowShared).toHaveBeenCalledWith(testUuid("shared"), { variant: "sharedIn", path: [testUuid("shared")] })
+		expect(listSlideshowShared).toHaveBeenCalledWith(
+			testUuid("shared"),
+			{ hideDotFiles: true, dotFilenRoot: null },
+			{ variant: "sharedIn", path: [testUuid("shared")] }
+		)
 		expect(items).toHaveLength(1)
 		expect(items[0]?.type).toBe("sharedFile")
 		expect(items[0]?.type === "sharedFile" && items[0].data.sharingRole).toEqual(role)
 	})
 
-	it("linked: lists the link recursively", async () => {
+	it("linked: lists the link recursively, in the worker's order", async () => {
 		const link = { linkUuid: testUuid("link") } as unknown as DirPublicLink
 		const root: LinkedDir = { inner: mockDir("lroot", testUuid("p"), "Public"), linkedTag: true }
 		const sub: LinkedDir = { inner: mockDir("lsub", root.inner.uuid, ".hidden"), linkedTag: true }
@@ -113,8 +118,7 @@ describe("fetchSlideshowTree", () => {
 
 		expect(listSlideshowLinked).toHaveBeenCalledWith(root, link)
 		expect(items.map(item => item.type)).toEqual(["file", "file"])
-		// A link never hides: the file inside the dot-directory stays.
-		expect(names(items)).toEqual(["a.jpg", "b.jpg"])
+		expect(names(items)).toEqual(["b.jpg", "a.jpg"])
 	})
 
 	it("linked: keeps the link's directories beside its files", async () => {
@@ -130,79 +134,13 @@ describe("fetchSlideshowTree", () => {
 		expect(tree.dirs.get(sub.inner.uuid)).toBe(sub)
 	})
 
-	it("orders by directory path then natural name", async () => {
-		const b = mockDir("b", ROOT, "B")
-		const a = mockDir("a", ROOT, "A")
-		const ab = mockDir("ab", a.uuid, "Inner")
-		const a10 = mockDir("a10", ROOT, "A10")
-		const a2 = mockDir("a2", ROOT, "A2")
+	it("keeps the worker's order and hands it the listing's rules: the main thread sorts nothing", async () => {
+		listSlideshowOwned.mockResolvedValueOnce({ dirs: [], files: [mockFile("b", ROOT, "b.jpg"), mockFile("a", ROOT, "a.jpg")] })
 
-		listSlideshowOwned.mockResolvedValueOnce({
-			dirs: [b, ab, a10, a, a2],
-			files: [
-				mockFile("f1", b.uuid, "x.jpg"),
-				mockFile("f2", ab.uuid, "x.jpg"),
-				mockFile("f3", a.uuid, "img10.jpg"),
-				mockFile("f4", a.uuid, "img2.jpg"),
-				mockFile("f5", ROOT, "top.jpg"),
-				mockFile("f6", a10.uuid, "x.jpg"),
-				mockFile("f7", a2.uuid, "x.jpg")
-			]
-		})
+		const items = await fetchSlideshowTree({ kind: "owned", uuid: ROOT, hideDotFiles: true, dotFilenRoot: ROOT }, signal())
 
-		const items = await fetchSlideshowTree({ kind: "owned", uuid: ROOT, hideDotFiles: false, dotFilenRoot: null }, signal())
-
-		expect(items.map(item => item.data.uuid)).toEqual(["f5", "f4", "f3", "f2", "f7", "f6", "f1"].map(testUuid))
-	})
-
-	it("drops dot-files and files inside dot-directories only when hideDotFiles", async () => {
-		const dot = mockDir("dot", ROOT, ".git")
-		const deep = mockDir("deep", dot.uuid, "objects")
-		const listing = (): NormalDirsAndFiles => ({
-			dirs: [dot, deep],
-			files: [
-				mockFile("a", ROOT, "a.jpg"),
-				mockFile("b", ROOT, ".b.jpg"),
-				mockFile("c", dot.uuid, "c.jpg"),
-				mockFile("d", deep.uuid, "d.jpg")
-			]
-		})
-
-		listSlideshowOwned.mockResolvedValueOnce(listing())
-
-		const hidden = await fetchSlideshowTree({ kind: "owned", uuid: ROOT, hideDotFiles: true, dotFilenRoot: null }, signal())
-
-		expect(names(hidden)).toEqual(["a.jpg"])
-
-		listSlideshowOwned.mockResolvedValueOnce(listing())
-
-		const shown = await fetchSlideshowTree({ kind: "owned", uuid: ROOT, hideDotFiles: false, dotFilenRoot: null }, signal())
-
-		expect(names(shown)).toEqual([".b.jpg", "a.jpg", "c.jpg", "d.jpg"])
-	})
-
-	it("drops the root .filen when the listing hides it, and keeps it when the listing shows it", async () => {
-		const dotFilen = mockDir("dotfilen", ROOT, ".filen")
-		const photos = mockDir("photos", dotFilen.uuid, "photos")
-		const other = mockDir("other", ROOT, "Other")
-		const nested = mockDir("nested", other.uuid, ".filen")
-		const listing = (): NormalDirsAndFiles => ({
-			dirs: [dotFilen, photos, other, nested],
-			files: [mockFile("a", photos.uuid, "a.jpg"), mockFile("b", nested.uuid, "b.jpg"), mockFile("c", ROOT, "c.jpg")]
-		})
-
-		listSlideshowOwned.mockResolvedValueOnce(listing())
-
-		const hidden = await fetchSlideshowTree({ kind: "owned", uuid: ROOT, hideDotFiles: false, dotFilenRoot: ROOT }, signal())
-
-		// Only the root's own `.filen`: one nested elsewhere stays.
-		expect(names(hidden)).toEqual(["c.jpg", "b.jpg"])
-
-		listSlideshowOwned.mockResolvedValueOnce(listing())
-
-		const shown = await fetchSlideshowTree({ kind: "owned", uuid: ROOT, hideDotFiles: false, dotFilenRoot: null }, signal())
-
-		expect(names(shown)).toEqual(["c.jpg", "a.jpg", "b.jpg"])
+		expect(listSlideshowOwned).toHaveBeenCalledWith(ROOT, { hideDotFiles: true, dotFilenRoot: ROOT })
+		expect(names(items)).toEqual(["b.jpg", "a.jpg"])
 	})
 
 	it("an aborted fetch resolves to nothing applied", async () => {

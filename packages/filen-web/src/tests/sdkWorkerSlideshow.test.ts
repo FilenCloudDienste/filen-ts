@@ -102,7 +102,7 @@ describe("slideshow worker lists", () => {
 
 		fakeClient.listDirRecursive.mockResolvedValueOnce({ dirs: [dir], files: mixedFiles(dir.uuid) })
 
-		const result = await api.listSlideshowOwned(ROOT)
+		const result = await api.listSlideshowOwned(ROOT, { hideDotFiles: false, dotFilenRoot: null })
 
 		expect(fakeClient.listDirRecursive).toHaveBeenCalledTimes(1)
 		expect(result.dirs.map(d => d.uuid)).toEqual([dir.uuid])
@@ -135,7 +135,7 @@ describe("slideshow worker lists", () => {
 			files: mixedFiles(nested.inner.uuid)
 		})
 
-		const result = await api.listSlideshowShared(testUuid("share"))
+		const result = await api.listSlideshowShared(testUuid("share"), { hideDotFiles: false, dotFilenRoot: null })
 
 		expect(fakeClient.listDirRecursive).toHaveBeenCalledWith({ dir: sharedRoot, shareInfo: role }, expect.any(Function))
 		expect(result.role).toEqual(role)
@@ -162,5 +162,31 @@ describe("slideshow worker lists", () => {
 		expect(fakeUnauth.free).toHaveBeenCalled()
 		expect(result.dirs).toEqual([sub])
 		expect(result.files.map(f => f.uuid)).toEqual(SLIDEABLE)
+	})
+
+	it("orders the slides in the worker: directory path, then natural name", async () => {
+		// A link no other test listed (a link's listing is held for the page).
+		const link = { linkUuid: testUuid("ordered") } as unknown as DirPublicLink
+		const root: LinkedDir = {
+			inner: { uuid: testUuid("oroot"), parent: ROOT, meta: { type: "decoded", data: { name: "Public" } }, ...dirBase },
+			linkedTag: true
+		}
+		const sub: LinkedDir = {
+			inner: { uuid: testUuid("osub"), parent: root.inner.uuid, meta: { type: "decoded", data: { name: "Sub" } }, ...dirBase },
+			linkedTag: true
+		}
+
+		fakeUnauth.listLinkedDirRecursive.mockResolvedValueOnce({
+			dirs: [sub],
+			files: [
+				mockFile("deep", sub.inner.uuid, "a.jpg", "image/jpeg"),
+				mockFile("img10", root.inner.uuid, "img10.jpg", "image/jpeg"),
+				mockFile("img2", root.inner.uuid, "img2.jpg", "image/jpeg")
+			]
+		})
+
+		const result = await api.listSlideshowLinked(root, link)
+
+		expect(result.files.map(f => f.uuid)).toEqual([testUuid("img2"), testUuid("img10"), testUuid("deep")])
 	})
 })

@@ -127,6 +127,7 @@ import { lookupDirectoryName } from "@/features/drive/lib/directoryName"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { isPhotoCandidate } from "@/features/photos/lib/predicate"
 import { slideKindOf } from "@/features/preview/lib/slideshow.logic"
+import { NO_HIDING, orderSlideshowFiles, type SlideshowOrderRules } from "@/features/preview/lib/slideshowOrder"
 import { FLAT_LISTING_KINDS, type FlatListingKind } from "@/features/drive/lib/flatListing"
 import { THUMB_CACHE_CAP, THUMB_MAX_DIM, THUMB_SDK_LOSSY_QUALITY, type ThumbnailCopy } from "@/features/drive/lib/thumbnails.logic"
 import {
@@ -1140,11 +1141,18 @@ function narrowOwnedWalk(
 	{ dirs, files }: { dirs: NonRootDirTagged[]; files: NormalDirsAndFiles["files"] },
 	keep: (item: DriveItem) => boolean
 ): NormalDirsAndFiles {
+	const normalDirs = ownedWalkDirs(dirs)
+
+	return { dirs: normalDirs, files: files.filter(file => keep(narrowItem(file))) }
+}
+
+// A walk's normal dirs, cached.
+function ownedWalkDirs(dirs: NonRootDirTagged[]): Extract<NonRootDirTagged, { type: "normal" }>[] {
 	const normalDirs = dirs.filter((d): d is Extract<NonRootDirTagged, { type: "normal" }> => d.type === "normal")
 
 	cacheDirs(normalDirs)
 
-	return { dirs: normalDirs, files: files.filter(file => keep(narrowItem(file))) }
+	return normalDirs
 }
 
 // What a slideshow shows, judged without verdicts (the worker holds none).
@@ -1705,9 +1713,12 @@ const api = {
 		return narrowOwnedWalk(await walkCoordinator.walk(rootUuid), isPhotoCandidate)
 	},
 	// A slideshow's "include subdirectories" list: the same walk (a settled one is reused), every dir but only
-	// slideable files.
-	async listSlideshowOwned(dirUuid: string): Promise<NormalDirsAndFiles> {
-		return narrowOwnedWalk(await walkCoordinator.walk(dirUuid), isSlideable)
+	// slideable files, in the slideshow's order without what the listing hides (sorted here, off the main thread).
+	async listSlideshowOwned(dirUuid: string, rules: SlideshowOrderRules): Promise<NormalDirsAndFiles> {
+		const walk = await walkCoordinator.walk(dirUuid)
+		const dirs = ownedWalkDirs(walk.dirs)
+
+		return { dirs, files: orderSlideshowFiles(dirs, walk.files, rules, isSlideable) }
 	},
 	// Photos' socket scoping: whether every dir provably sits outside `rootUuid`, judged from the dir cache
 	// alone. Deciding to skip a refetch must never cost a round trip of its own.
@@ -2640,7 +2651,15 @@ const api = {
 		const result =
 			linkedSearch.subtree(dir, link) ?? (await withLinkedUnauth(unauth => unauth.listLinkedDirRecursive(dir, link, () => undefined)))
 
-		return { dirs: result.dirs, files: result.files.filter(file => isSlideable(narrowItem(file))) }
+		return {
+			dirs: result.dirs,
+			files: orderSlideshowFiles(
+				result.dirs.map(entry => entry.inner),
+				result.files,
+				NO_HIDING,
+				isSlideable
+			)
+		}
 	},
 	// The search of a public directory link (workers/linkedSearch.ts): open lists `dir`'s subtree once and holds it, its
 	// download reported through `onProgress` (the page's Comlink.proxy, released once the listing is in); range reads a
@@ -3091,8 +3110,8 @@ const api = {
 		return { dirs: result.dirs, files: result.files, role: context.role }
 	},
 	// A slideshow's "include subdirectories" list of a shared directory: the whole subtree in one listing, every dir
-	// (cached for descent like listSharedDirectory's) but only slideable files.
-	async listSlideshowShared(dirUuid: string, hint?: SharedPathHint): Promise<SharedNestedListing> {
+	// (cached for descent like listSharedDirectory's) but only slideable files, in the slideshow's order.
+	async listSlideshowShared(dirUuid: string, rules: SlideshowOrderRules, hint?: SharedPathHint): Promise<SharedNestedListing> {
 		const c = requireClient()
 		const context = await sharedDirContextOf(c, dirUuid, hint)
 		const result = await c.listDirRecursive({ dir: context.dir, shareInfo: context.role }, () => undefined)
@@ -3102,7 +3121,16 @@ const api = {
 			cacheSharedDirContext(dir.inner.uuid, { dir, role: context.role })
 		}
 
-		return { dirs, files: result.files.filter(file => isSlideable(narrowItem(file))), role: context.role }
+		return {
+			dirs,
+			files: orderSlideshowFiles(
+				dirs.map(entry => entry.inner),
+				result.files,
+				rules,
+				isSlideable
+			),
+			role: context.role
+		}
 	},
 	// Stops sharing a shared-root item (a directory shared out, or an item shared in the caller wants
 	// gone).
