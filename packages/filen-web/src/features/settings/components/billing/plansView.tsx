@@ -159,7 +159,7 @@ function PlansView({ accountQuery, planId }: PlansViewProps) {
 					}}
 				>
 					<div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-						<TabsList className="h-9! max-w-full overflow-x-auto">
+						<TabsList className="h-9! max-w-full overflow-x-auto overflow-y-hidden">
 							{groups.map(group => {
 								const savings = group.tab === "annually" ? tabSavings(group.cards) : undefined
 
