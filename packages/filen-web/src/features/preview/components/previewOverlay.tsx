@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useRef, useState, useSyncExternalStore, Component, type KeyboardEvent, type ReactNode } from "react"
+import { useEffect, useEffectEvent, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { useLatestRef } from "@/lib/useLatestRef"
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
@@ -41,7 +41,6 @@ import { VIDEO_CANCEL_ACTION } from "@/features/preview/videoEdit/lib/keys"
 import type { VideoSaveTarget } from "@/features/preview/videoEdit/types"
 import type { ImageEditorCommands, ImageExportSource } from "@/features/preview/imageEdit/types"
 import { IN_EDITORS_AND_FIELDS, useAction } from "@/lib/keymap/useAction"
-import { log } from "@/lib/log"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { SplitTitle } from "@/features/preview/components/splitTitle"
 import { PreviewBody } from "@/features/preview/components/previewBody"
@@ -62,6 +61,7 @@ import { PreviewReplaceContext, type PreviewReplaceMake } from "@/features/previ
 import { PasswordDraft, PasswordDraftContext } from "@/features/preview/lib/passwordDraft"
 import { stableUuidOf } from "@/features/drive/store/useDriveClipboardStore"
 import { PreviewLoading } from "@/features/preview/components/previewErrorState"
+import { PreviewErrorBoundary } from "@/features/preview/components/previewErrorBoundary"
 import { useSettledSlot } from "@/features/preview/hooks/useSettledSlot"
 import {
 	isMediaTarget,
@@ -176,44 +176,6 @@ export interface PreviewOverlayProps {
 	// Swaps the host's frozen pager list (as opening it with `items` at `index` would): a slideshow's subdirectories'
 	// files, and back.
 	onItemsReplaced?: ((items: DriveItem[], index: number) => void) | undefined
-}
-
-interface PreviewErrorBoundaryState {
-	hasError: boolean
-}
-
-// The only React API for a render-phase catch (no hook equivalent). Scoped to the preview body ONLY —
-// the header (Save/prev/next/download/close) lives outside it, so the overlay stays fully closeable
-// even while this is showing its fallback. A synchronous viewer throw (e.g. the markdown parser, which
-// runs during render, not inside an effect) would otherwise propagate past this dialog uncaught and
-// white-screen the whole app — no boundary exists anywhere else in this tree. Keyed by bodyKey
-// at its call site below (the drive uuid, the same key PreviewBody itself remounts on) so a
-// crash on one slot can never stick once the user steps to a different one — getDerivedStateFromError has no other way back to a
-// clean state.
-class PreviewErrorBoundary extends Component<{ children: ReactNode }, PreviewErrorBoundaryState> {
-	override state: PreviewErrorBoundaryState = { hasError: false }
-
-	static getDerivedStateFromError(): PreviewErrorBoundaryState {
-		return { hasError: true }
-	}
-
-	override componentDidCatch(error: unknown): void {
-		log.error("preview", "viewer render failed", error)
-	}
-
-	override render(): ReactNode {
-		return this.state.hasError ? <PreviewRenderError /> : this.props.children
-	}
-}
-
-function PreviewRenderError() {
-	const { t } = useTranslation("preview")
-
-	return (
-		<div className="flex size-full items-center justify-center px-6 text-center text-sm text-destructive">
-			{t("previewRenderError")}
-		</div>
-	)
 }
 
 // Full-bleed preview surface, mounted by the drive dialog host (directoryListing.tsx) exactly like its
@@ -1540,7 +1502,10 @@ export function PreviewOverlay({
 							<ArchiveListingScope>
 								{/* Mid-run (a held arrow key) the slots stepped through show only their header. */}
 								{editing !== null ? (
-									<PreviewErrorBoundary key={`edit:${editing.uuid}`}>
+									<PreviewErrorBoundary
+										key={`edit:${editing.uuid}`}
+										item={driveItem}
+									>
 										<ImageEditor
 											source={editing.source}
 											info={editing.info}
@@ -1557,7 +1522,10 @@ export function PreviewOverlay({
 										/>
 									</PreviewErrorBoundary>
 								) : videoEditing !== null ? (
-									<PreviewErrorBoundary key={`videoEdit:${videoEditing.uuid}`}>
+									<PreviewErrorBoundary
+										key={`videoEdit:${videoEditing.uuid}`}
+										item={driveItem}
+									>
 										<VideoEditor
 											client={videoEditing.client}
 											info={videoEditing.info}
@@ -1582,12 +1550,15 @@ export function PreviewOverlay({
 								) : !slotSettled ? (
 									<PreviewLoading />
 								) : (
-									<PreviewErrorBoundary key={slotKey}>
-										<SlideshowSlot value={slideshow.running ? slideshow.slot : null}>
-											<PreviewDownloadableProvider
-												downloadable={previewDownloadable(downloadable, variant)}
-												onDownload={download}
-											>
+									<PreviewDownloadableProvider
+										downloadable={previewDownloadable(downloadable, variant)}
+										onDownload={download}
+									>
+										<PreviewErrorBoundary
+											key={slotKey}
+											item={driveItem}
+										>
+											<SlideshowSlot value={slideshow.running ? slideshow.slot : null}>
 												<ContentSniffGate
 													item={driveItem}
 													asText={asText}
@@ -1640,9 +1611,9 @@ export function PreviewOverlay({
 														</PreviewReplaceContext>
 													)}
 												/>
-											</PreviewDownloadableProvider>
-										</SlideshowSlot>
-									</PreviewErrorBoundary>
+											</SlideshowSlot>
+										</PreviewErrorBoundary>
+									</PreviewDownloadableProvider>
 								)}
 							</ArchiveListingScope>
 							{/* On the stage it watches the pointer over. */}
