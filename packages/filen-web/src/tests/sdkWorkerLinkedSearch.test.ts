@@ -290,6 +290,28 @@ describe("linked search: the held listing reused", () => {
 		expect(fakeUnauth.listLinkedDir).not.toHaveBeenCalled()
 	})
 
+	it("a slideshow waits on a listing under way of the link, which may cover it, before listing its own", async () => {
+		let land: (listing: LinkedDirsAndFiles) => void = () => undefined
+
+		fakeUnauth.listLinkedDirRecursive.mockImplementationOnce(
+			() =>
+				new Promise(resolve => {
+					land = resolve
+				})
+		)
+
+		const opened = api.searchLinkedOpen(ROOT, LINK, vi.fn())
+		const slides = api.listSlideshowLinked(PHOTOS, LINK)
+
+		await Promise.resolve()
+		land(TREE)
+		await opened
+
+		expect((await slides).files.map(f => f.uuid)).toEqual([testUuid("beach"), testUuid("clip")])
+		expect(fakeUnauth.listLinkedDirRecursive).toHaveBeenCalledTimes(1)
+		expect(names(await query("beach"))).toEqual(["beach.jpg"])
+	})
+
 	it("a search opened while a slideshow's listing is under way waits on that one, its progress reported", async () => {
 		let land: (listing: LinkedDirsAndFiles) => void = () => undefined
 		let progress: (downloaded: number, total: number | undefined) => void = () => undefined

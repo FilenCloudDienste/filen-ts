@@ -43,7 +43,8 @@ export interface LinkSearchSession {
 	reset: () => void
 	// The page leaves the link: the held listing goes.
 	close: () => void
-	// The worker holds a listing for the page by another path (a slideshow's subdirectories), for close to free.
+	// The worker holds a listing for the page by another path (a slideshow's subdirectories), which may replace this
+	// session's; close frees it.
 	engage: () => void
 }
 
@@ -170,8 +171,12 @@ export function createLinkSearchSession(link: DirPublicLink, onState: (state: Li
 		search,
 		reset,
 		close,
+		// What this session last opened may be replaced now: the next query asks the worker again (no request where
+		// its listing covers the directory), and a listing under way of this session's is no longer taken as held.
 		engage: () => {
 			engaged = true
+			opened = null
+			opening = null
 		}
 	}
 }

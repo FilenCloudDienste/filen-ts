@@ -225,6 +225,14 @@ export function createLinkedSearch(listRecursive: ListLinkedRecursive) {
 		pending = null
 	}
 
+	// Once the link's listing under way (if any) has landed or failed: a caller that may list a directory of its own
+	// waits on it first, since it may cover that directory.
+	async function settle(link: DirPublicLink): Promise<void> {
+		if (pending?.linkId === linkIdentity(link)) {
+			await pending.promise.catch(() => undefined)
+		}
+	}
+
 	// A query's window over the held listing, matched by the drive's name rules (nameSearchKey). A blank query matches
 	// nothing. Throws when nothing held covers the directory: the page opens it first.
 	function range(request: LinkedSearchRequest): LinkedSearchRange {
@@ -314,5 +322,5 @@ export function createLinkedSearch(listRecursive: ListLinkedRecursive) {
 		}
 	}
 
-	return { open, close, range, children, subtree }
+	return { open, close, settle, range, children, subtree }
 }

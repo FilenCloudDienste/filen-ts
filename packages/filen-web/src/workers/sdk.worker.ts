@@ -2645,6 +2645,8 @@ const api = {
 	// from the link's held listing (linkedSearch), opened here when nothing held covers the directory, so one listing
 	// serves the slideshow, the search, the subdirectories' listings and the subtitles beside a video.
 	async listSlideshowLinked(dir: AnyLinkedDir, link: DirPublicLink): Promise<LinkedDirsAndFiles> {
+		// A search's listing of the link under way may cover `dir`: never superseded by one of `dir` alone.
+		await linkedSearch.settle(link)
 		await linkedSearch.open(dir, link, () => undefined)
 
 		// Superseded meanwhile (another directory's search, the page leaving): listed for this alone.
