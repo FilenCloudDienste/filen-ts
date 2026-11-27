@@ -1377,6 +1377,11 @@ export function PreviewOverlay({
 											{saving ? <Spinner className="size-4" /> : <SaveIcon />}
 										</TooltipIconButton>
 									) : null}
+									{items.length > 1 ? (
+										<span className="shrink-0 px-1 text-xs text-muted-foreground tabular-nums">
+											{t("previewPosition", { current: index + 1, total: items.length })}
+										</span>
+									) : null}
 									<TooltipIconButton
 										label={t("previewPreviousAction")}
 										disabled={index <= 0 || saving}

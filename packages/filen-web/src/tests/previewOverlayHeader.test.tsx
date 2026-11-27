@@ -6,8 +6,8 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
 import type { DriveItem } from "@/features/drive/lib/item"
 
-// The header's favorite star: shown where the menu offers Favorite, toggling in place and following a toggle made
-// elsewhere.
+// The header's favorite star (shown where the menu offers Favorite, toggling in place and following a toggle made
+// elsewhere) and its position among the paged files.
 
 const harness = vi.hoisted(() => ({ toggled: [] as string[] }))
 
@@ -43,9 +43,9 @@ registerAllActions()
 
 const UUID = "11111111-1111-1111-1111-111111111111"
 
-function deck(): DriveItem {
+function deck(uuid = UUID): DriveItem {
 	return narrowItem({
-		uuid: UUID,
+		uuid,
 		stableUUID: undefined,
 		parent: "22222222-2222-2222-2222-222222222222",
 		size: 1_024n,
@@ -74,12 +74,12 @@ afterEach(() => {
 	harness.toggled = []
 })
 
-function shown(variant: "drive" | "sharedIn"): void {
+function shown(variant: "drive" | "sharedIn", items: DriveItem[] = [deck()], index = 0): void {
 	render(
 		createElement(PreviewOverlay, {
 			variant,
-			items: [deck()],
-			index: 0,
+			items,
+			index,
 			onStep: vi.fn(),
 			onClose: vi.fn(),
 			onItemRemoved: vi.fn()
@@ -116,6 +116,18 @@ describe("PreviewOverlay — favorite star", () => {
 		})
 
 		expect(screen.getByRole("button", { name: "Favorite" }).getAttribute("aria-pressed")).toBe("false")
+	})
+
+	it("shows the open file's place among the paged files, and nothing for a single file", async () => {
+		const items = Array.from({ length: 812 }, (_, at) => deck(`11111111-1111-1111-1111-${String(at).padStart(12, "0")}`))
+
+		shown("drive", items, 36)
+		expect(await screen.findByText("37 / 812")).toBeTruthy()
+
+		cleanup()
+		shown("drive")
+		await screen.findByRole("button", { name: "Favorite" })
+		expect(screen.queryByText(/\d+ \/ \d+/)).toBeNull()
 	})
 
 	it("is not offered where the menu offers no Favorite", async () => {

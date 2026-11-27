@@ -116,6 +116,8 @@ export const preview = {
 	previewPreviousAction: "Previous file",
 	/** Preview overlay header — accessible label for the button stepping to the next previewable sibling; disabled at the last item */
 	previewNextAction: "Next file",
+	/** Preview overlay header — the open file's place among the files it pages through, e.g. "37 / 812" */
+	previewPosition: "{{current, number}} / {{total, number}}",
 	/** Preview overlay header — accessible label for the button downloading the open item; hidden in trash */
 	previewDownloadAction: "Download",
 	/** Preview overlay header — accessible label for the button saving the editable text/code buffer; shown only while editable and dirty, also the Cmd/Ctrl+S keymap command's description */
