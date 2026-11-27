@@ -27,6 +27,8 @@ export type DriveActionId =
 	| "openContainingDirectory"
 	| "download"
 	| "downloadAs"
+	| "playNext"
+	| "addToQueue"
 	| "addToPlaylist"
 	| "share"
 	| "publicLink"
@@ -255,9 +257,9 @@ function gatedActions(items: readonly DriveItem[], variant: DriveVariant, option
 		}
 	}
 
-	// Any playable song in the selection; the rest is skipped by the add.
+	// Any playable song in the selection; the rest is skipped by the queue inserts and the add.
 	if (flags.includesPlaylistSong) {
-		actions.push(entry("addToPlaylist", "addToPlaylist"))
+		actions.push(entry("playNext", "playNext"), entry("addToQueue", "addToQueue"), entry("addToPlaylist", "addToPlaylist"))
 	}
 
 	// Copying only reads, so Shared with me offers it too, beside the other read actions.

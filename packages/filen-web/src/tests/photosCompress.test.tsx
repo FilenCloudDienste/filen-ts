@@ -39,6 +39,8 @@ vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), err
 vi.mock("@/features/transfers/lib/archiveToast", () => ({ startCompressWithCard }))
 vi.mock("@/features/drive/lib/dnd", () => ({ performMove: vi.fn() }))
 vi.mock("@/features/transfers/lib/copyToast", () => ({ startCopyWithCard: vi.fn() }))
+// The drive menus' queue entries reach the audio engine, whose import-time prefs read this test's kv stub does not answer.
+vi.mock("@/features/audio/lib/queueActions", () => ({ queueDriveSongs: vi.fn() }))
 vi.mock("@/features/drive/queries/drive", async importOriginal => ({
 	...(await importOriginal<typeof import("@/features/drive/queries/drive")>()),
 	useDirectoryTreeChildrenQuery: () => ({ status: "success", data: [] })

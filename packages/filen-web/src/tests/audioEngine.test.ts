@@ -1460,3 +1460,125 @@ describe("dispose", () => {
 		expect(h.fake.calls.dispose).toBe(1)
 	})
 })
+
+describe("enqueue", () => {
+	it("starts playing when the queue is empty", async () => {
+		const h = makeHarness()
+
+		expect(h.engine.enqueue([track("a"), track("b")], "end")).toBe(2)
+		await flush()
+
+		expect(useAudioStore.getState().queue.map(entry => entry.uuid)).toEqual(["a", "b"])
+		expect(useAudioStore.getState().status).toBe("playing")
+	})
+
+	it("inserts without touching the track playing", async () => {
+		const h = makeHarness()
+
+		await h.engine.enqueueAndPlay([track("a"), track("b")], 0)
+		await flush()
+
+		expect(h.engine.enqueue([track("x")], "next")).toBe(1)
+		expect(h.engine.enqueue([track("y")], "end")).toBe(1)
+
+		const state = useAudioStore.getState()
+
+		expect(state.queue.map(entry => entry.uuid)).toEqual(["a", "x", "b", "y"])
+		expect(state.currentIndex).toBe(0)
+		expect(state.status).toBe("playing")
+		expect(h.resolveSource).toHaveBeenCalledTimes(1)
+		expect(h.fake.calls.load).toEqual(["src:a"])
+	})
+
+	it("skips the next track into what Play next queued", async () => {
+		const h = makeHarness()
+
+		await h.engine.enqueueAndPlay([track("a"), track("b")], 0)
+		await flush()
+		h.engine.enqueue([track("x")], "next")
+		await h.engine.skipNext()
+		await flush()
+
+		expect(h.fake.calls.load).toEqual(["src:a", "src:x"])
+	})
+})
+
+describe("clear queue and restore", () => {
+	it("restores the cleared queue at the track and position it was at, playing", async () => {
+		const h = makeHarness()
+
+		await h.engine.enqueueAndPlay([track("a"), track("b"), track("c")], 1)
+		await flush()
+		h.fake.setSample({ currentTimeMs: 42_000, durationMs: 200_000, paused: false, ended: false })
+
+		const snapshot = h.engine.queueSnapshot()
+
+		h.engine.clearQueue()
+		expect(useAudioStore.getState().queue).toEqual([])
+
+		if (snapshot === null) {
+			throw new Error("expected a snapshot")
+		}
+
+		await h.engine.restoreQueue(snapshot)
+		await flush()
+
+		const state = useAudioStore.getState()
+
+		expect(state.queue.map(entry => entry.uuid)).toEqual(["a", "b", "c"])
+		expect(state.currentIndex).toBe(1)
+		expect(state.status).toBe("playing")
+		expect(h.fake.calls.seek.at(-1)).toBe(42)
+	})
+
+	it("brings a paused queue back paused", async () => {
+		const h = makeHarness()
+
+		await h.engine.enqueueAndPlay([track("a")], 0)
+		await flush()
+		h.engine.pause()
+
+		const snapshot = h.engine.queueSnapshot()
+
+		h.engine.clearQueue()
+
+		if (snapshot === null) {
+			throw new Error("expected a snapshot")
+		}
+
+		const plays = h.fake.calls.play
+
+		await h.engine.restoreQueue(snapshot)
+		await flush()
+
+		expect(useAudioStore.getState().status).toBe("paused")
+		expect(h.fake.calls.play).toBe(plays)
+	})
+
+	it("leaves a queue started since the clear alone", async () => {
+		const h = makeHarness()
+
+		await h.engine.enqueueAndPlay([track("a")], 0)
+		await flush()
+
+		const snapshot = h.engine.queueSnapshot()
+
+		h.engine.clearQueue()
+		await h.engine.enqueueAndPlay([track("z")], 0)
+		await flush()
+
+		if (snapshot === null) {
+			throw new Error("expected a snapshot")
+		}
+
+		await h.engine.restoreQueue(snapshot)
+
+		expect(useAudioStore.getState().queue.map(entry => entry.uuid)).toEqual(["z"])
+	})
+
+	it("has nothing to snapshot for an empty queue", () => {
+		const h = makeHarness()
+
+		expect(h.engine.queueSnapshot()).toBeNull()
+	})
+})

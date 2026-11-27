@@ -15,6 +15,7 @@ const { audioEngine } = vi.hoisted(() => ({
 		setShuffleEnabled: vi.fn(),
 		setLoopMode: vi.fn(),
 		clearQueue: vi.fn(),
+		queueSnapshot: vi.fn(() => null),
 		playIndex: vi.fn().mockResolvedValue(undefined),
 		removeAt: vi.fn().mockResolvedValue(undefined)
 	}
@@ -254,6 +255,16 @@ describe("NowPlayingPanel — controls", () => {
 		for (const control of controls) {
 			expect(control.className).toContain(NOW_PLAYING_CONTROL_CLASS)
 		}
+	})
+
+	it("clears the queue from its button", () => {
+		useAudioStore.setState({ queue: [track("t1", "one.mp3")], currentIndex: 0 })
+
+		render(createElement(NowPlayingPanel))
+		fireEvent.click(screen.getByRole("button", { name: "Clear queue" }))
+
+		expect(audioEngine.queueSnapshot).toHaveBeenCalledOnce()
+		expect(audioEngine.clearQueue).toHaveBeenCalledOnce()
 	})
 
 	it("shows whether tracks blend now, and turns the kept pref off while they can't", () => {

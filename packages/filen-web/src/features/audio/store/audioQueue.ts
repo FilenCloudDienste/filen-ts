@@ -276,3 +276,106 @@ export function reconcileVisibility(sample: ElementSample, currentStatus: AudioP
 
 	return { positionMs, durationMs, status: sample.paused ? "paused" : "playing", shouldAdvance: false }
 }
+
+// Where queued tracks land: right after the current track ("Play next") or at the end ("Add to queue").
+export type QueuePlacement = "next" | "end"
+
+// The outcome of an insert. `shifted` tells the engine whether any track already queued changed index (a warm-up keyed
+// to an index is stale then); `added` how many tracks went in.
+export interface QueueInsert {
+	queue: QueueTrack[]
+	currentIndex: number
+	shuffleOrder: number[]
+	shifted: boolean
+	added: number
+}
+
+// Inserts `tracks` without disturbing the current track. A track already queued moves to the new place (row keys and
+// the engine's uuid checks rely on a queue holding each uuid once); the current track itself stays where it is. Under
+// shuffle the existing order is kept: "next" lands the tracks right after the current one in play order too, "end"
+// after the rest of the lap. A stale order is rebuilt anchored at the current track first.
+export function insertIntoQueue(
+	queue: QueueTrack[],
+	currentIndex: number,
+	shuffleEnabled: boolean,
+	shuffleOrder: number[],
+	tracks: readonly QueueTrack[],
+	placement: QueuePlacement,
+	random: () => number = Math.random
+): QueueInsert {
+	const currentUuid = queue[currentIndex]?.uuid
+	const incomingUuids = new Set<string>()
+	const incoming: QueueTrack[] = []
+
+	for (const track of tracks) {
+		if (track.uuid !== currentUuid && !incomingUuids.has(track.uuid)) {
+			incomingUuids.add(track.uuid)
+			incoming.push(track)
+		}
+	}
+
+	if (incoming.length === 0) {
+		return { queue, currentIndex, shuffleOrder, shifted: false, added: 0 }
+	}
+
+	// Old index → index among the tracks that stay (-1 for one that moves).
+	const keptIndexOf: number[] = []
+	const kept: QueueTrack[] = []
+
+	for (const track of queue) {
+		if (incomingUuids.has(track.uuid)) {
+			keptIndexOf.push(-1)
+		} else {
+			keptIndexOf.push(kept.length)
+			kept.push(track)
+		}
+	}
+
+	const keptCurrent = keptIndexOf[currentIndex] ?? 0
+	const at = placement === "next" && kept.length > 0 ? keptCurrent + 1 : kept.length
+	const count = incoming.length
+	const finalIndexOf = (oldIndex: number): number => {
+		const keptIndex = keptIndexOf[oldIndex] ?? -1
+
+		return keptIndex >= at ? keptIndex + count : keptIndex
+	}
+	const nextQueue = kept.slice(0, at).concat(incoming, kept.slice(at))
+	const nextCurrent = queue.length === 0 ? 0 : finalIndexOf(currentIndex)
+	const shifted = kept.length !== queue.length || at < kept.length
+
+	if (!shuffleEnabled) {
+		return { queue: nextQueue, currentIndex: nextCurrent, shuffleOrder: [], shifted, added: count }
+	}
+
+	const base =
+		shuffleOrder.length === queue.length && shuffleOrder.includes(currentIndex)
+			? shuffleOrder
+			: buildShuffleOrder(queue.length, currentIndex, random)
+	const order: number[] = []
+
+	for (const oldIndex of base) {
+		if ((keptIndexOf[oldIndex] ?? -1) !== -1) {
+			order.push(finalIndexOf(oldIndex))
+		}
+	}
+
+	const inserted = Array.from({ length: count }, (_, offset) => at + offset)
+	const anchor = placement === "next" ? order.indexOf(nextCurrent) : -1
+
+	if (anchor === -1) {
+		order.push(...inserted)
+	} else {
+		order.splice(anchor + 1, 0, ...inserted)
+	}
+
+	return { queue: nextQueue, currentIndex: nextCurrent, shuffleOrder: order, shifted, added: count }
+}
+
+// What a cleared queue held, for its undo: the tracks, where playback was in them and whether it was playing.
+export interface QueueSnapshot {
+	queue: QueueTrack[]
+	currentIndex: number
+	shuffleOrder: number[]
+	positionMs: number
+	playing: boolean
+}

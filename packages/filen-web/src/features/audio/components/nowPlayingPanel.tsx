@@ -3,6 +3,7 @@ import { Trash2, X, AlertCircle } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { audioEngine } from "@/features/audio/lib/audioEngine"
+import { clearQueueWithUndo } from "@/features/audio/lib/queueActions"
 import { useAudioStore, useAudioQueue } from "@/features/audio/store/useAudioStore"
 import { useTrackTagsStore } from "@/features/audio/store/useTrackTagsStore"
 import { trackDisplayTitle } from "@/features/audio/lib/trackTags.logic"
@@ -52,9 +53,7 @@ export function NowPlayingPanel() {
 					<TooltipIconButton
 						label={t("clearQueue")}
 						className={NOW_PLAYING_CONTROL_CLASS}
-						onClick={() => {
-							audioEngine.clearQueue()
-						}}
+						onClick={clearQueueWithUndo}
 					>
 						<Trash2 />
 					</TooltipIconButton>

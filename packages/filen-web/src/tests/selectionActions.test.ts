@@ -11,8 +11,18 @@ import { testUuid } from "@/tests/support/uuid"
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("sonner", () => ({ toast: Object.assign(toast, { success: toastSuccess, error: toastError, dismiss: vi.fn() }) }))
 
-const { setFavoritedItemsMock, startDownloadsMock, toggleFavoriteMock, copyTextMock, toast, toastSuccess, toastError } = vi.hoisted(() => ({
+const {
+	setFavoritedItemsMock,
+	startDownloadsMock,
+	toggleFavoriteMock,
+	copyTextMock,
+	queueDriveSongsMock,
+	toast,
+	toastSuccess,
+	toastError
+} = vi.hoisted(() => ({
 	setFavoritedItemsMock: vi.fn(),
+	queueDriveSongsMock: vi.fn(),
 	startDownloadsMock: vi.fn(),
 	toggleFavoriteMock: vi.fn(),
 	copyTextMock: vi.fn(),
@@ -32,6 +42,7 @@ vi.mock("@/features/drive/lib/download", async importOriginal => {
 })
 
 vi.mock("@/features/drive/lib/favorite", () => ({ toggleItemFavorite: toggleFavoriteMock }))
+vi.mock("@/features/audio/lib/queueActions", () => ({ queueDriveSongs: queueDriveSongsMock }))
 vi.mock("@/lib/copyText", async importOriginal => {
 	const actual = await importOriginal<typeof import("@/lib/copyText")>()
 	return { ...actual, copyText: copyTextMock }
@@ -153,8 +164,20 @@ describe("driveSelectionActions — one item gets its own menu, several the sele
 		expect(ids([file("a.zip"), file("b.pdf")], "drive")).not.toContain("extract")
 	})
 
-	it("a playable song anywhere in the selection adds Add to playlist", () => {
-		expect(ids([file("a.mp3"), file("b.pdf")], "drive")).toContain("addToPlaylist")
+	it("a playable song anywhere in the selection adds Play next, Add to queue and Add to playlist", () => {
+		const offered = ids([file("a.mp3"), file("b.pdf")], "drive")
+		const at = offered.indexOf("playNext")
+
+		expect(offered.slice(at, at + 3)).toEqual(["playNext", "addToQueue", "addToPlaylist"])
+		expect(ids(TWO_FILES(), "drive")).not.toContain("playNext")
+		expect(ids([file("a.mp3")], "trash")).not.toContain("addToQueue")
+	})
+
+	it("offers the queue inserts offline too: only the local queue changes", () => {
+		const descriptors = driveSelectionActions([file("a.mp3")], "drive", { isOnline: false })
+
+		expect(descriptors.find(descriptor => descriptor.id === "playNext")?.enabled).not.toBe(false)
+		expect(descriptors.find(descriptor => descriptor.id === "addToQueue")?.enabled).not.toBe(false)
 	})
 
 	it("nothing selected offers nothing", () => {
@@ -380,6 +403,18 @@ describe("runDriveAction", () => {
 		expect(host.onDialogAction).toHaveBeenNthCalledWith(1, "color", items)
 		expect(host.onDialogAction).toHaveBeenNthCalledWith(2, "trash", items)
 		expect(host.onDialogAction).toHaveBeenNthCalledWith(3, "restoreSelected", items)
+	})
+
+	it("queues the selection's songs for Play next and Add to queue", () => {
+		const items = [file("a.mp3"), file("b.pdf")]
+		const host = handlers()
+
+		runDriveAction(descriptorFor(items, "playNext"), items, host)
+		runDriveAction(descriptorFor(items, "addToQueue"), items, host)
+
+		expect(queueDriveSongsMock).toHaveBeenNthCalledWith(1, items, "next")
+		expect(queueDriveSongsMock).toHaveBeenNthCalledWith(2, items, "end")
+		expect(host.onDialogAction).not.toHaveBeenCalled()
 	})
 
 	it("leaves the submenu entries to their submenus", () => {

@@ -57,6 +57,26 @@ export const audio = {
 	clearQueue: "Clear queue",
 	/** Per-row action removing one track from the queue */
 	removeFromQueue: "Remove from queue",
+	/** Toast after Clear queue emptied the queue; its action brings the queue back */
+	queueClearedToast: "Queue cleared",
+	/** Action on the queue-cleared toast restoring the queue and where it was */
+	queueClearedUndo: "Undo",
+	/** Menu entry queuing the track(s) right after the one playing */
+	playNext: "Play next",
+	/** Menu entry queuing the track(s) at the end of the queue */
+	addToQueue: "Add to queue",
+	/** Toast after Play next queued tracks, singular */
+	queuedNextToast_one: "{{count}} track plays next",
+	/** Toast after Play next queued tracks, plural */
+	queuedNextToast_other: "{{count}} tracks play next",
+	/** Toast after Add to queue queued tracks, singular */
+	queuedEndToast_one: "Added {{count}} track to the queue",
+	/** Toast after Add to queue queued tracks, plural */
+	queuedEndToast_other: "Added {{count}} tracks to the queue",
+	/** Toast when Play next / Add to queue had nothing new to queue (only the track already playing) */
+	queuedNoneToast: "Already playing",
+	/** Accessible label of a playlist track row's menu trigger */
+	trackMenuTrigger: "Track actions",
 	/** Sub-count under the panel heading, singular */
 	queueCount_one: "{{count}} track",
 	/** Sub-count under the panel heading, plural */

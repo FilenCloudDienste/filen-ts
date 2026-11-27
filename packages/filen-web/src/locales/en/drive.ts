@@ -420,6 +420,10 @@ export const drive = {
 	driveActionEmptyTrash: "Empty trash",
 	/** Item menu (only when the item or selection holds a playable song) — submenu adding the song(s) to one of the user's playlists; other items are skipped */
 	driveActionAddToPlaylist: "Add to playlist",
+	/** Item menu (only when the item or selection holds a playable song) — queue the song(s) right after the track playing; other items are skipped */
+	driveActionPlayNext: "Play next",
+	/** Item menu (only when the item or selection holds a playable song) — queue the song(s) at the end of the play queue; other items are skipped */
+	driveActionAddToQueue: "Add to queue",
 	/** Add to playlist submenu — last entry: create a playlist (opens its name dialog) and add the song(s) to it */
 	driveAddToNewPlaylist: "New playlist…",
 	/** Add to playlist submenu — shown when the playlists list could not be loaded */

@@ -2,7 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { mockViewportHeight } from "@/tests/support/viewport"
-import { render, screen, cleanup, within, waitFor, fireEvent } from "@testing-library/react"
+import { render, screen, cleanup, within, waitFor, fireEvent, act } from "@testing-library/react"
 import { createElement, type ReactNode } from "react"
 import "@/lib/i18n"
 import type { PlaylistEntry } from "@/features/audio/queries/playlists"
@@ -54,6 +54,11 @@ vi.mock("@/features/audio/lib/playlistPlayback", () => ({
 	startPlaylist: vi.fn(),
 	startShuffledPlaylist: vi.fn()
 }))
+
+// Play next / Add to queue reach the real audioEngine singleton the same way.
+const { queueTracks, queuePlaylist } = vi.hoisted(() => ({ queueTracks: vi.fn(), queuePlaylist: vi.fn() }))
+
+vi.mock("@/features/audio/lib/queueActions", () => ({ queueTracks, queuePlaylist }))
 
 // The remembered playlist, controlled per test: null is "nothing remembered", undefined "still reading".
 const { lastOpened } = vi.hoisted(() => ({
@@ -294,6 +299,48 @@ describe("playlists split view", () => {
 		expect(screen.getByText("Couldn't load")).toBeTruthy()
 		expect(screen.queryByRole("link", { name: /^Broken/ })).toBeNull()
 		expect(screen.getByRole("heading", { level: 1, name: "Road trip" })).toBeTruthy()
+	})
+
+	it("queues one track from its row's menu, next or at the end", async () => {
+		usePlaylistsQuery.mockReturnValue(success(TWO))
+
+		renderSplitView("p2")
+
+		const [, , second] = within(screen.getByRole("region", { name: "Focus" })).getAllByRole("row")
+		const trigger = second ? within(second).getByRole("button", { name: "Track actions" }) : null
+
+		if (trigger === null) {
+			throw new Error("no track menu")
+		}
+
+		await act(async () => {
+			trigger.focus()
+			fireEvent.keyDown(trigger, { key: "ArrowDown" })
+			await Promise.resolve()
+		})
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Play next" }))
+
+		expect(queueTracks).toHaveBeenCalledOnce()
+		expect(queueTracks.mock.calls[0]?.[0]).toMatchObject([{ uuid: "f3" }])
+		expect(queueTracks.mock.calls[0]?.[1]).toBe("next")
+	})
+
+	it("queues a whole playlist from its menu", async () => {
+		usePlaylistsQuery.mockReturnValue(success(TWO))
+
+		renderSplitView("p2")
+
+		const trigger = within(screen.getByRole("region", { name: "Focus" })).getByRole("button", { name: "Playlist options" })
+
+		await act(async () => {
+			trigger.focus()
+			fireEvent.keyDown(trigger, { key: "ArrowDown" })
+			await Promise.resolve()
+		})
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Add to queue" }))
+
+		expect(queuePlaylist).toHaveBeenCalledOnce()
+		expect(queuePlaylist.mock.calls[0]?.[1]).toBe("end")
 	})
 
 	it("marks the playing track's row", () => {

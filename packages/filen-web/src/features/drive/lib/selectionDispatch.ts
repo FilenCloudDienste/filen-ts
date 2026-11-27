@@ -12,6 +12,7 @@ import { type DriveActionDescriptor, type DriveActionDialogKind } from "@/featur
 import { runBulkActivity } from "@/lib/activity/activity"
 import { copyText } from "@/lib/copyText"
 import { i18n } from "@/lib/i18n"
+import { queueDriveSongs } from "@/features/audio/lib/queueActions"
 
 export type DriveDialogAction = (kind: DriveActionDialogKind, items: DriveItem[], startPath?: readonly string[]) => void
 
@@ -76,6 +77,12 @@ export function runDriveAction(descriptor: DriveActionDescriptor, items: DriveIt
 				void runOpenContainingDirectory(defaultRevealDeps, single, handlers.navigate)
 			}
 
+			return
+		case "playNext":
+			queueDriveSongs(items, "next")
+			return
+		case "addToQueue":
+			queueDriveSongs(items, "end")
 			return
 		// Submenus on every surface: their entries run the action.
 		case "downloadAs":

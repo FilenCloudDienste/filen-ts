@@ -7,6 +7,7 @@ import { useAudioStore } from "@/features/audio/store/useAudioStore"
 import {
 	buildShuffleOrder,
 	computeNext,
+	insertIntoQueue,
 	reconcileVisibility,
 	removeFromQueue,
 	replaceQueueAtIndex,
@@ -16,6 +17,8 @@ import {
 	type ElementSample,
 	type LoopMode,
 	type QueueNav,
+	type QueuePlacement,
+	type QueueSnapshot,
 	type QueueTrack
 } from "@/features/audio/store/audioQueue"
 import type { MediaSessionPublisher } from "@/features/audio/lib/mediaSession"
@@ -2353,6 +2356,95 @@ export class AudioEngine {
 		}
 
 		await this.loadAndPlay(load.currentIndex)
+	}
+
+	// "Play next" / "Add to queue": inserts without touching the current track. Indices that moved stale the warm-up,
+	// which goes; a pure append keeps it, and schedulePrefetch re-derives next either way. An empty queue starts
+	// playing the tracks instead. Returns how many tracks went in.
+	public enqueue(tracks: readonly QueueTrack[], placement: QueuePlacement): number {
+		const state = useAudioStore.getState()
+
+		if (state.queue.length === 0) {
+			const unique = [...new Map(tracks.map(track => [track.uuid, track])).values()]
+
+			if (unique.length > 0) {
+				void this.enqueueAndPlay(unique, 0)
+			}
+
+			return unique.length
+		}
+
+		const insert = insertIntoQueue(state.queue, state.currentIndex, state.shuffleEnabled, state.shuffleOrder, tracks, placement)
+
+		if (insert.added === 0) {
+			return 0
+		}
+
+		if (insert.shifted) {
+			this.teardownPrefetch()
+		}
+
+		state.setQueueState(insert.queue, insert.currentIndex, insert.shuffleOrder)
+		// A transition starting into a track the insert moved, or that is no longer next, waits.
+		this.parkStarting()
+		this.planStale = true
+		void this.schedulePrefetch()
+
+		return insert.added
+	}
+
+	// What clearQueue is about to drop, for an undo. The playhead is read off the element when it holds the track.
+	public queueSnapshot(): QueueSnapshot | null {
+		const state = useAudioStore.getState()
+		const track = state.queue[state.currentIndex]
+
+		if (!track) {
+			return null
+		}
+
+		return {
+			queue: state.queue,
+			currentIndex: state.currentIndex,
+			shuffleOrder: state.shuffleOrder,
+			positionMs: this.element && this.loadedTrackUuid === track.uuid ? this.element.sample().currentTimeMs : state.positionMs,
+			playing: state.status === "playing" || state.status === "loading"
+		}
+	}
+
+	// Puts a cleared queue back where it was: the same track at the same position, playing only if it was. Nothing
+	// happens once another queue took its place. The track reloads (clearQueue released its source).
+	public async restoreQueue(snapshot: QueueSnapshot): Promise<void> {
+		const state = useAudioStore.getState()
+		const track = snapshot.queue[snapshot.currentIndex]
+
+		if (state.queue.length > 0 || !track) {
+			return
+		}
+
+		this.unlockOutput()
+		this.bumpLoadGeneration()
+		this.teardownPrefetch()
+
+		const order = state.shuffleEnabled
+			? snapshot.shuffleOrder.length === snapshot.queue.length && snapshot.shuffleOrder.includes(snapshot.currentIndex)
+				? snapshot.shuffleOrder
+				: buildShuffleOrder(snapshot.queue.length, snapshot.currentIndex)
+			: []
+
+		state.loadQueue(snapshot.queue, snapshot.currentIndex, order)
+		this.pendingResume = { uuid: track.uuid, ms: snapshot.positionMs }
+		useAudioStore.getState().setPosition(snapshot.positionMs)
+
+		const load = this.loadAndPlay(snapshot.currentIndex)
+
+		// The load ran synchronously up to its first await; a paused queue comes back paused.
+		if (!snapshot.playing) {
+			this.pauseGeneration++
+			useAudioStore.getState().setStatus("paused")
+			this.deps.mediaSession?.setPlaybackState("paused")
+		}
+
+		await load
 	}
 
 	public async playCurrent(): Promise<void> {

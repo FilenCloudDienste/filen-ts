@@ -3,8 +3,20 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { formatBytes, formatSecondsToMediaClock } from "@filen/shared"
-import { AudioLinesIcon, GripVerticalIcon, MoreHorizontalIcon, MusicIcon, PlayIcon, PlusIcon, ShuffleIcon, XIcon } from "lucide-react"
-import { removeTracksFromPlaylistAction, reorderPlaylistFileAction } from "@/features/audio/lib/playlists"
+import {
+	AudioLinesIcon,
+	GripVerticalIcon,
+	ListEndIcon,
+	ListStartIcon,
+	MoreHorizontalIcon,
+	MusicIcon,
+	PlayIcon,
+	PlusIcon,
+	ShuffleIcon,
+	XIcon
+} from "lucide-react"
+import { playlistFileTrack, removeTracksFromPlaylistAction, reorderPlaylistFileAction } from "@/features/audio/lib/playlists"
+import { queueTracks } from "@/features/audio/lib/queueActions"
 import { AddPlaylistTracksDialog } from "@/features/audio/components/addPlaylistTracksDialog"
 import { PlaylistArtwork } from "@/features/audio/components/playlistArtwork"
 import { PlaylistMenuContent } from "@/features/audio/components/playlistMenu"
@@ -30,7 +42,7 @@ import { LazyTooltip } from "@/components/lazyTooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { REVEAL_CLASS } from "@/components/rowReveal"
 import { Skeleton } from "@/components/ui/skeleton"
-import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 import { ignoredUnderOverlays, OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
@@ -258,7 +270,7 @@ export function PlaylistPane({ playlist }: { playlist: Playlist }) {
 								</th>
 								<th
 									scope="col"
-									className="w-10 border-b border-border"
+									className="w-18 border-b border-border"
 								>
 									<span className="sr-only">{t("trackColumnActions")}</span>
 								</th>
@@ -638,6 +650,40 @@ function TrackRow({ playlist, file, index, playing, dragOver, removing, disabled
 				{formatBytes(file.size)}
 			</td>
 			<td className={cn(cellClass, "rounded-r-xl pr-1 text-right")}>
+				<DropdownMenu>
+					<LazyTooltip label={t("trackMenuTrigger")}>
+						<DropdownMenuTrigger
+							render={
+								<Button
+									variant="ghost"
+									size="icon-xs"
+									aria-label={t("trackMenuTrigger")}
+									className={cn(REVEAL_CLASS.trow, "transition-opacity")}
+								>
+									<MoreHorizontalIcon />
+								</Button>
+							}
+						/>
+					</LazyTooltip>
+					<DropdownMenuContent align="end">
+						<DropdownMenuItem
+							onClick={() => {
+								queueTracks([playlistFileTrack(file)], "next")
+							}}
+						>
+							<ListStartIcon />
+							{t("playNext")}
+						</DropdownMenuItem>
+						<DropdownMenuItem
+							onClick={() => {
+								queueTracks([playlistFileTrack(file)], "end")
+							}}
+						>
+							<ListEndIcon />
+							{t("addToQueue")}
+						</DropdownMenuItem>
+					</DropdownMenuContent>
+				</DropdownMenu>
 				<LazyTooltip label={t("removeFromPlaylist")}>
 					<Button
 						variant="ghost"

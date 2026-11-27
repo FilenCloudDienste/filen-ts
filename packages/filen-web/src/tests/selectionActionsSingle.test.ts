@@ -930,6 +930,9 @@ describe("offline gating", () => {
 		download: "gated",
 		// Exports read the file over the network as Download does.
 		downloadAs: "gated",
+		// Only the local play queue changes, as the double-click's handoff does.
+		playNext: "readOnly",
+		addToQueue: "readOnly",
 		// Every pick writes a playlist file; the submenu's trigger greys out.
 		addToPlaylist: "gated",
 		copy: "gated",
