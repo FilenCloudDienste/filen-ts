@@ -43,6 +43,7 @@ import { usePreviewVideo } from "@/features/preview/hooks/usePreviewVideo"
 import { usePreviewSubtitles } from "@/features/preview/hooks/usePreviewSubtitles"
 import { ChaptersMenu, TracksMenu } from "@/features/preview/components/videoTrackMenus"
 import { useHoldReadsWhilePlaying } from "@/lib/media/useHoldReadsWhilePlaying"
+import { usePreviewMediaSession } from "@/features/preview/hooks/usePreviewMediaSession"
 import { SubtitleOverlay } from "@/components/media/video/subtitleOverlay"
 import {
 	MediaCannotStream,
@@ -225,6 +226,7 @@ export function VideoPlayer({
 
 	useSyncedMediaVolume(video)
 	useHoldReadsWhilePlaying(video)
+	usePreviewMediaSession(video, alt)
 
 	// The controller loops in the element's place (previewVideo.ts), so the element never gets `loop`.
 	useEffect(() => {

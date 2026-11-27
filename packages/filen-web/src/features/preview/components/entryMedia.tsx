@@ -11,6 +11,7 @@ import { allowedMediaContentType } from "@/features/preview/lib/mediaType"
 import { mediaControlsList, usePreviewAccessMode, usePreviewDownloadable } from "@/features/preview/lib/accessMode"
 import { usePreviewStreamUrl } from "@/features/preview/hooks/usePreviewStreamUrl"
 import { usePreviewFetch } from "@/features/preview/hooks/usePreviewFetch"
+import { usePreviewMediaSession } from "@/features/preview/hooks/usePreviewMediaSession"
 import { loadOriginBytes } from "@/features/preview/lib/origin/loadBytes"
 import { unplayableCodecs } from "@/features/preview/lib/previewPlayback.logic"
 import { MediaCannotStream, MediaFormatFailure } from "@/features/preview/components/mediaFailureState"
@@ -228,6 +229,9 @@ function EntryMediaElement({
 	const downloadable = usePreviewDownloadable()
 	const [failed, setFailed] = useState<readonly MediaCodec[] | null>(null)
 	const probing = useRef<AbortController | null>(null)
+	const [media, setMedia] = useState<HTMLMediaElement | null>(null)
+
+	usePreviewMediaSession(media, alt)
 
 	// A probe still reading once the element is gone is cancelled.
 	useEffect(
@@ -273,6 +277,7 @@ function EntryMediaElement({
 		<div className="flex size-full flex-col items-center justify-center gap-2 p-4">
 			{category === "video" ? (
 				<video
+					ref={setMedia}
 					controls
 					controlsList={mediaControlsList(downloadable)}
 					src={src}
@@ -282,6 +287,7 @@ function EntryMediaElement({
 				/>
 			) : (
 				<audio
+					ref={setMedia}
 					controls
 					controlsList={mediaControlsList(downloadable)}
 					preload="metadata"

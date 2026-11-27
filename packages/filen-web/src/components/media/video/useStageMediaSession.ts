@@ -4,8 +4,9 @@ import { pauseMedia } from "@filen/shared/heldPause"
 import { playMedia, seekMedia } from "@/lib/media/useMediaState"
 import { MEDIA_SEEK_STEP_SECONDS } from "@/lib/media/mediaKeys.logic"
 
-// The video stage's share of the Media Session: taken from the audio engine (which pauses) for as long as the
-// stage is open, given back on close. Position state is published on discrete events only (play, pause,
+// A player's share of the Media Session: taken from the audio engine (which pauses) for as long as the player
+// is open, or from its first play on (`claim: "play"`, the preview, where a file can sit unplayed), given back on
+// close. A player another owner takes the session from pauses. Position state is published on discrete events only (play, pause,
 // seek, rate, a new item, both edges of a buffering stall), never per timeupdate: the OS extrapolates from the rate.
 
 const SEEK_NUDGE_SECONDS = MEDIA_SEEK_STEP_SECONDS
@@ -16,7 +17,7 @@ export interface StageMediaInfo {
 	artworkUrl: string | null
 }
 
-function publishPosition(owner: MediaSessionOwner, video: HTMLVideoElement): void {
+function publishPosition(owner: MediaSessionOwner, video: HTMLMediaElement): void {
 	const duration = video.duration
 
 	if (!Number.isFinite(duration) || duration <= 0) {
@@ -33,15 +34,16 @@ function publishPosition(owner: MediaSessionOwner, video: HTMLVideoElement): voi
 }
 
 export function useStageMediaSession(params: {
-	video: HTMLVideoElement | null
+	video: HTMLMediaElement | null
 	info: StageMediaInfo
 	onNext: (() => void) | null
 	onPrevious: (() => void) | null
 	// Any OS media control used counts as the user touching the player (still watching).
 	onInteraction?: () => void
+	claim?: "open" | "play"
 }): void {
-	const { video, info, onNext, onPrevious, onInteraction } = params
-	const [owner] = useState(() => mediaSessionOwners.create("video"))
+	const { video, info, onNext, onPrevious, onInteraction, claim = "open" } = params
+	const [owner] = useState(() => mediaSessionOwners.create(claim === "open" ? "video" : "preview"))
 	const interaction = useRef(onInteraction)
 
 	useEffect(() => {
@@ -49,12 +51,36 @@ export function useStageMediaSession(params: {
 	})
 
 	useEffect(() => {
-		owner.acquire()
+		if (claim === "open") {
+			owner.acquire()
+		}
 
 		return () => {
 			owner.release()
 		}
-	}, [owner])
+	}, [owner, claim])
+
+	useEffect(() => {
+		if (claim !== "play" || video === null) {
+			return
+		}
+
+		const element = video
+
+		function take(): void {
+			owner.acquire()
+		}
+
+		if (!element.paused) {
+			take()
+		}
+
+		element.addEventListener("play", take)
+
+		return () => {
+			element.removeEventListener("play", take)
+		}
+	}, [owner, claim, video])
 
 	useEffect(() => {
 		if (typeof MediaMetadata === "undefined") {
@@ -121,11 +147,19 @@ export function useStageMediaSession(params: {
 			touched()
 			seekMedia(element, element.currentTime + (details.seekOffset ?? SEEK_NUDGE_SECONDS))
 		})
-		owner.setActionHandler("enterpictureinpicture", () => {
-			touched()
-			void element.requestPictureInPicture().catch(() => undefined)
-		})
+		owner.setActionHandler(
+			"enterpictureinpicture",
+			element instanceof HTMLVideoElement
+				? () => {
+						touched()
+						void element.requestPictureInPicture().catch(() => undefined)
+					}
+				: null
+		)
 
+		owner.setOnPreempt(() => {
+			pauseMedia(element)
+		})
 		state()
 
 		const stateEvents = ["play", "pause", "ended", "emptied"]
@@ -140,6 +174,8 @@ export function useStageMediaSession(params: {
 		}
 
 		return () => {
+			owner.setOnPreempt(undefined)
+
 			for (const event of stateEvents) {
 				element.removeEventListener(event, state)
 			}

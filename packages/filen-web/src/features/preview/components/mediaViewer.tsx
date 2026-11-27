@@ -23,6 +23,7 @@ import { VideoPlayer } from "@/features/preview/components/videoPlayer"
 import { MediaCannotStream, MediaFormatFailure, MediaPlaybackFailure } from "@/features/preview/components/mediaFailureState"
 import { PreviewLoading } from "@/features/preview/components/previewErrorState"
 import { useReleaseOnUnmount } from "@/lib/media/useReleaseOnUnmount"
+import { usePreviewMediaSession } from "@/features/preview/hooks/usePreviewMediaSession"
 import type { ByteOrigin } from "@/lib/sdk/byteOrigin"
 
 export interface MediaViewerProps {
@@ -49,10 +50,16 @@ export function PreviewAudioElement({
 	onTimeUpdate?: ((audio: HTMLAudioElement) => void) | undefined
 }) {
 	const downloadable = usePreviewDownloadable()
+	const [audio, setAudio] = useState<HTMLAudioElement | null>(null)
+
+	usePreviewMediaSession(audio, alt)
 
 	return (
 		<audio
-			ref={onElement}
+			ref={element => {
+				setAudio(element)
+				onElement?.(element)
+			}}
 			controls
 			controlsList={mediaControlsList(downloadable)}
 			preload="metadata"

@@ -12,6 +12,7 @@ vi.mock("@/lib/media/mediaSessionOwner", () => ({
 		create: () => ({
 			acquire: () => undefined,
 			release: () => undefined,
+			setOnPreempt: () => undefined,
 			setMetadata: () => undefined,
 			setPlaybackState: () => undefined,
 			setPositionState,

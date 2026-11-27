@@ -35,6 +35,8 @@ export interface MediaSessionOwner extends MediaSessionLike {
 	release: () => void
 	readonly active: boolean
 	setPositionState: (state?: MediaPositionState) => void
+	// Replaces what runs when another owner takes the session over.
+	setOnPreempt: (handler: (() => void) | undefined) => void
 	// Method forms of the metadata and playbackState setters.
 	setMetadata: (metadata: unknown) => void
 	setPlaybackState: (state: string) => void
@@ -176,7 +178,7 @@ class OwnerHandle implements MediaSessionOwner {
 	public readonly name: string
 	public readonly state: OwnerState = { metadata: null, playbackState: "none", handlers: new Map(), position: undefined }
 	private readonly owners: MediaSessionOwners
-	private readonly onPreempt: (() => void) | undefined
+	private onPreempt: (() => void) | undefined
 
 	public constructor(owners: MediaSessionOwners, name: string, onPreempt: (() => void) | undefined) {
 		this.owners = owners
@@ -198,6 +200,10 @@ class OwnerHandle implements MediaSessionOwner {
 
 	public preempted(): void {
 		this.onPreempt?.()
+	}
+
+	public setOnPreempt(handler: (() => void) | undefined): void {
+		this.onPreempt = handler
 	}
 
 	public get metadata(): unknown {
