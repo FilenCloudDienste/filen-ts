@@ -14,6 +14,13 @@ export interface PendingReveal {
 	splat: string
 }
 
+// Set by the command palette's "Search Cloud Drive" just before it navigates; the listing at `splat` consumes it once and
+// searches for `query` there.
+export interface PendingSearch {
+	splat: string
+	query: string
+}
+
 interface DriveState {
 	selectedItems: DriveItem[]
 	setSelectedItems: (next: DriveItem[] | ((prev: DriveItem[]) => DriveItem[])) => void
@@ -25,6 +32,9 @@ interface DriveState {
 	pendingReveal: PendingReveal | null
 	requestReveal: (reveal: PendingReveal) => void
 	clearPendingReveal: () => void
+	pendingSearch: PendingSearch | null
+	requestSearch: (search: PendingSearch) => void
+	clearPendingSearch: () => void
 }
 
 export const useDriveStore = create<DriveState>(set => ({
@@ -35,6 +45,13 @@ export const useDriveStore = create<DriveState>(set => ({
 	},
 	clearPendingReveal: () => {
 		set({ pendingReveal: null })
+	},
+	pendingSearch: null,
+	requestSearch: search => {
+		set({ pendingSearch: search })
+	},
+	clearPendingSearch: () => {
+		set({ pendingSearch: null })
 	},
 	setSelectedItems: next => {
 		set(state => ({

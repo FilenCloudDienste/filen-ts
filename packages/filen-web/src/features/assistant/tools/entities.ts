@@ -1,18 +1,11 @@
-import {
-	contactDisplayName,
-	deriveBlockedUsers,
-	driveItemName,
-	EMPTY_BLOCKED_USERS,
-	shareRoleKind,
-	type BlockedUsers,
-	type Playlist
-} from "@filen/shared"
+import { contactDisplayName, driveItemName, shareRoleKind, type BlockedUsers, type Playlist } from "@filen/shared"
 import type { Chat, Note } from "@filen/sdk-rs"
 import type { AssistantSignal, AssistantToolProgress } from "@filen/shared/assistant"
 import { i18n } from "@/lib/i18n"
 import { queryClient } from "@/queries/client"
 import { accountQueryGet } from "@/queries/account"
-import { contactsQueryGet, contactsQueryRead } from "@/features/contacts/queries/contacts"
+import { contactsQueryRead } from "@/features/contacts/queries/contacts"
+import { heldBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
 import { cachedQueriesWithPrefix } from "@/queries/patch"
 import {
 	DRIVE_LISTING_KEY_PREFIX,
@@ -94,9 +87,7 @@ export function currentUserId(): bigint | undefined {
 
 // The blocked set the sidebars filter by, as the contacts cache holds it; fail-open like useBlockedUsers.
 export function blockedUsers(): BlockedUsers {
-	const blocked = contactsQueryGet()?.blocked
-
-	return blocked === undefined || blocked.length === 0 ? EMPTY_BLOCKED_USERS : deriveBlockedUsers(blocked)
+	return heldBlockedUsers()
 }
 
 export function driveName(item: DriveItem): string {

@@ -1,25 +1,10 @@
-import { useId, useRef, useState, type ComponentType, type KeyboardEvent } from "react"
+import { useId, useRef, useState, type KeyboardEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { cn } from "@filen/shared"
 import type { AppHelpEntry } from "@filen/shared/assistant"
 import { Link, useRouter } from "@tanstack/react-router"
-import {
-	UserIcon,
-	ShieldIcon,
-	SunMoonIcon,
-	KeyboardIcon,
-	HistoryIcon,
-	CreditCardIcon,
-	SlidersHorizontalIcon,
-	MonitorIcon,
-	GemIcon,
-	FilePenLineIcon,
-	HeadphonesIcon,
-	SparklesIcon
-} from "lucide-react"
 import { SidebarPanel } from "@/features/shell/components/sidebarPanel"
 import { SIDEBAR_NAV_ITEM_CLASS } from "@/features/shell/lib/sidebarNavItem"
-import { desktopBridge } from "@/lib/desktop"
 import { useMasterKeysNotExported } from "@/queries/account"
 import { RailStatusDot } from "@/features/shell/components/railProgressBar"
 import { ignoredUnderOverlays, OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
@@ -28,64 +13,7 @@ import { pageSearchClaimed, searchSettings } from "@/features/settings/lib/setti
 import { ListFilterInput } from "@/components/listFilterInput"
 import { APP_HELP_SECTION_LABELS } from "@/lib/appHelp"
 import { requestSettingsHighlight } from "@/lib/settingsHighlight"
-
-type IconType = ComponentType<{ className?: string }>
-
-type SettingsRoute =
-	| "/settings/account"
-	| "/settings/security"
-	| "/settings/appearance"
-	| "/settings/keyboard"
-	| "/settings/office"
-	| "/settings/audio"
-	| "/settings/assistant"
-	| "/settings/events"
-	| "/settings/plans"
-	| "/settings/billing"
-	| "/settings/advanced"
-	| "/settings/desktop"
-
-interface SettingsSidebarItem {
-	id: string
-	labelKey:
-		| "settingsSectionAccount"
-		| "settingsSectionSecurity"
-		| "settingsSectionAppearance"
-		| "settingsSectionKeyboard"
-		| "settingsSectionOffice"
-		| "settingsSectionAudio"
-		| "settingsSectionAssistant"
-		| "settingsSectionEvents"
-		| "settingsSectionPlans"
-		| "settingsSectionBilling"
-		| "settingsSectionAdvanced"
-		| "settingsSectionDesktop"
-	icon: IconType
-	to: SettingsRoute
-}
-
-// Account first (the index redirect's landing section — see routes/_app/settings/index.tsx),
-// Security second (the already-shipped page, unchanged), then Appearance/Keyboard/Office/Audio/Assistant/Events/Plans (web only)/
-// Billing/Advanced, and Desktop in the desktop app only.
-const SETTINGS_ITEMS: SettingsSidebarItem[] = [
-	{ id: "account", labelKey: "settingsSectionAccount", icon: UserIcon, to: "/settings/account" },
-	{ id: "security", labelKey: "settingsSectionSecurity", icon: ShieldIcon, to: "/settings/security" },
-	{ id: "appearance", labelKey: "settingsSectionAppearance", icon: SunMoonIcon, to: "/settings/appearance" },
-	{ id: "keyboard", labelKey: "settingsSectionKeyboard", icon: KeyboardIcon, to: "/settings/keyboard" },
-	{ id: "office", labelKey: "settingsSectionOffice", icon: FilePenLineIcon, to: "/settings/office" },
-	{ id: "audio", labelKey: "settingsSectionAudio", icon: HeadphonesIcon, to: "/settings/audio" },
-	{ id: "assistant", labelKey: "settingsSectionAssistant", icon: SparklesIcon, to: "/settings/assistant" },
-	{ id: "events", labelKey: "settingsSectionEvents", icon: HistoryIcon, to: "/settings/events" },
-	// Plans and checkout exist only in the web app.
-	...(desktopBridge() === undefined
-		? [{ id: "plans", labelKey: "settingsSectionPlans", icon: GemIcon, to: "/settings/plans" } as const]
-		: []),
-	{ id: "billing", labelKey: "settingsSectionBilling", icon: CreditCardIcon, to: "/settings/billing" },
-	{ id: "advanced", labelKey: "settingsSectionAdvanced", icon: SlidersHorizontalIcon, to: "/settings/advanced" },
-	...(desktopBridge() === undefined
-		? []
-		: [{ id: "desktop", labelKey: "settingsSectionDesktop", icon: MonitorIcon, to: "/settings/desktop" } as const])
-]
+import { SETTINGS_ITEMS, settingsSectionOf, type SettingsRoute } from "@/features/settings/lib/settingsSections"
 
 const SETTINGS_ROUTES: readonly SettingsRoute[] = SETTINGS_ITEMS.map(item => item.to)
 
@@ -176,7 +104,7 @@ export function SettingsSidebar() {
 
 	// Opens the page showing the setting, which scrolls to its row and rings it (useHelpHighlight).
 	function openResult(entry: AppHelpEntry): void {
-		const item = SETTINGS_ITEMS.find(candidate => candidate.id === entry.section)
+		const item = settingsSectionOf(entry)
 
 		if (item === undefined) {
 			return

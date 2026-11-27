@@ -1,4 +1,4 @@
-import { useContactsQuery } from "@/features/contacts/queries/contacts"
+import { contactsQueryGet, useContactsQuery, type ContactsQueryData } from "@/features/contacts/queries/contacts"
 import { deriveBlockedUsers, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@filen/shared"
 
 // Reactive blocked-user lookup — mirrors filen-mobile's useBlockedUsers. React Compiler memoizes the
@@ -13,7 +13,14 @@ import { deriveBlockedUsers, EMPTY_BLOCKED_USERS, type BlockedUsers } from "@fil
 // query key: the fetch is deduped, so an extra observer is not an extra request. A disabled query's data
 // is undefined, which still yields the fail-open EMPTY_BLOCKED_USERS above.
 export function useBlockedUsers(enabled: boolean): BlockedUsers {
-	const blocked = useContactsQuery({ enabled }).data?.blocked
+	return blockedUsersOf(useContactsQuery({ enabled }).data?.blocked)
+}
 
+function blockedUsersOf(blocked: ContactsQueryData["blocked"] | undefined): BlockedUsers {
 	return blocked === undefined || blocked.length === 0 ? EMPTY_BLOCKED_USERS : deriveBlockedUsers(blocked)
+}
+
+// The same set as the contacts cache holds it now, for a reader outside React; never a fetch, fail-open.
+export function heldBlockedUsers(): BlockedUsers {
+	return blockedUsersOf(contactsQueryGet()?.blocked)
 }

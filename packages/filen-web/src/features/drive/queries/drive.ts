@@ -30,6 +30,7 @@ import {
 } from "@/features/drive/lib/item"
 import type { FlatListingKind } from "@/features/drive/lib/flatListing"
 import {
+	DEFAULT_HIDE_HIDDEN_ITEMS,
 	DEFAULT_SHOW_DOT_FILEN,
 	getHideHiddenItems,
 	getShowDotFilen,
@@ -1593,18 +1594,22 @@ export function heicUploadConvertPreferenceCached(): boolean | undefined {
 
 // Same convention again — the hide-dot-prefixed-items display filter, surfaced from the drive
 // toolbar's Display menu.
+const HIDE_HIDDEN_ITEMS_PREFERENCE_KEY = ["drive", "hideHiddenItemsPreference"] as const
+
 export function useHideHiddenItemsPreferenceQuery(): UseQueryResult<boolean> {
 	return useQuery({
-		queryKey: ["drive", "hideHiddenItemsPreference"] as const,
+		queryKey: HIDE_HIDDEN_ITEMS_PREFERENCE_KEY,
 		queryFn: getHideHiddenItems
 	})
 }
 
 // Same convention: whether the root `.filen` is listed, set in Settings → Advanced. Every tree node and listing
 // observes it, and only its own setter changes it (refetching), so a mount never reads it again.
+const SHOW_DOT_FILEN_PREFERENCE_KEY = ["drive", "showDotFilenPreference"] as const
+
 export function useShowDotFilenPreferenceQuery(): UseQueryResult<boolean> {
 	return useQuery({
-		queryKey: ["drive", "showDotFilenPreference"] as const,
+		queryKey: SHOW_DOT_FILEN_PREFERENCE_KEY,
 		queryFn: getShowDotFilen,
 		staleTime: Infinity
 	})
@@ -1660,4 +1665,14 @@ export function useDriveItemLinkStatusQuery(item: DriveItem): UseQueryResult<Dri
 // patches (contrast actions.ts's other writes, which also touch one or more listing keys).
 export function driveItemLinkStatusQueryUpdate(uuid: string, next: DriveItemLinkStatus | null): void {
 	queryClient.setQueryData<DriveItemLinkStatus | null>(driveItemLinkStatusQueryKey(uuid), next)
+}
+
+// The two display preferences as the cache holds them, for a reader outside a listing (the command palette): never a
+// read of storage; the defaults until a listing has read them.
+export function hideHiddenItemsPreferenceCached(): boolean {
+	return queryClient.getQueryData<boolean>(HIDE_HIDDEN_ITEMS_PREFERENCE_KEY) ?? DEFAULT_HIDE_HIDDEN_ITEMS
+}
+
+export function showDotFilenPreferenceCached(): boolean {
+	return queryClient.getQueryData<boolean>(SHOW_DOT_FILEN_PREFERENCE_KEY) ?? DEFAULT_SHOW_DOT_FILEN
 }

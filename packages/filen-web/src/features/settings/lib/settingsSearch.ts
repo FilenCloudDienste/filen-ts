@@ -7,15 +7,15 @@ import { appHelpEntryWords, appHelpLanguages, appHelpShownHere } from "@/lib/app
 
 export const SETTINGS_SEARCH_RESULTS = 20
 
-interface IndexedSetting {
+export interface IndexedSetting {
 	entry: AppHelpEntry
 	words: AppHelpWords[]
 }
 
-// Built on the first search in a language, kept until the language changes.
+// Built on the first search in a language, kept until the language changes; the command palette ranks it too.
 let index: { language: string; rows: IndexedSetting[] } | null = null
 
-function settingsIndex(language: string): readonly IndexedSetting[] {
+export function settingsIndex(language: string): readonly IndexedSetting[] {
 	if (index?.language !== language) {
 		const languages = appHelpLanguages(language)
 

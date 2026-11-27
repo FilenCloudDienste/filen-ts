@@ -1,4 +1,14 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react"
+import {
+	useCallback,
+	useEffect,
+	useEffectEvent,
+	useLayoutEffect,
+	useMemo,
+	useRef,
+	useState,
+	type ReactElement,
+	type ReactNode
+} from "react"
 import { createPortal } from "react-dom"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
@@ -317,6 +327,20 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	// keyboard nav, context menus, the bulk bar, and preview siblings all read `sortedItems` alone, so
 	// swapping its one source here is what makes every one of them inherited for free.
 	const search = useDriveSearch(uuid, variant === "drive")
+	const pendingSearch = useDriveStore(state => state.pendingSearch)
+	const runPendingSearch = useEffectEvent((query: string) => {
+		search.setInput(query)
+	})
+
+	// The command palette's hand-off: its words, searched here once this listing is the one it navigated to.
+	useEffect(() => {
+		if (pendingSearch === null || variant !== "drive" || pendingSearch.splat !== splat) {
+			return
+		}
+
+		useDriveStore.getState().clearPendingSearch()
+		runPendingSearch(pendingSearch.query)
+	}, [pendingSearch, variant, splat])
 
 	// Local-substring fallback for every non-"drive" variant (favorites/recents/trash/sharedIn/
 	// sharedOut/links) — those have no navigable subtree of their own for the cache-backed engine above,
