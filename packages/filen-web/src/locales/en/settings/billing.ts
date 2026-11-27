@@ -30,7 +30,11 @@ export const settingsBilling = {
 	settingsBillingRegularPrice: "Regular price {{price}}",
 	/** Plan card — sale badge with the discount; {{percent}} is a whole number */
 	settingsBillingDiscount: "−{{percent}}%",
-	/** Plan card — badge on lifetime plans and plans on sale */
+	/** Plan card — line under a monthly plan's sale price: the sale price covers the first month only; {{intro}} and {{cost}} are formatted amounts */
+	settingsBillingIntroFirstMonth: "{{intro}} for the first month, then {{cost}} per month",
+	/** Plan card — line under an annual plan's sale price, in place of "billed yearly": the sale price covers the first year only; {{intro}} and {{cost}} are formatted amounts */
+	settingsBillingIntroFirstYear: "{{intro}} for the first year, then {{cost}} per year",
+	/** Plan card — badge on lifetime plans */
 	settingsBillingLimited: "Limited availability",
 	/** Plan card — badge on the plan most people choose, which is shown raised */
 	settingsBillingPopular: "Most popular",

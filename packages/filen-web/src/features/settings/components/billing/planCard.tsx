@@ -101,9 +101,21 @@ function PlanCard({ card, current, highlighted, purchase, buyDisabledReason, loc
 							<Badge variant="destructive">{t("settingsBillingDiscount", { percent: discountPercent })}</Badge>
 						</div>
 					)}
+					{discountPercent !== undefined && !annual ? (
+						<p className="text-xs text-muted-foreground tabular-nums">
+							{t("settingsBillingIntroFirstMonth", { intro: formatBillingCost(price), cost: formatBillingCost(plan.cost) })}
+						</p>
+					) : null}
 					{annual ? (
 						<div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground tabular-nums">
-							<span>{t("settingsBillingBilledYearly", { price: formatBillingCost(price) })}</span>
+							<span>
+								{discountPercent === undefined
+									? t("settingsBillingBilledYearly", { price: formatBillingCost(price) })
+									: t("settingsBillingIntroFirstYear", {
+											intro: formatBillingCost(price),
+											cost: formatBillingCost(plan.cost)
+										})}
+							</span>
 							{annualSavingsPercent === undefined ? null : (
 								<Badge variant="secondary">{t("settingsBillingSavePercent", { percent: annualSavingsPercent })}</Badge>
 							)}

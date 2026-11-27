@@ -29,12 +29,13 @@ export interface PlanCard {
 	plan: PricingPlan
 	// The price charged now: the sale price while a sale applies.
 	price: number
-	// Set only while a sale lowers the price.
+	// Set only while a sale lowers the price. A sale is an intro price: it covers the first month (monthly) or year
+	// (annually) only, every renewal is charged the regular cost. Other terms never go on sale.
 	discountPercent: number | undefined
 	limited: boolean
 	methods: PaymentMethod[]
 	// Annual plans only, when a monthly plan with the same storage exists: how much less a year costs than twelve
-	// of its months, in whole percent (both at the price charged now).
+	// of its months, in whole percent (both at the regular cost, which every renewal is charged).
 	annualSavingsPercent: number | undefined
 }
 
@@ -44,7 +45,7 @@ export interface PlanGroup {
 }
 
 function discountPercent(plan: PricingPlan, saleEnabled: boolean): number | undefined {
-	if (!saleEnabled || !(plan.sale > 0 && plan.sale < plan.cost)) {
+	if (!saleEnabled || plan.term === "lifetime" || !(plan.sale > 0 && plan.sale < plan.cost)) {
 		return undefined
 	}
 
@@ -70,7 +71,7 @@ function annualSavingsPercent(price: number, monthlyPrice: number | undefined): 
 	return percent > 0 ? percent : undefined
 }
 
-function toCard(plan: PricingPlan, saleEnabled: boolean, monthlyPriceByStorage: ReadonlyMap<number, number>): PlanCard {
+function toCard(plan: PricingPlan, saleEnabled: boolean, monthlyCostByStorage: ReadonlyMap<number, number>): PlanCard {
 	const discount = discountPercent(plan, saleEnabled)
 	const price = chargedPrice(plan, discount)
 
@@ -78,19 +79,19 @@ function toCard(plan: PricingPlan, saleEnabled: boolean, monthlyPriceByStorage: 
 		plan,
 		price,
 		discountPercent: discount,
-		limited: plan.term === "lifetime" || discount !== undefined,
+		limited: plan.term === "lifetime",
 		methods: paymentMethods(plan),
-		annualSavingsPercent: plan.term === "annually" ? annualSavingsPercent(price, monthlyPriceByStorage.get(plan.storage)) : undefined
+		annualSavingsPercent: plan.term === "annually" ? annualSavingsPercent(plan.cost, monthlyCostByStorage.get(plan.storage)) : undefined
 	}
 }
 
-// What a monthly plan of each storage size charges now; the first one listed wins a tie.
-function monthlyPrices(pricing: Pricing): Map<number, number> {
+// The regular cost of a monthly plan of each storage size; the first one listed wins a tie.
+function monthlyCosts(pricing: Pricing): Map<number, number> {
 	const byStorage = new Map<number, number>()
 
 	for (const plan of pricing.plans) {
 		if (plan.term === "monthly" && !byStorage.has(plan.storage)) {
-			byStorage.set(plan.storage, chargedPrice(plan, discountPercent(plan, pricing.saleEnabled)))
+			byStorage.set(plan.storage, plan.cost)
 		}
 	}
 
@@ -100,7 +101,7 @@ function monthlyPrices(pricing: Pricing): Map<number, number> {
 // Tabs in display order, empty ones dropped. Lifetime-term plans are hidden in every tab while lifetime sales are off.
 export function groupPlans(pricing: Pricing): PlanGroup[] {
 	const byTab = new Map<PlanTab, PlanCard[]>()
-	const monthlyPriceByStorage = monthlyPrices(pricing)
+	const monthlyCostByStorage = monthlyCosts(pricing)
 
 	for (const plan of pricing.plans) {
 		const tab = TERM_TYPE_TABS.get(plan.termType)
@@ -111,7 +112,7 @@ export function groupPlans(pricing: Pricing): PlanGroup[] {
 
 		const cards = byTab.get(tab) ?? []
 
-		cards.push(toCard(plan, pricing.saleEnabled, monthlyPriceByStorage))
+		cards.push(toCard(plan, pricing.saleEnabled, monthlyCostByStorage))
 		byTab.set(tab, cards)
 	}
 

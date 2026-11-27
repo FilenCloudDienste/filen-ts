@@ -173,13 +173,24 @@ describe("PlansView", () => {
 		expect(document.querySelector("[aria-current='true']")?.textContent).toContain("Pro II")
 	})
 
-	it("strikes the regular price through and shows the discount during a sale", () => {
-		setPricing({ ...PRICING, saleEnabled: true, plans: [plan({ cost: 10, sale: 7.5 })] })
+	it("strikes the regular price through and shows the discount and its intro terms during a sale", () => {
+		setPricing({
+			...PRICING,
+			saleEnabled: true,
+			plans: [plan({ cost: 10, sale: 7.5 }), plan({ id: 28, termType: 3, term: "annually", cost: 100, sale: 60, storage: 2e12 })]
+		})
 		renderPlans()
 
 		expect(screen.getByText("−25%")).toBeDefined()
-		expect(screen.getByText(/Regular price/)).toBeDefined()
-		expect(screen.getByText(EN.settingsBillingLimited)).toBeDefined()
+		expect(screen.getAllByText(/Regular price/)).toHaveLength(1)
+		expect(screen.getByText(/for the first month, then .*10.* per month/)).toBeDefined()
+		expect(screen.queryByText(EN.settingsBillingLimited)).toBeNull()
+
+		fireEvent.click(screen.getByRole("tab", { name: EN.settingsBillingTabAnnually }))
+
+		expect(screen.getByText("−40%")).toBeDefined()
+		expect(screen.getByText(/for the first year, then .*100.* per year/)).toBeDefined()
+		expect(screen.queryByText(/billed yearly/)).toBeNull()
 	})
 
 	it("shows the renewal terms for recurring plans only", () => {

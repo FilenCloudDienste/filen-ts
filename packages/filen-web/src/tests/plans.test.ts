@@ -47,17 +47,26 @@ describe("groupPlans", () => {
 		expect(group?.cards.map(card => card.plan.id)).toEqual([1, 2])
 	})
 
-	it("applies a sale only while sales are on and the sale price is below the cost", () => {
+	it("applies a sale only while sales are on and the sale price is below the cost, without marking it limited", () => {
 		const sale = plan({ cost: 10, sale: 7.5 })
 
 		expect(groupPlans(pricing([sale]))[0]?.cards[0]).toMatchObject({ price: 10, discountPercent: undefined, limited: false })
 		expect(groupPlans(pricing([sale], { saleEnabled: true }))[0]?.cards[0]).toMatchObject({
 			price: 7.5,
 			discountPercent: 25,
-			limited: true
+			limited: false
 		})
 		expect(groupPlans(pricing([plan({ cost: 10, sale: 10 })], { saleEnabled: true }))[0]?.cards[0]?.discountPercent).toBeUndefined()
 		expect(groupPlans(pricing([plan({ cost: 10, sale: 0 })], { saleEnabled: true }))[0]?.cards[0]?.discountPercent).toBeUndefined()
+	})
+
+	it("never puts a lifetime plan on sale", () => {
+		const lifetime = plan({ id: 4, termType: 4, term: "lifetime", cost: 400, sale: 300 })
+
+		expect(groupPlans(pricing([lifetime], { saleEnabled: true, lifetimeEnabled: true }))[0]?.cards[0]).toMatchObject({
+			price: 400,
+			discountPercent: undefined
+		})
 	})
 
 	it("marks lifetime plans limited and offers crypto for lifetime terms only", () => {
@@ -73,12 +82,12 @@ describe("groupPlans", () => {
 		expect(cards.get(4)).toMatchObject({ limited: true, methods: ["stripe", "paypal", "crypto"] })
 	})
 
-	it("compares an annual plan with twelve months of the monthly plan of the same storage, at the prices charged now", () => {
+	it("compares an annual plan with twelve months of the monthly plan of the same storage, at the regular costs", () => {
 		const plans = [
 			plan({ id: 1, cost: 1.99, storage: 2e11 }),
 			plan({ id: 2, cost: 8.99, sale: 6.99, storage: 2e12 }),
 			plan({ id: 3, termType: 3, term: "annually", cost: 19.99, storage: 2e11 }),
-			plan({ id: 4, termType: 3, term: "annually", cost: 89.99, sale: 69.99, storage: 2e12 }),
+			plan({ id: 4, termType: 3, term: "annually", cost: 89.99, sale: 39.99, storage: 2e12 }),
 			plan({ id: 5, termType: 3, term: "annually", cost: 99, storage: 5e12 })
 		]
 		const savings = (groups: ReturnType<typeof groupPlans>) =>
