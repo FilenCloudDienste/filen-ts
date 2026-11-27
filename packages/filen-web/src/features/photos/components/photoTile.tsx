@@ -9,7 +9,7 @@ import { DriveContextMenuContent, DriveDropdownMenuContent } from "@/features/dr
 import { patchPhoto } from "@/features/photos/lib/actions"
 import { PHOTOS_HIDDEN_ACTION_IDS, PHOTOS_ITEM_SHORTCUTS, photosParentNaming } from "@/features/photos/lib/itemActions"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
-import { driveItemName } from "@filen/shared"
+import { cn, driveItemName } from "@filen/shared"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu } from "@/components/ui/dropdown-menu"
 import { RowMenuTrigger } from "@/components/rowMenuTrigger"
@@ -114,15 +114,37 @@ export function PhotoTile({
 									<span className="sr-only">{t("driveVideoItem")}</span>
 								</div>
 							) : null}
-							{selected ? (
-								<div className="absolute top-1 left-1 flex size-6 items-center justify-center rounded-full bg-primary shadow-sm">
+							{/* Shown on hover and keyboard focus too, as the pointer's way to select: a click on it toggles the
+							    tile like a Ctrl/Cmd+click. A coarse pointer selects by long-press, so it shows there once selected. */}
+							<div
+								data-photo-select-check=""
+								aria-hidden={selected ? undefined : true}
+								className={cn(
+									"absolute top-1 left-1 flex size-6 cursor-pointer items-center justify-center rounded-full shadow-sm transition-opacity",
+									selected
+										? "bg-primary"
+										: "border-2 border-white/90 bg-black/20 opacity-0 group-hover/tile:opacity-100 group-focus-visible/tile:opacity-100 pointer-coarse:hidden"
+								)}
+								onClick={event => {
+									event.stopPropagation()
+									onTileToggle(index)
+								}}
+							>
+								{selected ? (
+									<>
+										<CheckIcon
+											aria-hidden="true"
+											className="size-3.5 text-primary-foreground"
+										/>
+										<span className="sr-only">{t("driveItemSelected")}</span>
+									</>
+								) : (
 									<CheckIcon
 										aria-hidden="true"
-										className="size-3.5 text-primary-foreground"
+										className="size-3.5 text-white"
 									/>
-									<span className="sr-only">{t("driveItemSelected")}</span>
-								</div>
-							) : null}
+								)}
+							</div>
 							<DropdownMenu>
 								<RowMenuTrigger
 									label={t("driveItemMenuTrigger")}

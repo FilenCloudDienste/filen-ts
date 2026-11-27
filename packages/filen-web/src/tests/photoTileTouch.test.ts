@@ -94,3 +94,29 @@ describe("PhotoTile — touch", () => {
 		expect(screen.queryByRole("menu")).toBeNull()
 	})
 })
+
+describe("PhotoTile — selection check", () => {
+	it("is there before the tile is selected, revealed on hover and keyboard focus", () => {
+		const { tile } = renderTile()
+		const check = tile.querySelector("[data-photo-select-check]")
+
+		expect(check).not.toBeNull()
+		expect(check?.className).toContain("opacity-0")
+		expect(check?.className).toContain("group-hover/tile:opacity-100")
+		expect(check?.className).toContain("group-focus-visible/tile:opacity-100")
+	})
+
+	it("toggles the tile on a click, without opening it", () => {
+		const { tile, onTileClick, onTileToggle } = renderTile()
+		const check = tile.querySelector("[data-photo-select-check]")
+
+		if (check === null) {
+			throw new Error("no check")
+		}
+
+		fireEvent.click(check, { detail: 1 })
+
+		expect(onTileToggle).toHaveBeenCalledExactlyOnceWith(INDEX)
+		expect(onTileClick).not.toHaveBeenCalled()
+	})
+})
