@@ -86,6 +86,8 @@ export const DRIVE_ACTIONS: readonly ActionDef[] = [
 		scope: "drive",
 		descriptionKey: "drive:driveActionInfo"
 	},
+	// The details side panel beside the listing. No default: Mod+Alt+I and Ctrl+Shift+I are the browsers' devtools.
+	{ id: "drive.toggleDetails", defaultCombo: "", scope: "drive", descriptionKey: "drive:driveCommandToggleDetails" },
 	{ id: "drive.versions", defaultCombo: "", scope: "drive", descriptionKey: "drive:driveActionVersions" },
 	{ id: "drive.color", defaultCombo: "", scope: "drive", descriptionKey: "drive:driveActionColor" },
 	// No default, as the preview's own favorite key: no file manager has one.

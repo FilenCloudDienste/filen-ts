@@ -1530,8 +1530,8 @@ export function directorySizeQueryOptions(item: DirectorySizeItem) {
 	}
 }
 
-export function useDirectorySizeQuery(item: DirectorySizeItem): UseQueryResult<DirSizeResponse> {
-	return useQuery(directorySizeQueryOptions(item))
+export function useDirectorySizeQuery(item: DirectorySizeItem, options?: { enabled?: boolean }): UseQueryResult<DirSizeResponse> {
+	return useQuery({ ...directorySizeQueryOptions(item), enabled: options?.enabled ?? true })
 }
 
 // Versions panel primitive: an on-demand read of a single file's version history, newest first, then uuid

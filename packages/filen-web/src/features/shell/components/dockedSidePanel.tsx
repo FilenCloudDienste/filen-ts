@@ -25,6 +25,7 @@ export function SidePanelSurface({
 	itemKey,
 	title,
 	headerActions,
+	keepSelection = false,
 	className,
 	ref,
 	onKeyDown,
@@ -35,6 +36,8 @@ export function SidePanelSurface({
 	itemKey: string
 	title: ReactNode
 	headerActions?: ReactNode
+	// A click on the panel's background keeps the listing's selection (drive/lib/clickAway.logic.ts).
+	keepSelection?: boolean
 	children: ReactNode
 }) {
 	const { t } = useTranslation("common")
@@ -43,6 +46,7 @@ export function SidePanelSurface({
 		<aside
 			id={controller.panelId}
 			data-panel-key={itemKey}
+			data-keep-selection={keepSelection ? "" : undefined}
 			ref={ref}
 			tabIndex={-1}
 			aria-labelledby={controller.titleId}

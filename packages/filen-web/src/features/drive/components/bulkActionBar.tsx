@@ -13,6 +13,7 @@ import { BulkExtractMenuEntries, CompressMenuEntries, ExtractMenuEntries } from 
 import { DownloadAsEntries } from "@/features/drive/components/downloadAsSubmenu"
 import { DriveActionMenuEntries, type ItemDestination } from "@/features/drive/components/itemMenu"
 import { useDriveMenuActions } from "@/features/drive/hooks/useDriveMenuActions"
+import { DriveDetailsToggle } from "@/features/drive/components/detailsPanel"
 import { BulkActionButton, BulkActionMenuButton, MenuShortcut, SelectionActionBar } from "@/components/selectionActionBar"
 
 export interface BulkActionBarProps {
@@ -189,6 +190,7 @@ export function BulkActionBar({ variant, selectedItems, onDialogAction, onOpen, 
 					{overflowEntries()}
 				</BulkActionMenuButton>
 			) : null}
+			<DriveDetailsToggle />
 			{/* The keys of the submenus the menus list, opening their entries from the bar as before. */}
 			{OVERFLOW_KEYS.map(id => {
 				const descriptor = overflow.find(candidate => candidate.id === id)

@@ -1,139 +1,30 @@
-import { type ReactNode } from "react"
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { Link } from "@tanstack/react-router"
-import { cn, formatBytes, driveItemName } from "@filen/shared"
-import { StarIcon } from "lucide-react"
-import { asDirectoryOrFile, driveItemMime, isDirectoryItem, type DriveItem } from "@/features/drive/lib/item"
+import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
-import { ItemHeroTile } from "@/features/drive/components/itemThumbnail"
-import {
-	formatCreatedDateTime,
-	formatItemSize,
-	formatModifiedDateTime,
-	formatUploadedDateTime,
-	sharedIdentityLabel
-} from "@/features/drive/lib/format"
-import { previewType } from "@/features/drive/lib/preview.logic"
-import { parentNavigationTarget } from "@/features/drive/lib/navigate"
-import { previewKindLabelKey } from "@/features/drive/components/infoDialog.logic"
-import { useFileKindVerdict } from "@/features/drive/hooks/useFileKindVerdict"
-import { useDirectorySizeQuery, useItemInfoQuery, type DirectorySizeItem } from "@/features/drive/queries/drive"
-import { errorLabel } from "@/lib/i18n/errorLabel"
+import { ItemDetails, type ItemDetailsDialog } from "@/features/drive/components/itemDetails"
+import { LinkDialog } from "@/features/drive/components/linkDialog"
+import { ContactPickerDialog } from "@/features/drive/components/contactPickerDialog"
+import { VersionsDialog } from "@/features/drive/components/versionsDialog"
 import { CannotDecryptState } from "@/components/cannotDecryptState"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
-import { Spinner } from "@/components/ui/spinner"
 
 export interface InfoDialogProps {
 	item: DriveItem
 	variant: DriveVariant
-	remoteInfoEnabled: boolean
 	onClose: () => void
 }
 
-// One row of the grouped detail card: a muted label, a right-aligned value. The value column opts into
-// text selection (the global user-select policy leaves it off everywhere else) — see the app-shell
-// spec's text-selection rule. Short values (sizes, dates, counts) stay on one line; `wrap` is for values
-// that can run long (path, MIME type, sharer, an error message), which wrap in full instead of being cut.
-function InfoRow({ label, wrap = false, children }: { label: string; wrap?: boolean; children: ReactNode }) {
-	return (
-		<div className={cn("flex justify-between gap-4 px-3.5 py-2.5 text-sm", wrap ? "items-start" : "items-center")}>
-			<span className="shrink-0 text-muted-foreground">{label}</span>
-			<span className={cn("min-w-0 text-right font-medium select-text", wrap ? "break-words" : "truncate")}>{children}</span>
-		</div>
-	)
-}
-
-// A directory's recursive size and counts, read from the listing's own dirSize entry so a size its row
-// already resolved shows without a second getDirSize. A failed read (including a shared directory
-// whose role never got spread on — toAnyDirWithContext throws) omits the rows, same as any absent data.
-function DirectorySizeRows({ item }: { item: DirectorySizeItem }) {
-	const { t } = useTranslation("drive")
-	const sizeQuery = useDirectorySizeQuery(item)
-
-	if (sizeQuery.status === "success") {
-		return (
-			<>
-				<InfoRow label={t("driveInfoSize")}>{formatBytes(Number(sizeQuery.data.size))}</InfoRow>
-				<InfoRow label={t("driveInfoFileCount")}>{sizeQuery.data.files.toString()}</InfoRow>
-				<InfoRow label={t("driveInfoDirectoryCount")}>{sizeQuery.data.dirs.toString()}</InfoRow>
-			</>
-		)
-	}
-
-	return sizeQuery.isLoading ? (
-		<InfoRow label={t("driveInfoSize")}>
-			<Spinner className="ml-auto size-4 text-muted-foreground" />
-		</InfoRow>
-	) : null
-}
-
-// Read-only item-info dialog — mounted-when-active by the listing's dialog host. Works for a directory
-// or a file, including any of the four shared arms (routed through asDirectoryOrFile), and for an item
-// in any variant including trash. Two tiers of data: item.data-derived rows (name, kind, mime,
-// size for a file, created/uploaded/modified) are synchronous and always render; the Location path
-// (the remote getItemInfo call) and a directory's recursive size/counts (the listing's dirSize entry)
-// are gated by remoteInfoEnabled (false for trash — a trashed item's ancestry has nothing navigable
-// to walk, and the worker's calls stall rather than reject on it). A large hero (thumbnail when the
-// service has one, else the item icon on a soft tonal tile tinted by the directory's own color)
-// carries the name and a type label; the grouped rows follow in filen-mobile's order. The Location row is a deliberate desktop addition — its
-// value is a link that navigates to the item's parent directory and closes the dialog.
-export function InfoDialog({ item, variant, remoteInfoEnabled, onClose }: InfoDialogProps) {
-	// ["drive", "common"] so the undecryptable branch can reach the shared cannot-decrypt label; drive
-	// stays the default namespace, so every bare t("drive…") key below is unaffected.
+// The item details (itemDetails.tsx) as a dialog, for the surfaces without the listing's details panel: the preview's
+// menu and photos. The same sections as the panel; the dialogs they open (link, share, versions) nest in this one.
+// The Location row navigates to the item's parent directory and closes the dialog.
+export function InfoDialog({ item, variant, onClose }: InfoDialogProps) {
+	// ["drive", "common"] so the undecryptable branch can reach the shared cannot-decrypt label.
 	const { t } = useTranslation(["drive", "common"])
-	// An undecryptable item's metadata never decrypted for this account, so every synchronous row below
-	// would fall back to the raw uuid and the remote getItemInfo call would resolve nothing useful — the
-	// dialog stands down to the shared explainer instead (see the early return below). Computed here so
-	// it can also switch the remote fetch off.
-	const undecryptable = item.data.undecryptable
-	// Rules-of-hooks: called unconditionally regardless of variant — remoteInfoEnabled controls
-	// fetching through `enabled`, never whether the hook itself runs.
-	const infoQuery = useItemInfoQuery(item.data, { enabled: remoteInfoEnabled && !undecryptable })
+	const [nested, setNested] = useState<ItemDetailsDialog | null>(null)
 
-	const name = driveItemName(item)
-	// A shared file reads as a file, a shared directory as a directory (asDirectoryOrFile) — the raw
-	// six-arm `item.type` would miss every shared arm in the branches below (see item.ts).
-	const base = asDirectoryOrFile(item)
-	const isDirectory = base.type === "directory"
-
-	const mime = driveItemMime(item)
-	const verdict = useFileKindVerdict(base.type === "file" ? base.data.uuid : undefined)
-	const kindKey = base.type === "file" ? previewKindLabelKey(previewType(item, verdict)) : null
-	// The sharing counterparty is item metadata that belongs here at every width — and it is the only
-	// place it survives once the listing row sheds its own label on a narrow card (see driveRow.tsx).
-	// Non-null for exactly the rows that carry that label: the two shared variants' root arms.
-	const shared = sharedIdentityLabel(item, variant)
-
-	// Remote-query projections — every remote row degrades independently to omitted (a directory that
-	// never resolves a size shows no size row; an item whose path can't resolve shows no Location row).
-	const remoteLoading = remoteInfoEnabled && infoQuery.isLoading
-	const remoteError = remoteInfoEnabled && infoQuery.status === "error"
-	const path = infoQuery.status === "success" ? infoQuery.data.path : null
-	const ancestors = infoQuery.status === "success" ? infoQuery.data.ancestors : []
-	// An item at the drive root resolves an empty path string (empty ancestor chain) — show the root
-	// label rather than a blank value; a trailing slash (get_item_path ends every directory segment
-	// with one) is trimmed for display only, never from the uuid-based navigation target.
-	const pathLabel = path === "" ? t("driveMyDrive") : (path?.replace(/\/$/, "") ?? "")
-
-	// Undecryptable: no readable name or metadata to show — the whole info sheet degrades to the shared
-	// "cannot decrypt" explainer (mobile parity, driveItemInfo.tsx's own undecryptable guard). The
-	// DialogTitle is kept for the dialog's accessible name (visually the explainer owns its own heading).
-	if (undecryptable) {
-		return (
-			<Dialog
-				open
-				onOpenChange={next => {
-					if (!next) {
-						onClose()
-					}
-				}}
-			>
-				<DialogContent>
-					<DialogTitle className="sr-only">{t("common:cannotDecryptTitle")}</DialogTitle>
-					<CannotDecryptState />
-				</DialogContent>
-			</Dialog>
-		)
+	function closeNested(): void {
+		setNested(null)
 	}
 
 	return (
@@ -145,88 +36,41 @@ export function InfoDialog({ item, variant, remoteInfoEnabled, onClose }: InfoDi
 				}
 			}}
 		>
-			<DialogContent>
-				<div className="flex min-w-0 flex-col items-center gap-3 pt-2 text-center">
-					<ItemHeroTile
+			<DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
+				{/* The DialogTitle is kept for the dialog's accessible name; the explainer owns its own heading. */}
+				{item.data.undecryptable ? (
+					<>
+						<DialogTitle className="sr-only">{t("common:cannotDecryptTitle")}</DialogTitle>
+						<CannotDecryptState />
+					</>
+				) : (
+					<ItemDetails
 						item={item}
-						className="size-28 rounded-2xl"
-						iconClassName="size-12"
+						variant={variant}
+						remoteReady
+						large
+						renderName={(name, className) => <DialogTitle className={className}>{name}</DialogTitle>}
+						onOpenDialog={setNested}
+						onNavigate={onClose}
 					/>
-					<div className="flex flex-col items-center gap-1">
-						<div className="flex w-full min-w-0 items-center justify-center gap-1.5">
-							<DialogTitle className="line-clamp-2 min-w-0 text-base leading-snug font-medium break-words select-text">
-								{name}
-							</DialogTitle>
-							{item.data.favorited ? (
-								<>
-									<StarIcon
-										aria-hidden="true"
-										className="size-4 shrink-0 fill-amber-500 text-amber-500"
-									/>
-									<span className="sr-only">{t("driveFavorited")}</span>
-								</>
-							) : null}
-						</div>
-						<span className="text-sm text-muted-foreground">
-							{t(isDirectory ? "driveItemTypeDirectory" : "driveItemTypeFile")}
-						</span>
-					</div>
-				</div>
-
-				<div className="flex min-w-0 flex-col divide-y divide-border/50 rounded-xl ring-1 ring-border/60">
-					{base.type === "file" ? (
-						<InfoRow label={t("driveInfoSize")}>{formatItemSize(item)}</InfoRow>
-					) : remoteInfoEnabled && isDirectoryItem(item) ? (
-						<DirectorySizeRows item={item} />
-					) : null}
-
-					{kindKey !== null ? <InfoRow label={t("driveInfoKind")}>{t(kindKey)}</InfoRow> : null}
-
-					{mime !== undefined ? (
-						<InfoRow
-							label={t("driveInfoMimeType")}
-							wrap
-						>
-							{mime}
-						</InfoRow>
-					) : null}
-
-					<InfoRow label={t("driveInfoCreated")}>{formatCreatedDateTime(item)}</InfoRow>
-					<InfoRow label={t("driveInfoUploaded")}>{formatUploadedDateTime(item)}</InfoRow>
-					<InfoRow label={t("driveInfoModified")}>{formatModifiedDateTime(item)}</InfoRow>
-
-					{shared ? (
-						<InfoRow
-							label={t(variant === "sharedIn" ? "driveInfoSharedBy" : "driveInfoSharedWith")}
-							wrap
-						>
-							{shared.name}
-						</InfoRow>
-					) : null}
-
-					{remoteInfoEnabled && (remoteLoading || remoteError || path !== null) ? (
-						<InfoRow
-							label={t("driveInfoPath")}
-							wrap
-						>
-							{remoteError ? (
-								<span className="text-destructive">{errorLabel(infoQuery.error)}</span>
-							) : path !== null ? (
-								<Link
-									to="/drive/$"
-									params={parentNavigationTarget(ancestors).params}
-									className="text-foreground hover:underline"
-									onClick={onClose}
-								>
-									{pathLabel}
-								</Link>
-							) : (
-								<Spinner className="ml-auto size-4 text-muted-foreground" />
-							)}
-						</InfoRow>
-					) : null}
-				</div>
+				)}
 			</DialogContent>
+			{nested === "link" ? (
+				<LinkDialog
+					item={item}
+					onClose={closeNested}
+				/>
+			) : nested === "share" ? (
+				<ContactPickerDialog
+					items={[item]}
+					onClose={closeNested}
+				/>
+			) : nested === "versions" && item.type === "file" ? (
+				<VersionsDialog
+					file={item}
+					onClose={closeNested}
+				/>
+			) : null}
 		</Dialog>
 	)
 }

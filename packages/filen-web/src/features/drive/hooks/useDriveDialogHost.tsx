@@ -27,6 +27,7 @@ import { TypedConfirmDialog } from "@/components/dialogs/typedConfirmDialog"
 import { DotFilenConfirmDialog } from "@/features/drive/components/dotFilenConfirmDialog"
 import { includesRootDotFilen } from "@/features/drive/lib/dotFilenGuard"
 import { cachedListing } from "@/features/drive/queries/drive"
+import { openDriveDetails } from "@/features/drive/store/useDriveDetailsPanel"
 import { DOT_FILEN_DIR_NAME } from "@filen/shared"
 
 // The listing-level dialog host's own state shape: every action's dialog kind plus the trash toolbar's "emptyTrash"
@@ -64,6 +65,8 @@ interface UseDriveDialogHostParams {
 	// True when this listing would actually hide a dot-prefixed name (the preference AND
 	// hiddenFilterAppliesTo) — computed once by the listing, since it already holds both halves.
 	hiddenNoticeApplies: boolean
+	// The listing: its details panel is where Info goes, the dialog only elsewhere (the sidebar tree's menu).
+	infoOpensDetails?: boolean
 }
 
 // One instance of whichever dialog activeDialog.kind names is rendered at a time (renderActiveDialog),
@@ -71,7 +74,7 @@ interface UseDriveDialogHostParams {
 // (rename/trash/delete/emptyTrash/restoreSelected) — the move/color/versions/info dialogs run their own
 // async calls internally and track their own pending state, since each needs more than one shared
 // boolean can express (e.g. versions has an independent restore vs. delete-confirm flow).
-export function useDriveDialogHost({ variant, hiddenNoticeApplies }: UseDriveDialogHostParams): DriveDialogHost {
+export function useDriveDialogHost({ variant, hiddenNoticeApplies, infoOpensDetails = false }: UseDriveDialogHostParams): DriveDialogHost {
 	const { t } = useTranslation(["drive", "common"])
 	const { activeDialog, setActiveDialog, dialogPending, isDialogOpen, closeActiveDialog, runDialogOutcome, runBulkDialogActivity } =
 		useDialogHost<ActiveDialog>({ keepOpenOnNavigate: keepPreviewOpenOnNavigate })
@@ -94,6 +97,12 @@ export function useDriveDialogHost({ variant, hiddenNoticeApplies }: UseDriveDia
 		// which it is not one of.
 		if (kind === "openAsText") {
 			setActiveDialog({ kind: "preview", items: items.slice(0, 1), index: 0, asText: true })
+
+			return
+		}
+
+		if (kind === "info" && infoOpensDetails) {
+			openDriveDetails(items)
 
 			return
 		}

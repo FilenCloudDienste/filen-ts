@@ -12,7 +12,16 @@ const { getItemInfo, getDirSize } = vi.hoisted(() => ({
 	getDirSize: vi.fn<(dir: unknown) => Promise<DirSizeResponse>>()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { getItemInfo, getDirSize } }))
+// The link and recipients sections read too; neither is counted here.
+vi.mock("@/lib/sdk/client", () => ({
+	sdkApi: {
+		getItemInfo,
+		getDirSize,
+		getFileLinkStatus: () => Promise.resolve(null),
+		getDirectoryLinkStatus: () => Promise.resolve(null),
+		listSharedOutRoot: () => Promise.resolve({ dirs: [], files: [] })
+	}
+}))
 
 vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
 
@@ -95,7 +104,7 @@ async function listViewResolves(item: DriveItem): Promise<void> {
 }
 
 async function openInfo(item: DriveItem, remoteInfoEnabled = true): Promise<void> {
-	render(createElement(InfoDialog, { item, variant: "drive", remoteInfoEnabled, onClose: vi.fn() }), { wrapper })
+	render(createElement(InfoDialog, { item, variant: remoteInfoEnabled ? "drive" : "trash", onClose: vi.fn() }), { wrapper })
 	await drain()
 }
 

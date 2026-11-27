@@ -678,6 +678,84 @@ export const drive = {
 	/** File-versions defense-in-depth guard — surfaced only if a caller reaches the delete-version action helper directly on the file's own live version (its uuid IS the file's current content, so deleting it would destroy the file, not just history); the panel's own per-row disabled state already keeps the UI from reaching this, so this message is a last-resort backstop */
 	driveVersionsDeleteLiveBlocked: "This is the current version and can't be deleted.",
 
+	// ── Details panel ────────────────────────────────────────────────────────
+	/** Details side panel — its heading and the selection bar toggle's label */
+	driveDetailsTitle: "Details",
+	/** Keymap action: shows or hides the details side panel */
+	driveCommandToggleDetails: "Show or hide details",
+	/** Details panel — heading for a selection of several items; {{count}} = items selected */
+	driveDetailsSelectionTitle_one: "{{count}} item selected",
+	/** Details panel — heading for a selection of several items; {{count}} = items selected */
+	driveDetailsSelectionTitle_other: "{{count}} items selected",
+	/** Details panel — row label: the item's ID (uuid), with a copy button */
+	driveDetailsId: "ID",
+	/** Details panel — copy button label for the item's ID */
+	driveDetailsCopyId: "Copy ID",
+	/** Details panel — section heading: what the picture's header says (dimensions, capture date, camera) */
+	driveDetailsPhoto: "Photo",
+	/** Details panel — row label: an image's pixel dimensions */
+	driveDetailsDimensions: "Dimensions",
+	/** Details panel — dimensions value; {{width}} × {{height}} in pixels */
+	driveDetailsDimensionsValue: "{{width}} × {{height}}",
+	/** Details panel — row label: when the photo was taken (Exif) */
+	driveDetailsTaken: "Taken",
+	/** Details panel — row label: the camera that took the photo (Exif make and model) */
+	driveDetailsCamera: "Camera",
+	/** Details panel — row label: the lens the photo was taken with (Exif) */
+	driveDetailsLens: "Lens",
+	/** Details panel — row label: the aperture, as "f/1.8" */
+	driveDetailsAperture: "Aperture",
+	/** Details panel — row label: the exposure time, as "1/120 s" */
+	driveDetailsExposure: "Exposure",
+	/** Details panel — row label: the ISO sensitivity */
+	driveDetailsIso: "ISO",
+	/** Details panel — row label: the focal length, with its 35 mm equivalent when the camera recorded one */
+	driveDetailsFocalLength: "Focal length",
+	/** Details panel — row label: whether the flash fired */
+	driveDetailsFlash: "Flash",
+	/** Details panel — Flash row value: the flash fired */
+	driveDetailsFlashFired: "Fired",
+	/** Details panel — Flash row value: the flash did not fire */
+	driveDetailsFlashOff: "Did not fire",
+	/** Details panel — row label: where the photo was taken, as latitude and longitude */
+	driveDetailsGps: "Location",
+	/** Details panel — copy button label for the photo's coordinates */
+	driveDetailsCopyGps: "Copy coordinates",
+	/** Toast after copying the photo's coordinates */
+	driveDetailsGpsCopied: "Coordinates copied to clipboard",
+	/** Details panel — section heading: the item's public link */
+	driveDetailsPublicLink: "Public link",
+	/** Details panel — public link status: a link exists */
+	driveDetailsLinkOn: "Anyone with the link can access this item.",
+	/** Details panel — public link status: no link */
+	driveDetailsLinkOff: "No public link",
+	/** Details panel — button opening the public link dialog */
+	driveDetailsManage: "Manage",
+	/** Details panel — section heading: who the item is shared with */
+	driveDetailsSharedWith: "Shared with",
+	/** Details panel — shown when the item is shared with nobody */
+	driveDetailsNotShared: "Not shared with anyone",
+	/** Details panel — button label removing one recipient; {{email}} = the recipient */
+	driveDetailsRemoveRecipient: "Stop sharing with {{email}}",
+	/** Details panel — confirm body before removing one recipient; {{email}} = the recipient */
+	driveDetailsRemoveRecipientBody: "{{email}} will lose access to this item.",
+	/** Details panel — section heading: a file's previous versions */
+	driveDetailsVersions: "Versions",
+	/** Details panel — button that loads the version list */
+	driveDetailsShowVersions: "Show versions",
+	/** Details panel — row label: files in the selection */
+	driveDetailsFiles: "Files",
+	/** Details panel — row label: directories in the selection */
+	driveDetailsDirectories: "Directories",
+	/** Details panel — row label: the selection's total size */
+	driveDetailsTotalSize: "Total size",
+	/** Details panel — total size while some directories' sizes are unknown; {{size}} = the known part */
+	driveDetailsAtLeast: "At least {{size}}",
+	/** Details panel — button that reads the selected directories' sizes */
+	driveDetailsCalculate: "Calculate",
+	/** Details panel — section heading: the actions the whole selection offers */
+	driveDetailsActions: "Actions",
+
 	// ── Info panel ───────────────────────────────────────────────────────────
 	/** Info panel — row label: the item's directory path (breadcrumb ancestors) */
 	driveInfoPath: "Location",

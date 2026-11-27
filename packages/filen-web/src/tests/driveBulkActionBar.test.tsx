@@ -109,7 +109,17 @@ describe("BulkActionBar — pinned and overflow", () => {
 	it("one file: the pinned actions on the face, the single-item rest under More actions", async () => {
 		renderBar([file("report.pdf")])
 
-		expect(barButtons()).toEqual(["Clear selection", "Move", "Copy", "Favorite", "Download", "Share", "Trash", "More actions"])
+		expect(barButtons()).toEqual([
+			"Clear selection",
+			"Move",
+			"Copy",
+			"Favorite",
+			"Download",
+			"Share",
+			"Trash",
+			"More actions",
+			"Details"
+		])
 
 		await openMore()
 
@@ -143,7 +153,7 @@ describe("BulkActionBar — pinned and overflow", () => {
 	it("the trash: Restore and Delete permanently, nothing to overflow for several", () => {
 		renderBar([file("a.pdf"), file("b.pdf")], "trash")
 
-		expect(barButtons()).toEqual(["Clear selection", "Restore", "Delete permanently"])
+		expect(barButtons()).toEqual(["Clear selection", "Restore", "Delete permanently", "Details"])
 	})
 
 	it("Links: no Move, Disable link sits in the overflow", async () => {

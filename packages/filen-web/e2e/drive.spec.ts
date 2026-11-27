@@ -84,17 +84,17 @@ test.describe("drive", () => {
 		await expect(breadcrumb(page).locator('[aria-current="page"]')).toHaveText(readFixtureManifest().fixtureRoot)
 		const root = await waitForListingSettled(page)
 
-		// Info is a pure read dialog — nothing is created or destroyed by opening it.
-		async function openInfoOn(list: ReturnType<typeof page.getByRole>): Promise<void> {
+		// Rename's dialog changes nothing until it is submitted. (Info opens the listing's details panel, not a dialog.)
+		async function openRenameOn(list: ReturnType<typeof page.getByRole>): Promise<void> {
 			await list.getByRole("option").first().getByRole("button", { name: "More actions", exact: true }).click()
 			await page
 				.getByRole("menu")
-				.getByRole("menuitem", { name: menuItemName("Info") })
+				.getByRole("menuitem", { name: menuItemName("Rename") })
 				.click()
 			await expect(page.getByRole("dialog")).toBeVisible()
 		}
 
-		await openInfoOn(root.listbox)
+		await openRenameOn(root.listbox)
 		await page.goForward()
 		await expect(page.getByRole("dialog")).toHaveCount(0)
 
@@ -102,9 +102,29 @@ test.describe("drive", () => {
 		// file, so the subdirectory always has a row to open a dialog on.
 		const nested = await waitForListingSettled(page)
 
-		await openInfoOn(nested.listbox)
+		await openRenameOn(nested.listbox)
 		await page.goBack()
 		await expect(page.getByRole("dialog")).toHaveCount(0)
+	})
+
+	test("Info opens the details panel beside the listing, and it hides with the selection", async ({ page }) => {
+		await bootTo(page)
+		const { listbox } = await enterFixtureRoot(page)
+		const first = listbox.getByRole("option").first()
+
+		await first.getByRole("button", { name: "More actions", exact: true }).click()
+		await page
+			.getByRole("menu")
+			.getByRole("menuitem", { name: menuItemName("Info") })
+			.click()
+
+		const details = page.getByRole("complementary", { name: "Details" })
+
+		await expect(details).toBeVisible()
+		await expect(page.getByRole("dialog")).toHaveCount(0)
+
+		await page.getByRole("toolbar").getByRole("button", { name: "Clear selection", exact: true }).click()
+		await expect(details).toHaveCount(0)
 	})
 
 	test("view mode toggles between list and grid and persists across a reload", async ({ page }) => {

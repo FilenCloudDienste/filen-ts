@@ -10,7 +10,14 @@ const { getItemInfo } = vi.hoisted(() => ({
 	getItemInfo: vi.fn<(item: Dir | File) => Promise<{ path: string | null; ancestors: Dir[] }>>()
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { getItemInfo, getDirSize: vi.fn() } }))
+vi.mock("@/lib/sdk/client", () => ({
+	sdkApi: {
+		getItemInfo,
+		getDirSize: vi.fn(),
+		getFileLinkStatus: () => Promise.resolve(null),
+		listSharedOutRoot: () => Promise.resolve({ dirs: [], files: [] })
+	}
+}))
 
 vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
 
@@ -65,7 +72,7 @@ describe("InfoDialog long values", () => {
 		getItemInfo.mockResolvedValueOnce({ path: LONG_PATH, ancestors: [] })
 		const item = narrowItem(mockFile())
 
-		render(createElement(InfoDialog, { item, variant: "drive", remoteInfoEnabled: true, onClose: vi.fn() }), {
+		render(createElement(InfoDialog, { item, variant: "drive", onClose: vi.fn() }), {
 			wrapper: queryClientWrapper(queryClient)
 		})
 

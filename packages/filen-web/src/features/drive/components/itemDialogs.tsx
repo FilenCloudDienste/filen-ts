@@ -134,7 +134,6 @@ export function ItemDialog({
 				<InfoDialog
 					item={item}
 					variant={variant}
-					remoteInfoEnabled={variant !== "trash"}
 					onClose={onClose}
 				/>
 			)

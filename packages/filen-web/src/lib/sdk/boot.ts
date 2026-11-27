@@ -55,6 +55,7 @@ import { clearDirectoryTreeState, loadDirectoryTreeOpen } from "@/features/drive
 import { loadDefaultNoteType } from "@/features/notes/lib/preferences"
 import { loadHistoryRetention } from "@/features/assistant/store/conversationHistory"
 import { loadAssistantHidden } from "@/features/assistant/store/assistantHidden"
+import { loadDriveDetailsPanelOpen } from "@/features/drive/store/useDriveDetailsPanel"
 
 // Settled when bootSdk() finishes — on success OR failure, and never rejected. Auth-sensitive route
 // guards await this before reading hasClient(): the boot kick runs before the router mounts, but
@@ -212,7 +213,8 @@ function preloadDevicePreferences(): Promise<void> {
 		loadCollapsedChatSections(),
 		loadDirectoryTreeOpen(),
 		loadHistoryRetention(),
-		loadAssistantHidden()
+		loadAssistantHidden(),
+		loadDriveDetailsPanelOpen()
 	]).then(() => undefined)
 }
 

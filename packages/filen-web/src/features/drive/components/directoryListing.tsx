@@ -95,6 +95,7 @@ import { EmptyTrashButton } from "@/features/drive/components/emptyTrashButton"
 import { NewMenu, UploadContextMenu } from "@/features/drive/components/uploadMenu"
 import { UploadDropzone } from "@/features/drive/components/uploadDropzone"
 import { BulkActionBar } from "@/features/drive/components/bulkActionBar"
+import { DriveDetailsHost } from "@/features/drive/components/detailsPanel"
 import { useWindowBarSlot } from "@/features/shell/lib/windowBarSlot"
 import { EmptyState } from "@/features/drive/components/emptyState"
 import { LoadingState } from "@/components/loadingState"
@@ -439,7 +440,8 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 
 	const { handleDialogAction, handleEmptyTrash, openPreview, renderActiveDialog } = useDriveDialogHost({
 		variant,
-		hiddenNoticeApplies: hideHidden
+		hiddenNoticeApplies: hideHidden,
+		infoOpensDetails: true
 	})
 
 	// What the empty-space menu and every directory row's New submenu create or upload into. Only offline
@@ -1497,6 +1499,13 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 				</ListingDropSurface>
 			</UploadDropzone>
 			{destination.host}
+			{listingReady ? (
+				<DriveDetailsHost
+					items={reconciledSelectedItems}
+					variant={variant}
+					onDialogAction={handleDialogAction}
+				/>
+			) : null}
 			{renderActiveDialog()}
 		</>
 	)
