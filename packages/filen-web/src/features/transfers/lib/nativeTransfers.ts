@@ -217,7 +217,7 @@ function endGroup(group: Group): void {
 					complete: "transfers:transfersUploadSummaryComplete",
 					withFailures: "transfers:transfersUploadSummaryCompleteWithFailures"
 				},
-		NATIVE_FAILURE_TOAST_ID
+		{ failureId: NATIVE_FAILURE_TOAST_ID }
 	)
 
 	if (group.storageFull) {
@@ -522,12 +522,13 @@ export async function startNativeUploads(files: File[], parentUuid: string | nul
 
 // The upload menu's pickers with HEIC conversion off: main's own open dialog, its paths straight to the host. Never
 // rejects; settles once the dialog closed and the upload started.
-export async function pickNativeUpload(kind: DesktopTransferKind, parentUuid: string | null): Promise<void> {
+// True once something started uploading.
+export async function pickNativeUpload(kind: DesktopTransferKind, parentUuid: string | null): Promise<boolean> {
 	const bridge = desktopBridge()
 	const parent = bridge === undefined ? null : uploadParent(parentUuid)
 
 	if (bridge === undefined || parent === null) {
-		return
+		return false
 	}
 
 	try {
@@ -539,10 +540,14 @@ export async function pickNativeUpload(kind: DesktopTransferKind, parentUuid: st
 			const ids = result.value.ids
 
 			toastTransferStarted({ direction: "upload", name: storeRow(ids[0] ?? "")?.name ?? "", count: ids.length, noun: "items" })
+
+			return true
 		}
 	} catch (e) {
 		toast.error(errorLabel(e))
 	}
+
+	return false
 }
 
 // Whether a dropped directory's tree holds a HEIC file, by its entries' names, stopping at the first. One it cannot

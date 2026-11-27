@@ -4,6 +4,7 @@ import { sumBytes } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp, type VoidActionOutcome } from "@/lib/actions/outcome"
 import { toastSummary } from "@/lib/actions/bulkToast"
+import { retryFailedRuns } from "@/features/transfers/lib/retry"
 import { toastTransferStarted } from "@/features/transfers/lib/transferStartToast"
 import { openProgressChannel } from "@/features/transfers/lib/progressChannel"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
@@ -51,7 +52,8 @@ import { askNameConflicts } from "@/features/drive/lib/nameConflictAsk"
 export interface RunUploadDeps {
 	upload: (parentUuid: string | null, transferId: string, file: File, runId?: string) => Promise<SdkFile>
 	cancel?: (transferId: string) => void
-	store: Pick<TransfersStore, "add" | "settle" | "setItem" | "remove" | "startRunFile" | "settleRunFile">
+	store: Pick<TransfersStore, "add" | "settle" | "setItem" | "remove" | "startRunFile" | "settleRunFile"> &
+		Partial<Pick<TransfersStore, "setRetry">>
 	// Splices the landed file into its parent listing (queueListingCreate: batched with the other
 	// creates, its own socket echo included).
 	patchCreated: (parentUuid: string | null, item: DriveItem) => void
@@ -151,6 +153,7 @@ export async function runUpload(
 	// Refused before it started: nothing to upload against a full account.
 	if (stop?.refusal !== undefined) {
 		deps.store.settle(id, "error", stop.refusal)
+		deps.store.setRetry?.(id, { kind: "upload", file })
 
 		return { status: "error", dto: stop.refusal }
 	}
@@ -166,7 +169,9 @@ export async function runUpload(
 
 			const failure = quotaStopFailure(deps, stop, asErrorDTO(e))
 
-			return settleTransferFailure(deps.store, id, failure) ? { status: "cancelled" } : { status: "error", dto: failure }
+			return settleTransferFailure(deps.store, id, failure, { kind: "upload", file })
+				? { status: "cancelled" }
+				: { status: "error", dto: failure }
 		}
 
 		stop?.inFlight.delete(id)
@@ -230,7 +235,7 @@ async function runRunFileUpload(
 	deps.store.startRunFile({ id, batchId: batch.id, size: file.size, ...(args.counted === undefined ? {} : { counted: args.counted }) })
 
 	if (stop?.refusal !== undefined) {
-		deps.store.settleRunFile(id, "error", stop.refusal, { name: args.name ?? file.name, parentUuid })
+		deps.store.settleRunFile(id, "error", stop.refusal, { name: args.name ?? file.name, parentUuid, file })
 
 		return { status: "error", dto: stop.refusal }
 	}
@@ -250,7 +255,7 @@ async function runRunFileUpload(
 				return { status: "cancelled" }
 			}
 
-			deps.store.settleRunFile(id, "error", dto, { name: args.name ?? file.name, parentUuid })
+			deps.store.settleRunFile(id, "error", dto, { name: args.name ?? file.name, parentUuid, file })
 
 			return { status: "error", dto }
 		}
@@ -608,14 +613,24 @@ async function uploadBatch(planned: readonly PlannedUpload[], parentUuid: string
 		defaultUploadDeps.invalidateDirectorySizes?.(parentUuid)
 	}
 
-	toastSummary(succeeded, failed, {
-		complete: "transfers:transfersUploadSummaryComplete",
-		withFailures: "transfers:transfersUploadSummaryCompleteWithFailures"
-	})
+	toastSummary(
+		succeeded,
+		failed,
+		{
+			complete: "transfers:transfersUploadSummaryComplete",
+			withFailures: "transfers:transfersUploadSummaryCompleteWithFailures"
+		},
+		{ retry: failed > 0 ? retryFailedRuns(new Set([batch.id]), startUploadsAgain) : undefined }
+	)
 
 	if (quotaStop.refusal !== undefined) {
 		reactToStorageRefusal()
 	}
+}
+
+// A summary's Retry failed: the failed files into the directory each went to, as a new run.
+export function startUploadsAgain(files: File[], parentUuid: string | null): void {
+	void startUploads(files, parentUuid)
 }
 
 // Once per batch or run the server refused for storage, after it ended: one account read (the figure the

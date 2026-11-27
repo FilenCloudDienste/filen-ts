@@ -49,7 +49,7 @@ export function narrowToAnyFile(item: DriveItem): AnyFile {
 export interface RunDownloadDeps {
 	download: (file: AnyFile, transferId: string, save: SaveTarget, onProgress: (bytes: bigint) => void) => Promise<void>
 	cancel?: (transferId: string) => void
-	store: Pick<TransfersStore, "add" | "setProgress" | "settle" | "remove">
+	store: Pick<TransfersStore, "add" | "setProgress" | "settle" | "remove"> & Partial<Pick<TransfersStore, "setRetry">>
 	// Optional for the same DI reason as `cancel`: tells the user the download started, once it has a
 	// place to save to.
 	announceStart?: (name: string, count: number) => void
@@ -108,7 +108,7 @@ export async function runDownload(deps: RunDownloadDeps, args: { item: DriveItem
 	} catch (e) {
 		const dto = asErrorDTO(e)
 
-		if (settleTransferFailure(deps.store, id, dto)) {
+		if (settleTransferFailure(deps.store, id, dto, { kind: "download", items: [item] })) {
 			return { status: "success" }
 		}
 

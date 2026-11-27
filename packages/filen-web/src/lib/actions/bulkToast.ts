@@ -9,10 +9,16 @@ export interface SummaryKeys {
 	withFailures: Extract<AppKey, `${string}:${string}CompleteWithFailures`>
 }
 
+export interface SummaryOptions {
+	// The toast a partial failure replaces.
+	failureId?: string
+	// Runs the failed items again ("Retry failed"); offered only alongside a failure.
+	retry?: (() => void) | undefined
+}
+
 // One summary toast for independently-run items, so a partial failure surfaces alongside the
-// successes. Nothing ran (all cancelled, or an empty selection): nothing to report. `failureId`: the
-// toast a partial failure replaces.
-export function toastSummary(succeeded: number, failed: number, keys: SummaryKeys, failureId?: string): void {
+// successes. Nothing ran (all cancelled, or an empty selection): nothing to report.
+export function toastSummary(succeeded: number, failed: number, keys: SummaryKeys, options?: SummaryOptions): void {
 	if (succeeded === 0 && failed === 0) {
 		return
 	}
@@ -23,12 +29,19 @@ export function toastSummary(succeeded: number, failed: number, keys: SummaryKey
 	}
 
 	const text = i18n.t(keys.withFailures, { count: succeeded, failed })
+	const retry = options?.retry
+	const failureId = options?.failureId
 
-	if (failureId === undefined) {
+	if (failureId === undefined && retry === undefined) {
 		toast.error(text)
-	} else {
-		toast.error(text, { id: failureId })
+
+		return
 	}
+
+	toast.error(text, {
+		...(failureId === undefined ? {} : { id: failureId }),
+		...(retry === undefined ? {} : { action: { label: i18n.t("transfers:transfersRetryFailed"), onClick: retry } })
+	})
 }
 
 export function toastBulkSummary(outcome: BulkOutcome<unknown>, keys: SummaryKeys): void {

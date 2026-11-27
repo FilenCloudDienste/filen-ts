@@ -12,6 +12,7 @@ import {
 	PanelBottomOpenIcon,
 	PauseIcon,
 	PlayIcon,
+	RotateCwIcon,
 	Trash2Icon,
 	UploadIcon,
 	XIcon,
@@ -38,6 +39,8 @@ import {
 import { errorDtoOf } from "@/features/transfers/lib/nativeTransfers.logic"
 import { desktopBridge } from "@/lib/desktop"
 import { setTransferPaused } from "@/features/transfers/lib/control"
+import { canRetry, canUploadAgain } from "@/features/transfers/lib/retry"
+import { retryTransfers, uploadAgain } from "@/features/transfers/lib/retryActions"
 import { showJobToast } from "@/features/transfers/lib/jobToast"
 import { pruneSettledDriveJobs } from "@/features/drive/lib/driveJobs"
 import { jobRevealItem } from "@/features/drive/lib/driveJobs.logic"
@@ -370,6 +373,27 @@ export function TransferRow({ transfer, group, onRequestCancel, onShowInDirector
 				) : null}
 				{!active ? (
 					<>
+						{canRetry(transfer) ? (
+							<TooltipIconButton
+								label={t("transfersRowRetry")}
+								className={ROW_ACTION_CLASS}
+								onClick={() => {
+									retryTransfers([transfer])
+								}}
+							>
+								<RotateCwIcon />
+							</TooltipIconButton>
+						) : canUploadAgain(transfer) ? (
+							<TooltipIconButton
+								label={t("transfersRowUploadAgain")}
+								className={ROW_ACTION_CLASS}
+								onClick={() => {
+									uploadAgain(transfer)
+								}}
+							>
+								<UploadIcon />
+							</TooltipIconButton>
+						) : null}
 						{offersNativeReveal(transfer) ? (
 							<>
 								<TooltipIconButton

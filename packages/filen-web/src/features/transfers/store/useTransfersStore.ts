@@ -66,7 +66,13 @@ export interface Transfer {
 	native?: true
 	// A native download the desktop app can show in its directory and open once it finished.
 	revealable?: true
+	// A failed row's way to run again (features/transfers/lib/retry.ts), gone with the row.
+	retry?: TransferRetry
 }
+
+// What a failed transfer re-runs from: the browser File an upload read (a handle, never its bytes, unless the page
+// made them, a converted HEIC) into the row's parentUuid, or the items a download saved.
+export type TransferRetry = { kind: "upload"; file: File } | { kind: "download"; items: DriveItem[] }
 
 // One drive upload run as the listing it targets shows it: a plain pick or drop of files, or one
 // top-level directory of a directory upload (`directoryName`). Every transfer of the run holds the same
@@ -527,6 +533,8 @@ export interface RunFileStart {
 export interface RunFileFailure {
 	name: string
 	parentUuid: string | null
+	// What its row retries from.
+	file?: File
 }
 
 // One event of the desktop app's native transfers (nativeTransfers.ts), applied in one update: rows main no longer lists
@@ -589,6 +597,8 @@ export interface TransfersStore {
 	settle: (id: string, status: TerminalStatus, error?: ErrorDTO) => void
 	// `name` renames the row too, for a job whose item came out under another name than it asked for.
 	setItem: (id: string, item: DriveItem, name?: string) => void
+	// Keeps what a failed row retries from on it.
+	setRetry: (id: string, retry: TransferRetry) => void
 	remove: (id: string) => void
 	// remove for many rows in one update.
 	removeMany: (ids: ReadonlySet<string>) => void
@@ -1363,6 +1373,21 @@ export const useTransfersStore = create<TransfersStore>((set, get) => ({
 	setItem: (id, item, name) => {
 		set(state => setItemState(state, id, item, name))
 	},
+	setRetry: (id, retry) => {
+		set(state => {
+			const draft = new RowsDraft(state.transfers)
+			const position = draft.position(id)
+			const target = draft.rows[position]
+
+			if (target?.status !== "error") {
+				return state
+			}
+
+			draft.replace(position, { ...target, retry })
+
+			return draft.result()
+		})
+	},
 	remove: id => {
 		get().removeMany(new Set([id]))
 	},
@@ -1568,7 +1593,8 @@ export const useTransfersStore = create<TransfersStore>((set, get) => ({
 					parentUuid: failure.parentUuid,
 					startedAt: file.startedAt,
 					...(error === undefined ? {} : { error }),
-					...(batch === undefined ? {} : { batch: batch.ref })
+					...(batch === undefined ? {} : { batch: batch.ref }),
+					...(failure.file === undefined ? {} : { retry: { kind: "upload" as const, file: failure.file } })
 				})
 
 				evicted = draft.capFinished()

@@ -6,6 +6,7 @@ import { toastTransferStarted } from "@/features/transfers/lib/transferStartToas
 import { i18n } from "@/lib/i18n"
 import { log } from "@/lib/log"
 import { toastSummary } from "@/lib/actions/bulkToast"
+import { retryFailedRuns } from "@/features/transfers/lib/retry"
 import { sdkApi } from "@/lib/sdk/client"
 import { runCreateDirectory, type CreateDirectoryDeps } from "@/features/drive/lib/createDirectory"
 import type { DriveItem } from "@/features/drive/lib/item"
@@ -28,6 +29,7 @@ import {
 	defaultUploadDeps,
 	discardUploadRuns,
 	newUploadBatchRef,
+	startUploadsAgain,
 	uploadBatchControl,
 	withUploadName,
 	type RunUploadDeps,
@@ -646,10 +648,17 @@ export async function runDirectoryUpload(
 	const succeeded = createdUuids.length + uploadedFiles
 	const failed = failedDirs + skipped + fileOutcomes.filter(status => status === "error").length
 
-	toastSummary(succeeded, failed, {
-		complete: "transfers:transfersDirectoryUploadSummaryComplete",
-		withFailures: "transfers:transfersDirectoryUploadSummaryCompleteWithFailures"
-	})
+	const runIds = new Set([...directoryRuns.values(), ...(topLevelFilesRun === undefined ? [] : [topLevelFilesRun])].map(run => run.id))
+
+	toastSummary(
+		succeeded,
+		failed,
+		{
+			complete: "transfers:transfersDirectoryUploadSummaryComplete",
+			withFailures: "transfers:transfersDirectoryUploadSummaryCompleteWithFailures"
+		},
+		{ retry: failed > 0 ? retryFailedRuns(runIds, startUploadsAgain) : undefined }
+	)
 
 	if (quotaStop.refusal !== undefined) {
 		const react = deps.onStorageRefusal ?? reactToStorageRefusal

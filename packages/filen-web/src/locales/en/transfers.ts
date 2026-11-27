@@ -138,6 +138,12 @@ export const transfers = {
 	transfersStatusMovingToTrash: "Moving to trash…",
 	/** Transfer row — accessible label on the button removing a single finished (done/error) transfer from the list */
 	transfersRowRemove: "Remove",
+	/** Transfer row — accessible label on the button running a failed upload or download again */
+	transfersRowRetry: "Retry",
+	/** Transfer row — accessible label on the button opening the file picker for a failed upload whose file is no longer held (it opens on the directory the upload went to) */
+	transfersRowUploadAgain: "Upload again",
+	/** Upload summary toast — action on a summary with failures, uploading the failed files again */
+	transfersRetryFailed: "Retry failed",
 	/** Transfer row — accessible label on the button opening the single-transfer Cancel confirm dialog; also reused as the confirm dialog's own destructive confirm button label */
 	transfersRowCancel: "Cancel",
 	/** Single-transfer Cancel confirm dialog — title */

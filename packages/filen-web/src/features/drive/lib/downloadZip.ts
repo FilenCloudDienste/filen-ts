@@ -30,7 +30,7 @@ export interface RunZipDownloadDeps {
 		save: SaveTarget,
 		onProgress: (bytesWritten: bigint, totalBytes: bigint, itemsProcessed: bigint, totalItems: bigint) => void
 	) => Promise<void>
-	store: Pick<TransfersStore, "add" | "setProgress" | "setSize" | "settle" | "remove">
+	store: Pick<TransfersStore, "add" | "setProgress" | "setSize" | "settle" | "remove"> & Partial<Pick<TransfersStore, "setRetry">>
 	// Optional, as RunDownloadDeps' own (download.ts): tells the user the download started.
 	announceStart?: (name: string, count: number) => void
 }
@@ -85,7 +85,7 @@ export async function runZipDownload(
 	} catch (e) {
 		const dto = asErrorDTO(e)
 
-		if (settleTransferFailure(deps.store, id, dto)) {
+		if (settleTransferFailure(deps.store, id, dto, { kind: "download", items })) {
 			return { status: "success" }
 		}
 

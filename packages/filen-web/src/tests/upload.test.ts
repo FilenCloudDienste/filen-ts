@@ -401,7 +401,7 @@ describe("runUpload (injected deps, no worker or query client)", () => {
 			})
 
 			expect(h.settleRunFile.mock.calls.map(call => call.slice(1))).toEqual([
-				["error", dto, { name: "photos/sub/a.txt", parentUuid: "sub" }],
+				["error", dto, { name: "photos/sub/a.txt", parentUuid: "sub", file: expect.any(File) as File }],
 				["cancelled"]
 			])
 			expect(h.patchCreated).not.toHaveBeenCalled()
@@ -520,7 +520,9 @@ describe("startUploads (real runUpload + defaultUploadDeps, mocked sdk client/qu
 		await startUploads([mockBrowserFile("a.txt"), mockBrowserFile("b.txt"), mockBrowserFile("c.txt")], null)
 
 		expect(toastError).toHaveBeenCalledTimes(1)
-		expect(toastError).toHaveBeenCalledWith(expect.any(String))
+		expect(toastError).toHaveBeenCalledWith(expect.any(String), expect.anything())
+		// The failed file kept its File, so the summary offers to upload it again.
+		expect(toastError.mock.lastCall?.[1]).toMatchObject({ action: { label: "Retry failed" } })
 		expect(toastSuccess).not.toHaveBeenCalled()
 	})
 
