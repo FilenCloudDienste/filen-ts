@@ -1,9 +1,9 @@
 import type { BlockedUsers } from "@filen/shared"
 import { useChatTypingLabel } from "@/features/chats/hooks/useChatTyping"
 
-// The thread's typing line — at the bottom of the scroller, outside the virtualized rows, so it never moves
-// a row's position (messageThread.tsx keeps a scrolled-up reader's view still as it comes and goes). Three
-// dots in the avatar gutter and the label in the text column. The live region stays mounted while nobody
+// The thread's typing line — a strip of fixed height between the message list and the composer, empty while nobody
+// types, so its coming and going never moves the list. Three dots in the avatar gutter and the label in the text
+// column. The live region stays mounted while nobody
 // types, so the label is announced when it appears; the label is the shared typingText derivation, so its
 // copy matches the sidebar-row preview override exactly.
 export function TypingIndicator({
@@ -20,10 +20,10 @@ export function TypingIndicator({
 	return (
 		<div
 			aria-live="polite"
-			className="px-4"
+			className="h-5 shrink-0 px-4"
 		>
 			{label !== null ? (
-				<div className="flex items-center gap-4 pt-1.5">
+				<div className="flex items-center gap-4">
 					<div
 						aria-hidden="true"
 						className="flex w-10 shrink-0 items-center justify-end gap-0.5"

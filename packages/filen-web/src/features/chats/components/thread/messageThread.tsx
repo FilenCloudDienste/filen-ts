@@ -314,8 +314,6 @@ function ThreadList({
 	// focus to the body, and with it the keyboard's scroll target. Left set when focus moves out of the
 	// thread, which costs one mounted row until focus next lands inside.
 	const focusedRowRef = useRef<{ key: string; index: number } | null>(null)
-	const typingSlotRef = useRef<HTMLDivElement | null>(null)
-	const listShown = !isPending && !isError && rows.length > 0
 
 	// Memoized by hand (useVirtualizer opts this component out of the React Compiler): the virtualizer
 	// re-lays every row when its key function changes, so it must change with the rows and nothing else.
@@ -417,36 +415,6 @@ function ThreadList({
 			el.scrollTop = 0
 		}
 	}, [newestKey, affordance.atBottom])
-
-	// The typing line sits below the rows inside the scroller, whose scroll origin is the bottom edge, so
-	// its coming and going would slide everything above it. A reader following the tail sees it push in; one
-	// scrolled up into history keeps their view, the scroll offset absorbing the change. The virtualizer's
-	// offset is off by the line's height while it shows, which its overscan covers.
-	useEffect(() => {
-		const slot = typingSlotRef.current
-
-		if (slot === null) {
-			return
-		}
-
-		let height = slot.offsetHeight
-		const observer = new ResizeObserver(() => {
-			const delta = slot.offsetHeight - height
-			const el = scrollRef.current
-
-			height += delta
-
-			if (delta !== 0 && el !== null && !isScrollNearBottom(el.scrollTop, BOTTOM_THRESHOLD)) {
-				el.scrollTop -= delta
-			}
-		})
-
-		observer.observe(slot)
-
-		return () => {
-			observer.disconnect()
-		}
-	}, [listShown])
 
 	function scrollToBottom(pill: HTMLButtonElement): void {
 		const el = scrollRef.current
@@ -743,14 +711,6 @@ function ThreadList({
 		}
 	}
 
-	const typingIndicator = (
-		<TypingIndicator
-			chatUuid={chat.uuid}
-			currentUserId={currentUserId}
-			blocked={blocked}
-		/>
-	)
-
 	function renderList(): ReactNode {
 		if (isPending) {
 			return <LoadingState size="lg" />
@@ -779,7 +739,6 @@ function ThreadList({
 						icon={MessagesSquareIcon}
 						title={t("chatThreadEmpty")}
 					/>
-					{typingIndicator}
 				</>
 			)
 		}
@@ -848,13 +807,8 @@ function ThreadList({
 							)
 						})}
 				</div>
-				{/* Below the rows and last in the DOM: -order-1 puts it at the bottom of the column-reverse box. */}
-				<div
-					ref={typingSlotRef}
-					className="-order-1 shrink-0 pb-3"
-				>
-					{typingIndicator}
-				</div>
+				{/* Space under the newest row, last in the DOM: -order-1 puts it at the bottom of the column-reverse box. */}
+				<div className="-order-1 shrink-0 pb-3" />
 			</div>
 		)
 	}
@@ -875,7 +829,7 @@ function ThreadList({
 			{/* Arrival announcements. The stable role="log" container with a KEYED inner span is what makes a
 			repeat arrival from the same sender re-announce: the child is removed and re-inserted, which is
 			the additions semantics role="log" defines — a bare changing text node with an identical string
-			would be skipped. The TypingIndicator inside the scroller is also aria-live="polite"; two polite
+			would be skipped. The TypingIndicator above the composer is also aria-live="polite"; two polite
 			regions interleave in the AT queue by design, neither preempts. */}
 			<div
 				role="log"
@@ -897,8 +851,8 @@ function ThreadList({
 	)
 }
 
-// Conversation thread (message runs): header, the bottom-anchored message list with its typing line
-// (ThreadList) and composer. Scrolling to the top loads one older page via loadOlderChatMessages. The
+// Conversation thread (message runs): header, the bottom-anchored message list (ThreadList), the typing line and the
+// composer. Scrolling to the top loads one older page via loadOlderChatMessages. The
 // composer routes every send through the outbox; an own send jumps the view back to the bottom. The
 // header's ⋯ trigger hosts the conversation menu (rename/mute/participants/leave/delete + the explicit
 // "mark as read" entry) — one of two places markChatRead is wired (chatMenu.tsx's row context menu is the
@@ -1041,6 +995,11 @@ export function MessageThread({ chat }: { chat: Chat }) {
 					blocked={blocked}
 				/>
 			</MessageBlockRequestContext>
+			<TypingIndicator
+				chatUuid={chatUuid}
+				currentUserId={currentUserId}
+				blocked={blocked}
+			/>
 			<Composer
 				chat={chat}
 				messages={messages}
