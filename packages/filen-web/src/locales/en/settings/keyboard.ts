@@ -257,10 +257,10 @@ export const settingsKeyboard = {
 	keyboardActionPreviousSection: "Previous settings section",
 	/** Keyboard shortcut — opens the settings section below the open one in the sidebar */
 	keyboardActionNextSection: "Next settings section",
-	/** Keyboard shortcut — focuses the search box of the Events page or of the keyboard shortcuts list */
+	/** Keyboard shortcut — focuses the Settings search box, or the search box of the Events page or of the keyboard shortcuts list */
 	keyboardActionSearch: "Search",
-	/** Shortcuts list — where the shortcut works: on the Events page and in the keyboard shortcuts list */
-	keyboardHintSettingsSearch: "In Events and in the keyboard shortcuts",
+	/** Shortcuts list — where the shortcut works: anywhere in Settings; on the Events page and in the keyboard shortcuts list it focuses their own search */
+	keyboardHintSettingsSearch: "Searches the settings; Events and the keyboard shortcuts search their own list",
 	/** Keyboard shortcut — shows the next newer event in the event details dialog */
 	keyboardActionPreviousEvent: "Previous event",
 	/** Keyboard shortcut — shows the next older event in the event details dialog */

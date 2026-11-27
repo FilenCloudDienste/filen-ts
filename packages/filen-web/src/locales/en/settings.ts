@@ -34,6 +34,14 @@ export const settings = {
 	settingsSectionAdvanced: "Advanced",
 	/** Settings sidebar — Desktop section nav label and that section's page heading (desktop app only) */
 	settingsSectionDesktop: "Desktop",
+
+	// ── Sidebar search ───────────────────────────────────────────────────
+	/** Settings sidebar — placeholder and accessible name of the search box above the section list */
+	settingsSearchPlaceholder: "Search settings",
+	/** Settings sidebar — accessible name of the list of settings matching the search */
+	settingsSearchResultsLabel: "Matching settings",
+	/** Settings sidebar — shown in place of the results when no setting matches the search */
+	settingsSearchNoResults: "No matching settings",
 	/** Account, Billing and Security pages — error-state title when the account query (getUserInfo) fails to load; paired with common:tryAgain */
 	settingsAccountLoadError: "Couldn't load your account",
 

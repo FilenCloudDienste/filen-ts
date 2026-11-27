@@ -5,6 +5,7 @@ import { EVENT_CATEGORIES } from "@/features/settings/lib/eventModel"
 import type { EventsCategoryFilter, EventsFilter } from "@/features/settings/components/events/eventsList.logic"
 import type { EventsKey } from "@/lib/i18n"
 import { ListFilterInput } from "@/components/listFilterInput"
+import { usePageSearchClaim } from "@/features/settings/lib/settingsSearch"
 import { Button } from "@/components/ui/button"
 
 const CATEGORY_LABEL = {
@@ -22,6 +23,8 @@ const CATEGORY_FILTERS = ["all", ...EVENT_CATEGORIES] as const satisfies readonl
 export function EventsFilters({ filter, onChange }: { filter: EventsFilter; onChange: (filter: EventsFilter) => void }) {
 	const { t } = useTranslation("events")
 	const rootRef = useRef<HTMLDivElement>(null)
+
+	usePageSearchClaim(true)
 
 	// Def in features/settings/lib/keymap.ts: Mod+F searches the events, in place of the browser's find; the page
 	// under a dialog or menu stands down.

@@ -7,12 +7,10 @@ import {
 	rankAppHelp,
 	type AppHelpEntry,
 	type AppHelpId,
-	type AppHelpSection,
 	type AppHelpWords
 } from "@filen/shared/assistant"
 import { i18n } from "@/lib/i18n"
-import type { AppKey } from "@/lib/i18n/appKey"
-import { isDesktopApp } from "@/lib/desktop"
+import { APP_HELP_SECTION_LABELS, appHelpEntryWords, appHelpLanguages, appHelpSearchText, appHelpShownHere } from "@/lib/appHelp"
 import { LOG_RING_MAX } from "@/lib/log"
 import { accountQueryGet } from "@/queries/account"
 import { parseCombo } from "@filen/shared/keymap"
@@ -29,20 +27,6 @@ import { screenOfPath, type AssistantRouteName } from "@/features/assistant/tool
 // Settings pages show and the name of each keyboard shortcut, searched in the app's language and in English. Built on
 // the first call, freed with the conversation; no request. A shortcut's keys are read at the call, so a key the user
 // changed since shows as changed.
-
-// The Settings sidebar's label of each section.
-const SECTION_LABELS: Readonly<Record<AppHelpSection, AppKey>> = {
-	account: "settings:settingsSectionAccount",
-	security: "settings:settingsSectionSecurity",
-	appearance: "settings:settingsSectionAppearance",
-	keyboard: "settings:settingsSectionKeyboard",
-	office: "settings:settingsSectionOffice",
-	audio: "settings:settingsSectionAudio",
-	assistant: "settings:settingsSectionAssistant",
-	advanced: "settings:settingsSectionAdvanced",
-	billing: "settings:settingsSectionBilling",
-	desktop: "settings:settingsSectionDesktop"
-}
 
 type HelpValues = Record<string, string | number>
 
@@ -71,39 +55,26 @@ interface IndexedRow {
 
 let index: { language: string; rows: IndexedRow[] } | null = null
 
-// The rows of this app: the desktop section and desktop-only rows in the desktop app, web-only rows on the web.
-function shownHere(entry: AppHelpEntry): boolean {
-	return entry.platform === undefined || entry.platform === (isDesktopApp() ? "desktop" : "web")
-}
-
-// The registry types its keys as plain "namespace:key" strings, which i18n.t takes with a defaultValue; the registry
-// drift test (appHelpRegistry.test.ts) pins that every one exists.
-
-// For searching only, in `language` (the app's when undefined): a figure's placeholder is no word of it.
-function searchText(key: string, language?: string): string {
-	return i18n.t(key, { defaultValue: "", count: 2, ...(language === undefined ? {} : { lng: language }) }).replace(/\{\{[^}]*\}\}/g, " ")
-}
-
 function helpIndex(): IndexedRow[] {
 	const language = i18n.language
 
 	if (index?.language !== language) {
-		const languages = language === "en" ? [undefined] : [undefined, "en"]
+		const languages = appHelpLanguages(language)
 
 		index = {
 			language,
 			rows: [
-				...APP_HELP.filter(shownHere).map(entry => ({
+				...APP_HELP.filter(appHelpShownHere).map(entry => ({
 					target: { kind: "setting" as const, entry },
-					words: languages.map(lng => appHelpWords(searchText(entry.titleKey, lng), searchText(entry.descriptionKey, lng)))
+					words: appHelpEntryWords(entry, languages)
 				})),
 				// Every shortcut this platform has, by its name, where it works and its hint.
 				...ALL_ACTIONS.filter(action => availableOn(action, CURRENT_PLATFORM)).map(action => ({
 					target: { kind: "shortcut" as const, action },
 					words: languages.map(lng =>
 						appHelpWords(
-							searchText(action.descriptionKey, lng),
-							`${searchText(SHORTCUT_SCOPE_LABEL_KEYS[action.scope], lng)} ${action.hintKey === undefined ? "" : searchText(action.hintKey, lng)}`
+							appHelpSearchText(action.descriptionKey, lng),
+							`${appHelpSearchText(SHORTCUT_SCOPE_LABEL_KEYS[action.scope], lng)} ${action.hintKey === undefined ? "" : appHelpSearchText(action.hintKey, lng)}`
 						)
 					)
 				}))
@@ -200,7 +171,7 @@ export const appHelpTool: ToolAdapter = (input, scope) => {
 					handle: scope.show({ kind: "help", id: entry.id, title }, title),
 					title,
 					...(text === null ? {} : { description: text }),
-					where: `${settings} → ${i18n.t(SECTION_LABELS[entry.section])}`,
+					where: `${settings} → ${i18n.t(APP_HELP_SECTION_LABELS[entry.section])}`,
 					route: entry.route
 				}
 			})
@@ -210,5 +181,5 @@ export const appHelpTool: ToolAdapter = (input, scope) => {
 
 // The registry row an app_help handle names, while this app shows it.
 export function shownHelpEntry(id: string): AppHelpEntry | undefined {
-	return APP_HELP.find(entry => entry.id === id && shownHere(entry))
+	return APP_HELP.find(entry => entry.id === id && appHelpShownHere(entry))
 }

@@ -32,6 +32,7 @@ import { ShortcutsRows, type VirtualRow } from "@/lib/keymap/shortcutsRows"
 import { SpecialKeyDialog } from "@/lib/keymap/specialKeyDialog"
 import { useAction } from "@/lib/keymap/useAction"
 import { ignoredOutsideLayer, LAYER_FIELD_TAGS } from "@/features/settings/lib/layerKeys"
+import { usePageSearchClaim } from "@/features/settings/lib/settingsSearch"
 
 const IS_MAC = isMacPlatform()
 
@@ -76,6 +77,9 @@ export function ShortcutsList({ variant, initialText }: { variant: "page" | "dia
 	const searchRef = useRef<HTMLInputElement>(null)
 	const rootRef = useRef<HTMLDivElement>(null)
 	const compact = variant === "dialog"
+
+	// On the Keyboard page, Mod+F searches this list rather than the sidebar.
+	usePageSearchClaim(variant === "page")
 
 	// Def in features/settings/lib/keymap.ts: the list's own search, in whichever layer it is shown (the page, or the
 	// `?` dialog over it), and from the search box itself, where Mod+F would otherwise open the browser's find.

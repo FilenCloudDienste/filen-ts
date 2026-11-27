@@ -485,7 +485,7 @@ function wordMatches(words: readonly string[], token: string): boolean {
 	return words.some(word => word.startsWith(stem))
 }
 
-// The rows that hold the most of the query's words, best first, at most APP_HELP_RESULTS; ties keep the registry's
+// The rows that hold the most of the query's words, best first, at most `limit`; ties keep the registry's
 // order. A word in the title counts double, and a row scores its best language (the app's or English). A word of one
 // or two Latin letters or digits matches too much to count. Among rows that score alike, the `preferred` ones (a
 // shortcut of the screen the user is on, where several screens name one alike: Rename) come first.
@@ -493,7 +493,8 @@ export function rankAppHelp<T>(
 	rows: readonly T[],
 	query: string,
 	words: (row: T) => readonly AppHelpWords[],
-	preferred: (row: T) => boolean = () => false
+	preferred: (row: T) => boolean = () => false,
+	limit: number = APP_HELP_RESULTS
 ): T[] {
 	const tokens = [...new Set(searchTokens(query))].filter(token => UNSPACED_WORD.test(token) || token.length > 2)
 
@@ -517,6 +518,6 @@ export function rankAppHelp<T>(
 		}))
 		.filter(scored => scored.score > 0)
 		.sort((a, b) => b.score - a.score || Number(b.preferred) - Number(a.preferred) || a.index - b.index)
-		.slice(0, APP_HELP_RESULTS)
+		.slice(0, limit)
 		.map(scored => scored.row)
 }

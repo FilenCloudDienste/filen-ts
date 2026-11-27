@@ -1,3 +1,4 @@
+import type { KeyboardEvent, Ref } from "react"
 import { useTranslation } from "react-i18next"
 import { cn } from "@filen/shared"
 import { SearchIcon, XIcon } from "lucide-react"
@@ -10,6 +11,11 @@ export interface ListFilterInputProps {
 	placeholder: string
 	ariaLabel: string
 	wrapperClassName?: string
+	inputRef?: Ref<HTMLInputElement>
+	// Runs before the box's own Escape handling; a handler that prevents the default takes the key.
+	onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void
+	// For a box that drives a listbox through aria-activedescendant (the combobox pattern).
+	combobox?: { listboxId: string; expanded: boolean; activeDescendant: string | undefined }
 }
 
 // Shared filter box for surfaces that have no reason to hijack a global keyboard shortcut the way
@@ -17,7 +23,16 @@ export interface ListFilterInputProps {
 // sidebar): the destination/contact/participant pickers and the notes/chats sidebars. Icon-left,
 // clear-button-right Input, no keymap registration. Escape clears a non-empty value and stops there, so
 // it never also reaches a document-level Escape action.
-export function ListFilterInput({ value, onChange, placeholder, ariaLabel, wrapperClassName }: ListFilterInputProps) {
+export function ListFilterInput({
+	value,
+	onChange,
+	placeholder,
+	ariaLabel,
+	wrapperClassName,
+	inputRef,
+	onKeyDown,
+	combobox
+}: ListFilterInputProps) {
 	const { t } = useTranslation("common")
 
 	return (
@@ -27,14 +42,26 @@ export function ListFilterInput({ value, onChange, placeholder, ariaLabel, wrapp
 				className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
 			/>
 			<Input
+				ref={inputRef}
 				type="search"
 				aria-label={ariaLabel}
+				role={combobox === undefined ? undefined : "combobox"}
+				aria-autocomplete={combobox === undefined ? undefined : "list"}
+				aria-expanded={combobox?.expanded}
+				aria-controls={combobox?.expanded === true ? combobox.listboxId : undefined}
+				aria-activedescendant={combobox?.activeDescendant}
 				placeholder={placeholder}
 				value={value}
 				onChange={event => {
 					onChange(event.target.value)
 				}}
 				onKeyDown={event => {
+					onKeyDown?.(event)
+
+					if (event.defaultPrevented) {
+						return
+					}
+
 					if (event.key === "Escape" && value.length > 0) {
 						event.preventDefault()
 						event.stopPropagation()

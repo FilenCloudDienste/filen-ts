@@ -66,6 +66,7 @@ describe("app_help registry", () => {
 		const rows = Array.from({ length: 8 }, (_, index) => ({ id: index, texts: [appHelpWords(`Cache ${String(index)}`, "")] }))
 
 		expect(rankAppHelp(rows, "cache", row => row.texts).map(row => row.id)).toEqual([0, 1, 2, 3, 4].slice(0, APP_HELP_RESULTS))
+		expect(rankAppHelp(rows, "cache", row => row.texts, undefined, 7)).toHaveLength(7)
 	})
 
 	it("matches words of scripts written without spaces inside longer ones", () => {
