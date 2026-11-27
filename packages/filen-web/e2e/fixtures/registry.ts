@@ -7,6 +7,7 @@ import { TEXT_SCENARIOS } from "./text"
 import { W5_SCENARIOS } from "./w5"
 import { RAR_SCENARIOS } from "./rar"
 import { COMIC_SCENARIOS } from "./comics"
+import { SLIDESHOW_SCENARIOS } from "./previewSlideshow"
 import type { FixturePayload, ScenarioFiles, ScenarioModule } from "./scenarios"
 
 // Every scenario module, once. Its scenarios join the shared tree in this order; a workstream adds its module here.
@@ -19,7 +20,8 @@ const SCENARIO_MODULES = [
 	IMAGE_SCENARIOS,
 	W5_SCENARIOS,
 	RAR_SCENARIOS,
-	COMIC_SCENARIOS
+	COMIC_SCENARIOS,
+	SLIDESHOW_SCENARIOS
 ] as const
 
 type FilesOf<M> = M extends ScenarioModule<infer F> ? F : never

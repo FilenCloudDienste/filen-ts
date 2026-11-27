@@ -1,4 +1,4 @@
-import type { Locator, Page } from "@playwright/test"
+import type { Browser, Locator, Page } from "@playwright/test"
 import { expect } from "../fixtures"
 import { openRowMenu } from "./archive"
 import { LIVE_WRITE_TIMEOUT_MS } from "./listing"
@@ -45,4 +45,19 @@ export async function setLinkDownloads(dialog: Locator, on: boolean): Promise<vo
 export async function closeLinkDialog(page: Page, dialog: Locator): Promise<void> {
 	await page.keyboard.press("Escape")
 	await expect(dialog).toHaveCount(0)
+}
+
+// The link opened by a signed-out visitor, in a context of its own. WebKit keeps one OPFS per origin, so specs skip
+// this there.
+export async function openAsVisitor(
+	browser: Browser,
+	baseURL: string | undefined,
+	url: string
+): Promise<{ page: Page; close: () => Promise<void> }> {
+	const context = await browser.newContext(baseURL === undefined ? {} : { baseURL })
+	const page = await context.newPage()
+
+	await page.goto(url)
+
+	return { page, close: () => context.close() }
 }

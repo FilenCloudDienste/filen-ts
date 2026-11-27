@@ -1,22 +1,12 @@
-import type { Browser } from "@playwright/test"
 import { test, expect, settleLeases } from "./fixtures"
 import { buildZip } from "./helpers/archiveFixtures"
 import { trackCspViolations } from "./helpers/csp"
 import { bootTo, enterScratchDirectory, trashScratchDirectory, uploadFiles, BOOT_SETTLE_TIMEOUT_MS } from "./helpers/listing"
-import { closeLinkDialog, createLink, openLinkDialog } from "./helpers/publicLinks"
+import { closeLinkDialog, createLink, openAsVisitor, openLinkDialog } from "./helpers/publicLinks"
 import { comicPagePng, COMIC_PAGES } from "./fixtures/comics"
 
 // A comic book on a public file link, read page by page through the public-link client's archive reader (W6 §3.8): by a
 // signed-out visitor, then by the signed-in owner through the session's unauthenticated view. Creating a link is premium, so this runs only against a premium account (E2E_PREMIUM).
-
-async function signedOutPage(browser: Browser, baseURL: string | undefined, url: string) {
-	const context = await browser.newContext(baseURL === undefined ? {} : { baseURL })
-	const page = await context.newPage()
-
-	await page.goto(url)
-
-	return { page, close: () => context.close() }
-}
 
 test.describe("comic books on public links", () => {
 	test.skip(!process.env["E2E_PREMIUM"], "public links need a premium account")
@@ -43,7 +33,7 @@ test.describe("comic books on public links", () => {
 			await closeLinkDialog(page, dialog)
 			await settleLeases(page)
 
-			const visitor = await signedOutPage(browser, baseURL, url)
+			const visitor = await openAsVisitor(browser, baseURL, url)
 
 			try {
 				const pageImage = (number: number) =>
