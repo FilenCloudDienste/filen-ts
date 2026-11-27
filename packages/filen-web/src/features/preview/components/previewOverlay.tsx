@@ -101,7 +101,7 @@ import { useSlideshow } from "@/features/preview/hooks/useSlideshow"
 import { useSlideshowSubfolders, type ShownSlot } from "@/features/preview/hooks/useSlideshowSubfolders"
 import { SlideshowSlot } from "@/features/preview/components/slideshowSlot"
 import { SlideshowBar } from "@/features/preview/components/slideshowBar"
-import { hasTwoSlides } from "@/features/preview/lib/slideshow.logic"
+import { hasTwoSlides, slideKindOf } from "@/features/preview/lib/slideshow.logic"
 import { fetchSlideshowTree, type SlideshowSource } from "@/features/preview/lib/slideshowTree"
 import { reconcilePreviewSources, subscribePreviewReconcile, type PreviewReconcileEvent } from "@/features/preview/lib/previewReconcile"
 import { usePreviewRemoteChanges, type PreviewEdits } from "@/features/preview/hooks/usePreviewRemoteChanges"
@@ -498,8 +498,11 @@ export function PreviewOverlay({
 		cacheScope,
 		access
 	})
-	// Offered over at least two slides of the list; never in the trash, where Delete deletes for good.
-	const slideshowOffered = variant !== "trash" && hasTwoSlides(items)
+	// Offered on a slide over at least two slides of the list (kept while one runs); never in the trash, where Delete
+	// deletes for good.
+	const slideshowOffered =
+		slideshow.running ||
+		(variant !== "trash" && rawDriveItem !== undefined && slideKindOf(rawDriveItem) !== null && hasTwoSlides(items))
 
 	// Swaps the pager's list, kept on the file on screen when the new list has it, else on `fallbackUuid`'s file when it
 	// has that, else on its first item; never away from a slot that cannot be left.

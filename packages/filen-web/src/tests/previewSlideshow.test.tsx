@@ -215,6 +215,15 @@ describe("PreviewOverlay slideshow", () => {
 		expect(startButton()).toBeNull()
 	})
 
+	it("no ▶ and no s on a file that is no slide, though the list has two", async () => {
+		renderOverlay([A, DOC, B], 1)
+
+		await screen.findByRole("button", { name: `viewer ${DOC.data.uuid}` })
+		expect(startButton()).toBeNull()
+		fireEvent.keyDown(popup(), withCode({ key: "s" }))
+		expect(bar()).toBeNull()
+	})
+
 	it("the header hides while running and returns on end", async () => {
 		renderOverlay([A, B], 0)
 

@@ -83,7 +83,9 @@ export function PagedFileHero({
 		canLeave: () => true,
 		cacheScope: previewCacheScope("anon", linkScope),
 		access: "anon"
-	})
+	}) // Offered on a slide over at least two slides of the list, and kept while one runs.
+	const slideshowOffered = slideshow.running || (slideKindOf(entry.item) !== null && pager.twoSlides)
+
 	// When the last slideshow ended: an Escape just after it (one the browser also left full screen with) stays here.
 	const endedAtRef = useRef(Number.NEGATIVE_INFINITY)
 
@@ -106,7 +108,7 @@ export function PagedFileHero({
 	// "Include subdirectories": the subdirectories' list (and their directories) stands in for the level's.
 	const subfolders = useSlideshowSubfolders({
 		slideshow,
-		offered: pager.twoSlides,
+		offered: slideshowOffered,
 		source,
 		list: pager,
 		// Nothing here edits.
@@ -217,7 +219,7 @@ export function PagedFileHero({
 							canNext: index < pager.entries.length - 1,
 							step,
 							slideshow,
-							slideshowOffered: pager.twoSlides,
+							slideshowOffered,
 							startSlideshow: subfolders.start,
 							subfolders: { available: subfolders.available, loading: subfolders.loading },
 							onSubfoldersChange: subfolders.setSubfolders

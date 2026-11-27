@@ -315,6 +315,15 @@ describe("a public directory link's pager", () => {
 		expect(viewer()).toBe("viewer a.jpg")
 	})
 
+	it("offers no slideshow on a file that is no slide", () => {
+		openFile("doc.pdf")
+
+		expect(viewer()).toBe("viewer doc.pdf")
+		expect(screen.queryByRole("button", { name: /^Slideshow/ })).toBeNull()
+		key(document.body, { key: "s" })
+		expect(screen.queryByRole("button", { name: /^End slideshow/ })).toBeNull()
+	})
+
 	it("s starts it and Escape ends it without leaving the file", () => {
 		const now = vi.spyOn(performance, "now").mockReturnValue(1000)
 
