@@ -59,6 +59,7 @@ import { inflightContentSchema, noteKindForPreview } from "@/features/notes/lib/
 import { deriveSessionBaseHash } from "@/features/notes/hooks/useNoteEditor.logic"
 import { holdNoteForRemoteEdit, releaseAllNoteHolds } from "@/features/notes/lib/remoteEditHolds"
 import { isOwnNotePush } from "@/features/notes/lib/pushEchoes"
+import { log } from "@/lib/log"
 import { forgetTabEditors, seedTabEditor, tabEditorBaseHash, tabEditorChanged, tabEditorDirty } from "@/features/notes/lib/tabEditors"
 
 function makeNote(uuid: string, overrides: Partial<Note> = {}): Note {
@@ -1263,6 +1264,51 @@ describe("restoreFromDisk — the reconcile's own reads", () => {
 		await vi.waitFor(() => {
 			expect(setNoteContent).toHaveBeenCalledWith(note, "draft", expect.any(String))
 		})
+		s.cancel()
+	})
+})
+
+// A push the SDK worker never settles holds the pass and its mutex: reported once, never aborted.
+describe("push loop — a push outstanding too long", () => {
+	it("warns once after 30 s and leaves the push running", async () => {
+		vi.useFakeTimers()
+
+		const warn = vi.spyOn(log, "warn")
+		const s = new Sync()
+
+		s.start()
+		await vi.advanceTimersByTimeAsync(0)
+		setNoteContent.mockReturnValue(new Promise<Note>(() => undefined))
+		await s.enqueue(makeNote("a"), "typed")
+		await vi.advanceTimersByTimeAsync(3000)
+
+		expect(setNoteContent).toHaveBeenCalledTimes(1)
+		await vi.advanceTimersByTimeAsync(29_999)
+		expect(warn.mock.calls.filter(call => call[1] === "setNoteContent still outstanding")).toEqual([])
+
+		await vi.advanceTimersByTimeAsync(600_001)
+
+		expect(warn.mock.calls.filter(call => call[1] === "setNoteContent still outstanding")).toEqual([
+			["notes-sync", "setNoteContent still outstanding", "a", "30000ms"]
+		])
+		expect(queued("a")).toBe(true)
+		warn.mockRestore()
+		s.cancel()
+	})
+
+	it("sets no warning timer past a push that settles", async () => {
+		vi.useFakeTimers()
+
+		const s = new Sync()
+
+		s.start()
+		await vi.advanceTimersByTimeAsync(0)
+		setNoteContent.mockResolvedValue(makeNote("a"))
+		await s.enqueue(makeNote("a"), "typed")
+		await vi.advanceTimersByTimeAsync(3000)
+
+		expect(queued("a")).toBe(false)
+		expect(vi.getTimerCount()).toBe(0)
 		s.cancel()
 	})
 })

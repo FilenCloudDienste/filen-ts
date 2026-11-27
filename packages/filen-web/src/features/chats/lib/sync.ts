@@ -9,6 +9,7 @@ import {
 import { onlineManager } from "@tanstack/react-query"
 import type { Chat, ChatMessagePartial } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
+import { warnIfSlow } from "@/lib/sdk/slowCall"
 import { log } from "@/lib/log"
 import { withoutKey } from "@/lib/utils"
 import { asErrorDTO } from "@/lib/sdk/errors"
@@ -569,7 +570,13 @@ export class Sync {
 	private async pushMessage(chat: Chat, message: ChatMessageWithInflightId): Promise<Chat> {
 		const inflightId = message.inflightId
 		// The commit. A throw here propagates to the loop's catch (a genuine send failure).
-		const updatedChat = await sdkApi.sendChatMessage(chat, message.message ?? "", message.replyTo)
+		// A send that never settles holds the pass (and its mutex): reported, never aborted.
+		const updatedChat = await warnIfSlow(
+			sdkApi.sendChatMessage(chat, message.message ?? "", message.replyTo),
+			"chats-sync",
+			"sendChatMessage",
+			inflightId
+		)
 
 		// ── Past the commit boundary: never re-throw below this line. ──
 		// Record the committed id so a late re-forward of it on a takeover is dropped by ingestRemoteEnqueue

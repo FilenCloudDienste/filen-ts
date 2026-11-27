@@ -21,6 +21,7 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 import { queryClient as testQueryClient } from "@/queries/client"
 import { Sync, sync, enqueueChatMessage } from "@/features/chats/lib/sync"
 import { retryInflightMessage, removeInflightMessage } from "@/features/chats/lib/inflight"
+import { log } from "@/lib/log"
 import { chatMessagesQueryGet } from "@/features/chats/queries/chatMessages"
 import { chatsQueryGet, chatsQueryUpdate, chatsQueryUpsert } from "@/features/chats/queries/chats"
 import {
@@ -899,5 +900,35 @@ describe("a chat the pass cannot resolve", () => {
 		await vi.advanceTimersByTimeAsync(30_000)
 		expect(sendChatMessage).toHaveBeenCalledTimes(1)
 		expect(queue()["chat-c-c-c"]).toBeUndefined()
+	})
+})
+
+// A send the SDK worker never settles holds the pass and its mutex: reported once, never aborted.
+describe("a send outstanding too long", () => {
+	afterEach(() => {
+		sync.cancel()
+		vi.useRealTimers()
+	})
+
+	it("warns once after 30 s and leaves the send running", async () => {
+		vi.useFakeTimers()
+
+		const warn = vi.spyOn(log, "warn")
+
+		chatsQueryUpsert(outboxChat("chat-a-a-a"))
+		sendChatMessage.mockReturnValue(new Promise<Chat>(() => undefined))
+		seed("chat-a-a-a", [optimistic("chat-a-a-a", "inf-1-1-1", 1n, "hi")])
+
+		sync.syncNow()
+		await vi.advanceTimersByTimeAsync(29_999)
+		expect(warn.mock.calls.filter(call => call[1] === "sendChatMessage still outstanding")).toEqual([])
+
+		await vi.advanceTimersByTimeAsync(600_001)
+
+		expect(warn.mock.calls.filter(call => call[1] === "sendChatMessage still outstanding")).toEqual([
+			["chats-sync", "sendChatMessage still outstanding", "inf-1-1-1", "30000ms"]
+		])
+		expect(inflightIdsIn("chat-a-a-a")).toEqual(["inf-1-1-1"])
+		warn.mockRestore()
 	})
 })

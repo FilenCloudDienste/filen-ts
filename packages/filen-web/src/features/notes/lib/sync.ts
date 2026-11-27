@@ -14,6 +14,7 @@ import {
 import { onlineManager } from "@tanstack/react-query"
 import type { Note } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
+import { warnIfSlow } from "@/lib/sdk/slowCall"
 import { cancelCached } from "@/queries/patch"
 import { i18n } from "@/lib/i18n"
 import { forgetNotePushes, rememberNotePush } from "@/features/notes/lib/pushEchoes"
@@ -1104,7 +1105,13 @@ export class Sync {
 						: await run(async () => {
 								const preview = notePreviewFor(liveNote.noteType, mostRecentContent.content)
 
-								return sdkApi.setNoteContent(liveNote, mostRecentContent.content, preview)
+								// A push that never settles holds the pass (and its mutex): reported, never aborted.
+								return warnIfSlow(
+									sdkApi.setNoteContent(liveNote, mostRecentContent.content, preview),
+									"notes-sync",
+									"setNoteContent",
+									noteUuid
+								)
 							})
 
 					if (!push.success) {
