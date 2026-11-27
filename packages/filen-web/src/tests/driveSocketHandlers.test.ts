@@ -1451,7 +1451,9 @@ describe("drive socket handlers — open-preview reconcile signals", () => {
 		}
 	})
 
-	it("an attribute-only change (itemFavorite) emits no preview signal", () => {
-		expect(captureReconcile({ type: "itemFavorite", item: { type: "file", ...mockFile({ favorited: true }) } })).toEqual([])
+	it("itemFavorite emits the new flag, for an open preview's star", () => {
+		expect(captureReconcile({ type: "itemFavorite", item: { type: "file", ...mockFile({ favorited: true }) } })).toEqual([
+			{ type: "favorited", uuid: testUuid("file"), favorited: true }
+		])
 	})
 })

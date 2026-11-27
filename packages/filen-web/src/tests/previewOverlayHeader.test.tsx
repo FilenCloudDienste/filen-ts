@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { createElement } from "react"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
+import type { File } from "@filen/sdk-rs"
 import type { DriveItem } from "@/features/drive/lib/item"
 
 // The header's favorite star (shown where the menu offers Favorite, toggling in place and following a toggle made
@@ -41,9 +42,9 @@ import { emitPreviewFavoriteChanged } from "@/features/preview/lib/previewReconc
 
 registerAllActions()
 
-const UUID = "11111111-1111-1111-1111-111111111111"
+const UUID: File["uuid"] = "11111111-1111-1111-1111-111111111111"
 
-function deck(uuid = UUID): DriveItem {
+function deck(uuid: File["uuid"] = UUID): DriveItem {
 	return narrowItem({
 		uuid,
 		stableUUID: undefined,
