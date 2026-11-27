@@ -7,8 +7,8 @@ import { log } from "@/lib/log"
 // ── Exif / TIFF ──────────────────────────────────────────────────────────────
 
 const TAG_ORIENTATION = 0x0112
-const TAG_EXIF_IFD = 0x8769
-const TAG_GPS_IFD = 0x8825
+export const TAG_EXIF_IFD = 0x8769
+export const TAG_GPS_IFD = 0x8825
 const TAG_INTEROP_IFD = 0xa005
 const TAG_PIXEL_X = 0xa002
 const TAG_PIXEL_Y = 0xa003
@@ -20,13 +20,18 @@ const TYPE_LONG = 4
 // Bytes per value of each TIFF field type (TIFF 6.0 §2, Exif adds 9 SLONG, 10 SRATIONAL); unknown types count as 1.
 const TYPE_SIZES = [0, 1, 1, 2, 4, 8, 1, 1, 2, 4, 8, 4, 8]
 
-interface Tiff {
+export interface Tiff {
 	view: DataView
 	le: boolean
 }
 
-// A TIFF header ("II*\0" little endian, "MM\0*" big endian) at the start of `view`, or null.
-function openTiff(view: DataView): Tiff | null {
+// The magics of TIFF-structured camera RAW files that are not 42: Olympus ORF ("IIRO", "IIRS") and Panasonic RW2
+// ("IIU\0"). Their IFDs are plain TIFF.
+const RAW_TIFF_MAGICS: ReadonlySet<number> = new Set([0x4f52, 0x5352, 0x55])
+
+// A TIFF header ("II*\0" little endian, "MM\0*" big endian) at the start of `view`, or null. `raw` also accepts the
+// RAW variants' magics (RAW_TIFF_MAGICS), for reading their metadata, never for writing.
+export function openTiff(view: DataView, raw = false): Tiff | null {
 	if (view.byteLength < 8) {
 		return null
 	}
@@ -34,11 +39,13 @@ function openTiff(view: DataView): Tiff | null {
 	const order = view.getUint16(0)
 	const le = order === 0x4949
 
-	if ((!le && order !== 0x4d4d) || view.getUint16(2, le) !== 42) {
+	if (!le && order !== 0x4d4d) {
 		return null
 	}
 
-	return { view, le }
+	const magic = view.getUint16(2, le)
+
+	return magic === 42 || (raw && RAW_TIFF_MAGICS.has(magic)) ? { view, le } : null
 }
 
 function viewOf(bytes: Uint8Array, start = 0, end = bytes.length): DataView {
@@ -57,7 +64,7 @@ function ifdCount(t: Tiff, offset: number): number {
 }
 
 // The offset of `tag`'s 12-byte entry in the IFD at `ifd`, or -1.
-function findEntry(t: Tiff, ifd: number, tag: number): number {
+export function findEntry(t: Tiff, ifd: number, tag: number): number {
 	const count = ifdCount(t, ifd)
 
 	for (let i = 0; i < count; i++) {
@@ -87,7 +94,7 @@ function entryValueBytes(t: Tiff, entry: number): number {
 }
 
 // A single SHORT or LONG value (for pointers and dimensions), or -1.
-function entryNumber(t: Tiff, entry: number): number {
+export function entryNumber(t: Tiff, entry: number): number {
 	const type = t.view.getUint16(entry + 2, t.le)
 
 	if (t.view.getUint32(entry + 4, t.le) !== 1) {
