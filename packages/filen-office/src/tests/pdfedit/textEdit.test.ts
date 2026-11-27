@@ -8,8 +8,10 @@ import {
 	narrowTarget,
 	newTextFrame,
 	prepareTextEdit,
+	previewTextEdit,
 	type TextEditTarget
 } from "../../dom/pdfedit/textEdit"
+import { allChars, readStext } from "../../dom/pdfedit/textEdit/stext"
 import { matchPdfFont } from "../../core/pdfedit/fontMatch"
 import { isTagged } from "../../dom/pdfedit/formState"
 import { nodeFontAssets } from "../sheetPdfFixtures"
@@ -261,6 +263,47 @@ describe("replacing text", () => {
 
 		expect(result).toEqual({ status: "unsafe" })
 		expect(pageString(document, 0)).toBe(original)
+		expect(document.canUndo()).toBe(false)
+		document.destroy()
+	})
+
+	it("previews the removal in an abandoned operation, the file and journal unchanged", () => {
+		const document = makeDocument({ pages: [{ content: LATIN_CONTENT }] })
+		const edit = target(document, [100, LINE_Y - 4])
+
+		document.enableJournal()
+
+		const saved = save(document)
+		const position = document.getJournal().position
+
+		document.beginOperation("preview")
+
+		const seen = previewTextEdit(mupdf, document, 0, edit, page =>
+			allChars(readStext(page))
+				.map(char => char.c)
+				.join("")
+		)
+
+		document.abandonOperation()
+
+		expect(seen).toBe(SECOND)
+		expect(pageString(document, 0)).toContain(LINE)
+		expect(document.getJournal().position).toBe(position)
+		expect(document.canUndo()).toBe(false)
+		expect(save(document)).toEqual(saved)
+		document.destroy()
+	})
+
+	it("previews nothing for an unsafe removal", () => {
+		const document = makeDocument({ pages: [{ content: "BT /F1 12 Tf 72 722 Td [(A) 580 (B) ( tail)] TJ ET" }] })
+		const edit = narrowTarget(target(document, [80, LINE_Y - 4]), 0, 1)
+
+		if (edit === null) throw new Error("No A")
+
+		document.enableJournal()
+		document.beginOperation("preview")
+		expect(previewTextEdit(mupdf, document, 0, edit, () => "drawn")).toBeNull()
+		document.abandonOperation()
 		expect(document.canUndo()).toBe(false)
 		document.destroy()
 	})

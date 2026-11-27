@@ -297,6 +297,11 @@ export class TileRenderer {
 		return this.draw(list, bounds, scale, rotation, tile)
 	}
 
+	// A tile of a page the caller loaded (and changed, unrendered elsewhere), unrotated; no list is read or kept.
+	renderLoaded(page: Mupdf.Page, scale: number, tile: PdfTile): RenderedTile {
+		return this.draw(page, page.getBounds(), scale, 0, tile)
+	}
+
 	private draw(
 		source: { run(device: Mupdf.Device, matrix: Mupdf.Matrix): void },
 		bounds: Mupdf.Rect,

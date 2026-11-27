@@ -192,6 +192,20 @@ export class PdfEditSession {
 		this.revision++
 	}
 
+	// Runs `change` in an operation abandoned after it: the document, its history and the revision stay as they were.
+	// Null, with nothing run, while an operation is open (a gesture's) or a save holds the document.
+	preview<T>(document: Mupdf.PDFDocument, change: () => T): T | null {
+		if (this.open !== null || this.output !== null) return null
+
+		document.beginOperation("preview")
+
+		try {
+			return change()
+		} finally {
+			document.abandonOperation()
+		}
+	}
+
 	// Ends the operation still open. One that changed nothing is no step.
 	endOpen(document: Mupdf.PDFDocument): void {
 		const open = this.open

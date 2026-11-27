@@ -2,9 +2,9 @@ import { useEffect, useEffectEvent, useId, type CSSProperties, type KeyboardEven
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { matchPdfFont } from "@filen/office/core/pdfedit/fontMatch"
-import { PdfEngineError, TEXT_EDIT_UNSAFE } from "@filen/office/dom/pdfedit"
+import { PdfEngineError, TEXT_EDIT_UNSAFE, type PdfTile } from "@filen/office/dom/pdfedit"
 import { narrowTarget, newTextFrame, type TextEditTarget } from "@filen/office/dom/pdfedit/textEdit/target"
-import { placementPosition, useKeyboardPlacement } from "@filen/office/react/pdfedit"
+import { placementPosition, useKeyboardPlacement, type PdfEditSessionModel } from "@filen/office/react/pdfedit"
 import { PdfTextEditor } from "@/features/pdf/textEdit/pdfTextEditor"
 import { PdfTextEditNotice, type PdfTextEditNoticeKind } from "@/features/pdf/textEdit/pdfTextEditNotice"
 import {
@@ -22,7 +22,8 @@ import { log } from "@/lib/log"
 
 // Tools › Edit text and Add text. A click on a page (or Enter on the focused page, a marker moved with the arrows, then
 // Enter) asks the editor what text is there (a block, laid out in lines);
-// the in-place editor opens over it, prefilled, with the font it will be set in. Done replaces only the words that
+// the in-place editor opens over it, prefilled, with the font it will be set in, over the page drawn without that text
+// (text Done would refuse to replace is refused before the editor opens). Done replaces only the words that
 // changed (their glyphs removed, the new words laid out in the matched font and grafted over the page) as one undo
 // step; a change that would also remove nearby text is refused whole and said so. Add text places an empty editor
 // where the page is clicked. Text drawn as shapes, in a Type 3 font, vertical or curved can't be edited (a notice).
@@ -44,7 +45,20 @@ interface OpenEditor {
 	readonly pageWidth: number
 	readonly pageHeight: number
 	readonly busy: boolean
+	// The page under the target without its text, drawn under the editor; null: none (new text, or not drawn).
+	readonly patch: TextPatch | null
 }
+
+interface TextPatch {
+	readonly bitmap: ImageBitmap
+	// Device px of the page at `scale` it shows; `asked`: the scale it was asked for (the view's then).
+	readonly tile: PdfTile
+	readonly scale: number
+	readonly asked: number
+}
+
+// Quiet time after the last zoom step before the patch is drawn again at the new scale.
+const PATCH_SETTLE_MS = 200
 
 const editorState = pdfToolState<OpenEditor | null>(null)
 // The tagged notice is said once while the tool is chosen.
@@ -68,6 +82,89 @@ function notifyTextNotice(context: PdfToolContext, kind: PdfTextEditNoticeKind):
 
 function isUnsafe(error: unknown): boolean {
 	return error instanceof PdfEngineError && error.failure === "notAllowed" && error.message === TEXT_EDIT_UNSAFE
+}
+
+// Device px per point the page is drawn at: the view's CSS scale on this screen.
+function patchScale(scale: number): number {
+	return scale * (window.devicePixelRatio > 0 ? window.devicePixelRatio : 1)
+}
+
+// The page under `target` without its text, as Done leaves it (the engine draws it and keeps nothing): "unsafe" when
+// Done would be refused, null when it was not drawn (a gesture or a save holds the document).
+async function previewPatch(
+	session: PdfEditSessionModel,
+	page: number,
+	target: TextEditTarget,
+	asked: number
+): Promise<TextPatch | "unsafe" | null> {
+	const preview = await session.engine.call("textPreview", { page, chars: target.chars, rect: target.bounds, scale: asked })
+
+	if (preview.status === "unsafe") return "unsafe"
+	if (preview.status === "busy") return null
+
+	const { bitmap } = preview
+
+	if (!(bitmap instanceof ImageBitmap)) {
+		bitmap.close()
+
+		return null
+	}
+
+	return { bitmap, tile: preview.tile, scale: preview.scale, asked }
+}
+
+// The patch drawn again at the view's settled scale; kept as it is (CSS-scaled) when that fails or the editor moved on.
+async function refreshPatch(context: PdfToolContext, editor: OpenEditor, target: TextEditTarget, asked: number): Promise<void> {
+	const patch = await withPdfSession(context, session => previewPatch(session, editor.page, target, asked)).catch((error: unknown) => {
+		log.warn("pdf", "text edit preview failed", { error })
+
+		return null
+	})
+
+	if (patch === null || patch === "unsafe") return
+
+	const current = editorState.get()
+
+	if (current?.target !== target || current.busy) {
+		patch.bitmap.close()
+
+		return
+	}
+
+	editorState.set({ ...current, patch })
+}
+
+// The patch, drawn by a `bitmaprenderer` canvas that takes the bitmap over; sized in display space × `scale`, so a zoom
+// stretches it until it is drawn again.
+function TextPatchCanvas({ patch, scale }: { patch: TextPatch; scale: number }) {
+	const { bitmap, tile } = patch
+	const width = tile[2] - tile[0]
+	const height = tile[3] - tile[1]
+	const ratio = scale / patch.scale
+
+	useEffect(
+		() => () => {
+			bitmap.close()
+		},
+		[bitmap]
+	)
+
+	return (
+		<canvas
+			aria-hidden="true"
+			data-slot="pdf-text-patch"
+			className="pointer-events-none absolute"
+			width={width}
+			height={height}
+			style={{ left: tile[0] * ratio, top: tile[1] * ratio, width: width * ratio, height: height * ratio }}
+			ref={canvas => {
+				// Drawn already (a ref attached again): the bitmap is the canvas's and reads 0×0.
+				if (canvas === null || bitmap.width === 0) return
+
+				canvas.getContext("bitmaprenderer")?.transferFromImageBitmap(bitmap)
+			}}
+		/>
+	)
 }
 
 // What Done replaces: the changed words of the target (or all of it when the change crosses lines), with what.
@@ -163,6 +260,22 @@ function TextOverlay({ context, page, viewport, editing, mode }: PdfToolOverlayP
 	const editor = usePdfToolState(editorState)
 	const mine = editor?.page === page ? editor : null
 	const hintId = useId()
+	const asked = patchScale(viewport.scale)
+
+	// A zoom stretches the patch; once the scale settles it is drawn again at it.
+	useEffect(() => {
+		const target = mine?.target ?? null
+
+		if (mine === null || target === null || mine.patch === null || mine.busy || mine.patch.asked === asked) return
+
+		const timer = window.setTimeout(() => {
+			void refreshPatch(context, mine, target, asked)
+		}, PATCH_SETTLE_MS)
+
+		return () => {
+			window.clearTimeout(timer)
+		}
+	}, [context, mine, asked])
 
 	const [x0 = 0, y0 = 0, x1 = 0, y1 = 0] = viewport.viewBox
 	const pageWidth = x1 - x0
@@ -185,19 +298,37 @@ function TextOverlay({ context, page, viewport, editing, mode }: PdfToolOverlayP
 			target: null,
 			pageWidth,
 			pageHeight,
-			busy: false
+			busy: false,
+			patch: null
 		})
 	}
 
-	// The editor over the text at `point` (display space), or the notice saying why there is none.
+	// The editor over the text at `point` (display space) with the page drawn without that text under it, or the notice
+	// saying why there is none (text Done would refuse to replace is refused here).
 	const editAt = (point: readonly [number, number]): void => {
-		void withPdfSession(context, session => session.engine.call("textHit", { page, point: [point[0], point[1]] })).then(
-			hit => {
+		const asked = patchScale(viewport.scale)
+
+		void withPdfSession(context, async session => {
+			const hit = await session.engine.call("textHit", { page, point: [point[0], point[1]] })
+
+			if (hit.kind !== "target") return { hit, patch: null }
+
+			// Without a patch the editor still opens, over the page as it is.
+			const patch = await previewPatch(session, page, hit.target, asked).catch((error: unknown) => {
+				log.warn("pdf", "text edit preview failed", { error })
+
+				return null
+			})
+
+			return { hit, patch }
+		}).then(
+			({ hit, patch }) => {
 				if (hit.kind === "refused") notifyTextNotice(context, "cantEdit")
 				else if (hit.kind === "none") notifyTextNotice(context, "noText")
+				else if (patch === "unsafe") notifyTextNotice(context, "unsafe")
 				else {
 					context.notify(null)
-					editorState.set({ page, source: hit.target, target: hit.target, pageWidth, pageHeight, busy: false })
+					editorState.set({ page, source: hit.target, target: hit.target, pageWidth, pageHeight, busy: false, patch })
 				}
 			},
 			(error: unknown) => {
@@ -294,11 +425,19 @@ function TextOverlay({ context, page, viewport, editing, mode }: PdfToolOverlayP
 						event.stopPropagation()
 					}}
 				>
+					{mine.patch === null ? null : (
+						<TextPatchCanvas
+							patch={mine.patch}
+							scale={viewport.scale}
+						/>
+					)}
 					<PdfTextEditor
 						key={`${String(mine.source.frame.origin[0])}:${String(mine.source.frame.origin[1])}`}
 						source={mine.source}
 						scale={viewport.scale}
 						busy={mine.busy}
+						// Over its patch, or over blank page for new text, the editor shows the page through.
+						clear={mine.patch !== null || mine.target === null}
 						onDone={text => {
 							if (text === mine.source.text) editorState.set(null)
 							else void apply(context, mine, text, { failed: t("previewPdfChangeFailed"), tagged: t("previewPdfTagged") })

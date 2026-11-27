@@ -170,6 +170,95 @@ describe("editing text in the engine", () => {
 	)
 
 	it(
+		"previews a block without its text, leaving the document and its history as they were",
+		async () => {
+			const bytes = save(makeDocument({ pages: [{ content: LATIN_CONTENT }] }))
+			const engine = startEngine(bytes)
+
+			await engine.open()
+
+			const hit = await engine.client.call("textHit", { page: 0, point: LINE_POINT, unit: "line" })
+
+			if (hit.kind !== "target") throw new Error("no text under the point")
+
+			const before = await engine.client.call("state", {})
+			const text = (await engine.client.call("text", { page: 0 })).lines.map(line => line.str).join("\n")
+			const preview = await engine.client.call("textPreview", { page: 0, chars: hit.target.chars, rect: hit.target.bounds, scale: 2 })
+
+			if (preview.status !== "clean") throw new Error(`no preview: ${preview.status}`)
+
+			const [x0, y0] = hit.target.bounds
+
+			expect(preview.scale).toBe(2)
+			expect(preview.tile[0]).toBe(Math.floor((x0 - 2) * 2))
+			expect(preview.tile[1]).toBe(Math.floor((y0 - 2) * 2))
+
+			// Only the page's white is left where the line was.
+			const { rgba } = preview.bitmap as unknown as { readonly rgba: Uint8ClampedArray }
+
+			expect(rgba.length).toBe(preview.bitmap.width * preview.bitmap.height * 4)
+			expect(Math.min(...rgba)).toBe(255)
+
+			expect(await engine.client.call("state", {})).toEqual(before)
+			expect((await engine.client.call("text", { page: 0 })).lines.map(line => line.str).join("\n")).toBe(text)
+
+			// Done afterwards is one step, undone back to the original.
+			await engine.client.call("dispatch", { command: "textEdit.replace", args: { page: 0, chars: hit.target.chars, overlay: null } })
+			expect(await engine.client.call("state", {})).toMatchObject({ canUndo: true, undoLabel: "textEdit.replace" })
+			await engine.client.call("undo", {})
+			expect((await engine.client.call("text", { page: 0 })).lines.map(line => line.str).join("\n")).toBe(text)
+			expect(await engine.client.call("state", {})).toMatchObject({ canUndo: false, canRedo: true })
+		},
+		TIMEOUT
+	)
+
+	it(
+		"previews an unsafe block as unsafe, and draws nothing while a gesture is open",
+		async () => {
+			const bytes = save(makeDocument({ pages: [{ content: "BT /F1 12 Tf 72 722 Td [(A) 580 (B) ( tail)] TJ ET" }] }))
+			const engine = startEngine(bytes)
+
+			await engine.open()
+
+			const hit = await engine.client.call("textHit", { page: 0, point: [80, 842 - 722 - 4] })
+
+			if (hit.kind !== "target") throw new Error("no text under the point")
+
+			const a = hit.target.chars.filter(char => char.c === "A")
+			const rect = hit.target.bounds
+
+			expect(await engine.client.call("textPreview", { page: 0, chars: a, rect, scale: 1 })).toEqual({ status: "unsafe" })
+			expect(await engine.client.call("state", {})).toMatchObject({ dirty: false, canUndo: false })
+
+			await engine.client.call("dispatch", {
+				command: "annotations.ink",
+				args: {
+					page: 0,
+					author: "Tester",
+					strokes: [
+						[
+							[100, 300],
+							[150, 320]
+						]
+					],
+					color: [1, 0, 0],
+					width: 2
+				},
+				op: { id: "stroke", final: false }
+			})
+
+			const open = await engine.client.call("state", {})
+
+			expect(await engine.client.call("textPreview", { page: 0, chars: hit.target.chars, rect, scale: 1 })).toEqual({
+				status: "busy"
+			})
+			expect(await engine.client.call("state", {})).toEqual(open)
+			expect((await failureOf(engine.client.call("textPreview", { page: 0, chars: [], rect, scale: 1 }))).failure).toBe("badRequest")
+		},
+		TIMEOUT
+	)
+
+	it(
 		"adds text where there was none and refuses text drawn as shapes",
 		async () => {
 			const content = `${LATIN_CONTENT} 0 g 72 400 m 80 430 l 88 400 l h f 90 400 m 98 430 l 106 400 l h f`

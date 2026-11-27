@@ -14,7 +14,7 @@ import type { SyncRangePort } from "./syncRange"
 import type { PdfPageText } from "./text"
 import type { OcrRenderedPage } from "./ocr/pipeline"
 import type { TextEditSource, TextEditStyle } from "./textEdit/prepare"
-import type { TextEditHit } from "./textEdit/target"
+import type { TextEditChar, TextEditHit } from "./textEdit/target"
 
 // What a page and a PDF engine worker (MuPDF) say to each other. Requests carry an id and get exactly one answer;
 // the worker also posts events (a render started, the engine was poisoned). Everything is plain data; bitmaps and
@@ -308,6 +308,19 @@ export interface PdfEngineOps {
 		readonly args: { readonly page: number; readonly point: readonly [number, number]; readonly unit?: "block" | "line" }
 		readonly value: TextEditHit
 	}
+	// The page under an opened text editor as Done would leave it before the new text: `chars` removed as
+	// textEdit.replace removes them, `rect` (display space, points) drawn with a small margin at `scale` device px per
+	// point (lowered for a large rect). Nothing changes: the removal is abandoned. "unsafe": Done would be refused;
+	// "busy": a gesture's operation or a save is open, nothing was drawn.
+	textPreview: {
+		readonly args: {
+			readonly page: number
+			readonly chars: readonly TextEditChar[]
+			readonly rect: readonly [number, number, number, number]
+			readonly scale: number
+		}
+		readonly value: PdfTextPreview
+	}
 	// New text laid out into a one-page overlay PDF (null for empty text), before the command that grafts it. Served by a
 	// worker that registers textPrepareRequest with its font files.
 	textPrepare: {
@@ -331,6 +344,12 @@ export interface PdfEngineOps {
 	// A placed signature that was not signed or not kept: its step goes, with the redo of it.
 	signDiscard: { readonly args: Record<string, never>; readonly value: PdfCommandResult }
 }
+
+// `tile`: device pixels of the page at `scale` (its display space × scale), what the bitmap shows.
+export type PdfTextPreview =
+	| { readonly status: "clean"; readonly bitmap: PdfBitmapLike; readonly tile: PdfTile; readonly scale: number }
+	| { readonly status: "unsafe" }
+	| { readonly status: "busy" }
 
 // A line of text: its box and its characters' edges (n characters, n + 1 ascending x positions), MuPDF page space.
 export interface PdfTextGeometryLine {

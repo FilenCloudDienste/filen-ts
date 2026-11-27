@@ -46,20 +46,7 @@ export function applyTextEdit(
 	const page = document.loadPage(pageIndex)
 
 	try {
-		const before = allChars(readStext(page))
-		const selected = locate(before, target.chars)
-
-		if (selected === null) return { status: "unsafe" }
-
-		const detached = detachRedactions(page)
-		const redact = page.createAnnotation("Redact")
-
-		redact.setQuadPoints(shrunkQuads(before, selected).map(quad => [...quad]))
-		page.applyRedactions(false, mupdf.PDFPage.REDACT_IMAGE_NONE, mupdf.PDFPage.REDACT_LINE_ART_NONE, mupdf.PDFPage.REDACT_TEXT_REMOVE)
-
-		if (!removedExactly(before, selected, allChars(readStext(page)))) return { status: "unsafe" }
-
-		reattachRedactions(page, detached)
+		if (!removeGlyphs(mupdf, page, target.chars)) return { status: "unsafe" }
 
 		if (overlay !== null) graftOverlay(mupdf, document, pageIndex, overlay)
 
@@ -67,6 +54,45 @@ export function applyTextEdit(
 	} finally {
 		page.destroy()
 	}
+}
+
+// The page as Done leaves it before the new text is grafted (the target's glyphs removed exactly as applyTextEdit
+// removes them), handed to `draw`. Run inside an operation the caller abandons (PdfEditSession.preview): the document
+// is unchanged after. Null when the removal is unsafe.
+export function previewTextEdit<T>(
+	mupdf: MupdfModule,
+	document: Mupdf.PDFDocument,
+	pageIndex: number,
+	target: Pick<TextEditTarget, "chars">,
+	draw: (page: Mupdf.PDFPage) => T
+): T | null {
+	const page = document.loadPage(pageIndex)
+
+	try {
+		return removeGlyphs(mupdf, page, target.chars) ? draw(page) : null
+	} finally {
+		page.destroy()
+	}
+}
+
+// Steps 1-3; false when unsafe (the caller abandons the operation).
+function removeGlyphs(mupdf: MupdfModule, page: Mupdf.PDFPage, chars: readonly TextEditChar[]): boolean {
+	const before = allChars(readStext(page))
+	const selected = locate(before, chars)
+
+	if (selected === null) return false
+
+	const detached = detachRedactions(page)
+	const redact = page.createAnnotation("Redact")
+
+	redact.setQuadPoints(shrunkQuads(before, selected).map(quad => [...quad]))
+	page.applyRedactions(false, mupdf.PDFPage.REDACT_IMAGE_NONE, mupdf.PDFPage.REDACT_LINE_ART_NONE, mupdf.PDFPage.REDACT_TEXT_REMOVE)
+
+	if (!removedExactly(before, selected, allChars(readStext(page)))) return false
+
+	reattachRedactions(page, detached)
+
+	return true
 }
 
 // "Add text": the overlay grafted as it is, nothing removed.

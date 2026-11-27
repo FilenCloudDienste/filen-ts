@@ -1,6 +1,7 @@
 import { useRef, type KeyboardEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { InfoIcon } from "lucide-react"
+import { cn } from "@filen/shared"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import {
 	cssColor,
@@ -25,13 +26,16 @@ export interface PdfTextEditorProps {
 	scale: number
 	// The edit is being applied: Done shows progress, the text is read-only.
 	busy?: boolean
+	// The page under the box shows through (drawn without the text it replaces, or blank for new text); otherwise the
+	// box veils it.
+	clear?: boolean
 	onDone: (text: string) => void
 	onCancel: () => void
 }
 
 const IS_MAC = isMacPlatform()
 
-export function PdfTextEditor({ source, scale, busy, onDone, onCancel }: PdfTextEditorProps) {
+export function PdfTextEditor({ source, scale, busy, clear, onDone, onCancel }: PdfTextEditorProps) {
 	const { t } = useTranslation("preview")
 	const field = useRef<HTMLTextAreaElement>(null)
 	const compositionEndedAt = useRef(Number.NEGATIVE_INFINITY)
@@ -145,7 +149,10 @@ export function PdfTextEditor({ source, scale, busy, onDone, onCancel }: PdfText
 
 					event.currentTarget.setSelectionRange(end, end)
 				}}
-				className="block resize-none overflow-hidden border border-dashed border-primary bg-background/80 p-0 outline-none"
+				className={cn(
+					"block resize-none overflow-hidden border border-dashed border-primary p-0 outline-none",
+					clear === true ? "bg-transparent" : "bg-background/80"
+				)}
 				style={{
 					width: placement.width,
 					minHeight: placement.height,

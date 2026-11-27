@@ -3,6 +3,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { isValidElement, type ReactNode } from "react"
+import { matchPdfFont } from "@filen/office/core/pdfedit/fontMatch"
 import { PdfEngineError, TEXT_EDIT_UNSAFE } from "@filen/office/dom/pdfedit"
 import { PageViewport, type PdfEditSessionModel } from "@filen/office/react/pdfedit"
 import type { PdfDomDocument } from "@filen/office/react/pdf"
@@ -33,7 +34,8 @@ const VIEWPORT = new PageViewport({ viewBox: [0, 0, 600, 800], scale: 1, rotatio
 function setup(
 	mode: "edit" | "add",
 	textHit: (args: { page: number; point: readonly number[] }) => Promise<unknown>,
-	textPrepare: () => Promise<unknown> = () => Promise.resolve(null)
+	textPrepare: () => Promise<unknown> = () => Promise.resolve(null),
+	textPreview: () => Promise<unknown> = () => Promise.resolve({ status: "busy" })
 ) {
 	const calls: unknown[] = []
 	const notices: ReactNode[] = []
@@ -43,6 +45,7 @@ function setup(
 				calls.push([op, args])
 
 				if (op === "textPrepare") return textPrepare()
+				if (op === "textPreview") return textPreview()
 
 				return op === "textHit" ? textHit(args) : Promise.resolve(null)
 			}
@@ -232,5 +235,78 @@ describe("applying a text edit", () => {
 			expect(screen.queryByRole("textbox", { name: "previewPdfTextEditField" })).toBeNull()
 		})
 		expect(notices.at(-1)).toBeNull()
+	})
+})
+
+describe("the page under the text editor", () => {
+	const TARGET = {
+		text: "Hello",
+		chars: [{ c: "H", x: 72, y: 120, quad: [72, 111, 80, 111, 72, 123, 80, 123] }],
+		offsets: [0],
+		frame: { origin: [72, 120], direction: [1, 0], width: null, lineHeight: 14 },
+		bounds: [72, 111, 100, 123],
+		angle: 0,
+		size: 12,
+		color: 0,
+		font: matchPdfFont({ name: "Helvetica", bold: false, italic: false, serif: false, mono: false }),
+		fontName: "Helvetica",
+		pageWidth: 600,
+		pageHeight: 800
+	}
+
+	class FakeBitmap {
+		readonly width = 64
+		readonly height = 32
+		readonly close = vi.fn()
+	}
+
+	function openEditor(preview: () => Promise<unknown>) {
+		const result = setup("edit", () => Promise.resolve({ kind: "target", target: TARGET }), undefined, preview)
+		const page = screen.getByRole("application")
+
+		fireEvent.keyDown(page, { key: "Enter" })
+		fireEvent.keyDown(page, { key: "Enter" })
+
+		return result
+	}
+
+	it("draws the page without the text under a clear editor, and drops it when the editor closes", async () => {
+		vi.stubGlobal("ImageBitmap", FakeBitmap)
+
+		const bitmap = new FakeBitmap()
+		const { calls } = openEditor(() => Promise.resolve({ status: "clean", bitmap, tile: [140, 218, 204, 250], scale: 2 }))
+		const field = await screen.findByRole<HTMLTextAreaElement>("textbox", { name: "previewPdfTextEditField" })
+		const patch = document.querySelector<HTMLCanvasElement>("[data-slot=pdf-text-patch]")
+
+		expect(calls).toContainEqual(["textPreview", { page: 2, chars: TARGET.chars, rect: TARGET.bounds, scale: window.devicePixelRatio }])
+		// Drawn at 2 device px per point, shown at the view's 1 CSS px per point.
+		expect(patch?.style.left).toBe("70px")
+		expect(patch?.style.width).toBe("32px")
+		expect(field.className).toContain("bg-transparent")
+
+		fireEvent.keyDown(field, { key: "Escape" })
+		await waitFor(() => {
+			expect(document.querySelector("[data-slot=pdf-text-patch]")).toBeNull()
+		})
+		expect(bitmap.close).toHaveBeenCalled()
+		vi.unstubAllGlobals()
+	})
+
+	it("refuses text Done would refuse before the editor opens", async () => {
+		const { notices } = openEditor(() => Promise.resolve({ status: "unsafe" }))
+
+		await waitFor(() => {
+			expect(noticeKinds(notices)).toContain("unsafe")
+		})
+		expect(screen.queryByRole("textbox", { name: "previewPdfTextEditField" })).toBeNull()
+	})
+
+	it("opens a veiled editor when the page could not be drawn", async () => {
+		openEditor(() => Promise.resolve({ status: "busy" }))
+
+		const field = await screen.findByRole<HTMLTextAreaElement>("textbox", { name: "previewPdfTextEditField" })
+
+		expect(field.className).toContain("bg-background/80")
+		expect(document.querySelector("[data-slot=pdf-text-patch]")).toBeNull()
 	})
 })

@@ -31,6 +31,27 @@ function parseChar(value: unknown): TextEditChar | null {
 	return parsed === null ? null : { c, x, y, quad: parsed }
 }
 
+// A replacement's glyphs (textEdit.replace, textPreview); null when malformed or empty.
+export function parseTextEditChars(value: unknown): TextEditChar[] | null {
+	if (!Array.isArray(value)) return null
+
+	const list: unknown[] = value
+
+	if (list.length === 0 || list.length > MAX_CHARS) return null
+
+	const chars: TextEditChar[] = []
+
+	for (const item of list) {
+		const char = parseChar(item)
+
+		if (char === null) return null
+
+		chars.push(char)
+	}
+
+	return chars
+}
+
 function parseOverlay(value: unknown): Uint8Array | null {
 	return value instanceof Uint8Array && value.byteLength > 0 && value.byteLength <= MAX_OVERLAY_BYTES ? value : null
 }
@@ -41,21 +62,11 @@ export const TEXT_EDIT_COMMANDS: PdfCommandTable<PdfTextEditCommands> = {
 		// The replaced glyphs stay in the file's earlier versions.
 		removesContent: true,
 		parse: args => {
-			if (!isRecord(args) || !isIndex(args["page"]) || !Array.isArray(args["chars"])) return null
+			if (!isRecord(args) || !isIndex(args["page"])) return null
 
-			const list: unknown[] = args["chars"]
+			const chars = parseTextEditChars(args["chars"])
 
-			if (list.length === 0 || list.length > MAX_CHARS) return null
-
-			const chars: TextEditChar[] = []
-
-			for (const value of list) {
-				const char = parseChar(value)
-
-				if (char === null) return null
-
-				chars.push(char)
-			}
+			if (chars === null) return null
 
 			const overlay = args["overlay"] === null ? null : parseOverlay(args["overlay"])
 

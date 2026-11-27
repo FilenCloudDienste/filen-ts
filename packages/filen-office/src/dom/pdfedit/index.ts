@@ -78,6 +78,7 @@ export {
 	type PdfSaveOutcome,
 	type PdfSaveProtection,
 	type PdfTextGeometryLine,
+	type PdfTextPreview,
 	type PdfSignAnswer,
 	type PdfSignBegun,
 	type PdfSignBeginArgs,

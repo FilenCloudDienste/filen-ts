@@ -1,4 +1,4 @@
-export { applyAddText, applyTextEdit, type TextEditResult } from "./apply"
+export { applyAddText, applyTextEdit, previewTextEdit, type TextEditResult } from "./apply"
 export { prepareTextEdit, type TextEditSource, type TextEditStyle } from "./prepare"
 export { readStext, type PdfQuad, type PdfRect, type StextChar, type StextLine, type StextPage } from "./stext"
 export {
