@@ -138,6 +138,8 @@ export const transfers = {
 	transfersStatusMovingToTrash: "Moving to trash…",
 	/** Transfer row — accessible label on the button removing a single finished (done/error) transfer from the list */
 	transfersRowRemove: "Remove",
+	/** Tab title while the tab is hidden and transfers run; {{percent}} = their overall progress ("42%"), {{title}} = the page's own title */
+	transfersTitleProgress: "{{percent}} · {{title}}",
 	/** Transfer row — accessible label on the button running a failed upload or download again */
 	transfersRowRetry: "Retry",
 	/** Transfer row — accessible label on the button opening the file picker for a failed upload whose file is no longer held (it opens on the directory the upload went to) */

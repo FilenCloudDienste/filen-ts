@@ -27,6 +27,7 @@ import { SyncSidebar } from "@/features/sync/components/syncSidebar"
 import { MountsSidebar } from "@/features/mounts/components/mountsSidebar"
 import { AccountReminders } from "@/features/shell/components/accountReminders"
 import { CommandPaletteHost } from "@/features/palette/components/commandPalette"
+import { useTransfersTitleProgress } from "@/features/transfers/hooks/useTransfersTitleProgress"
 import { AnnouncementStrip } from "@/features/shell/components/announcementStrip"
 import { SyncHost } from "@/features/notes/components/syncHost"
 import { ChatsSyncHost } from "@/features/chats/components/syncHost"
@@ -116,6 +117,7 @@ export function AppShell() {
 	}
 
 	useDismissBootSplash()
+	useTransfersTitleProgress()
 
 	// The panel is mounted either way (inline in the row, or inside the closed drawer behind display:none),
 	// so the panels themselves cannot tell whether anyone can see them — this is the shell's answer to

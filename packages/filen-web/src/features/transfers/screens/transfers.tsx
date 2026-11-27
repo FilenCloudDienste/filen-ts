@@ -207,20 +207,20 @@ export function TransfersScreen() {
 
 	return (
 		<>
-			{/* One row at every width: below sm the summary goes and the buttons shed their labels, each
-			    keeping it as its accessible name. */}
+			{/* One row at every width: below sm the summary shortens to its percent and the buttons shed their
+			    labels, each keeping it as its accessible name. */}
 			<header className="flex h-14 shrink-0 items-center gap-3 px-4 app-region-chrome">
 				<h1 className="shrink-0 text-sm font-medium">{t("common:moduleTransfers")}</h1>
 				{/* The same order as a row's line, for the same reason: the speed, the one figure that keeps
 				    changing length, goes last. */}
-				<p className="hidden min-w-0 flex-1 truncate text-xs text-muted-foreground tabular-nums sm:block">
-					{showAggregate
-						? [
-								t("transfersScreenActiveCount", { count: activeCount }),
-								percentFormat(undefined).format(runningPercentFraction(percent)),
-								formatBytesPerSecond(speed)
-							].join(" · ")
-						: null}
+				<p className="min-w-0 flex-1 truncate text-xs text-muted-foreground tabular-nums">
+					{showAggregate ? (
+						<>
+							<span className="hidden sm:inline">{t("transfersScreenActiveCount", { count: activeCount })} · </span>
+							{percentFormat(undefined).format(runningPercentFraction(percent))}
+							<span className="hidden sm:inline"> · {formatBytesPerSecond(speed)}</span>
+						</>
+					) : null}
 				</p>
 				<div className="ml-auto flex shrink-0 items-center gap-1">
 					<TooltipIconButton

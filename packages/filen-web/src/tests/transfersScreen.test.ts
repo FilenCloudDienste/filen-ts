@@ -78,7 +78,12 @@ describe("TransfersScreen — aggregate readout", () => {
 		// 1_000_000 bytes over the 1s window, with its decimal kept, rendered as text rather than just the
 		// pure computeTransfersSpeed number.
 		// The speed last: the one figure that keeps changing length, with nothing after it to push.
-		expect(header.getByText("1 active · 50% · 976.6 KiB/s")).toBeTruthy()
+		// Below sm only the percent shows; the count and speed are sm and up.
+		expect(header.getByText("50%", { exact: false }).textContent).toBe("1 active · 50% · 976.6 KiB/s")
+		expect(Array.from(container.querySelectorAll("header p span"), span => span.className)).toEqual([
+			"hidden sm:inline",
+			"hidden sm:inline"
+		])
 	})
 
 	it("names every kind of transfer, archive jobs included, while the list is empty", () => {
