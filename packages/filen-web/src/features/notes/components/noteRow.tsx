@@ -199,12 +199,6 @@ export function NoteRow({
 							multiSelected && "ring-2 ring-primary/60 ring-inset"
 						)}
 					>
-						{selected ? (
-							<span
-								aria-hidden
-								className={cn("absolute inset-y-1.5 w-0.75 rounded-full bg-primary", nested ? "left-5.5" : "left-1")}
-							/>
-						) : null}
 						<Link
 							to="/notes/$uuid"
 							params={{ uuid: note.uuid }}
