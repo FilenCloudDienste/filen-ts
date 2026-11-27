@@ -117,6 +117,28 @@ describe("SlideshowBar", () => {
 		expect(slideshow.stop).not.toHaveBeenCalled()
 	})
 
+	it("leaving full screen (the browser's Escape) closes an open interval menu, and the show runs on", async () => {
+		const slideshow = makeSlideshow()
+
+		Object.defineProperty(document, "fullscreenElement", { configurable: true, value: document.documentElement })
+		renderBar(slideshow)
+		fireEvent.click(screen.getByRole("button", { name: "Time per image" }))
+		await act(async () => {
+			await vi.advanceTimersByTimeAsync(50)
+		})
+		expect(screen.getByRole("menu")).toBeTruthy()
+
+		Object.defineProperty(document, "fullscreenElement", { configurable: true, value: null })
+		await act(async () => {
+			document.dispatchEvent(new Event("fullscreenchange"))
+			await vi.advanceTimersByTimeAsync(300)
+		})
+
+		expect(screen.queryByRole("menu")).toBeNull()
+		expect(slideshow.setMenuOpen).toHaveBeenLastCalledWith(false)
+		expect(slideshow.stop).not.toHaveBeenCalled()
+	})
+
 	it("sits over the slide: positioned and raised on its stage", () => {
 		renderBar(makeSlideshow())
 

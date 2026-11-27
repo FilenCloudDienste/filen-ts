@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { FoldersIcon, PauseIcon, PlayIcon, ShuffleIcon, SkipBackIcon, SkipForwardIcon, XIcon } from "lucide-react"
 import { cn } from "@filen/shared"
@@ -82,6 +82,30 @@ export function SlideshowBar({
 		reportMenuOpen(open)
 	}
 
+	const onFullscreenChange = useEffectEvent(() => {
+		if (document.fullscreenElement === null) {
+			handleMenuOpenChange(false)
+		}
+	})
+
+	// Leaving full screen (Escape, which Firefox and Safari keep from the page) closes the menu; the slideshow runs on,
+	// as it does for an Escape the menu took.
+	useEffect(() => {
+		if (!menuOpen) {
+			return
+		}
+
+		const onChange = (): void => {
+			onFullscreenChange()
+		}
+
+		document.addEventListener("fullscreenchange", onChange)
+
+		return () => {
+			document.removeEventListener("fullscreenchange", onChange)
+		}
+	}, [menuOpen])
+
 	return (
 		<div
 			ref={barRef}
@@ -127,7 +151,10 @@ export function SlideshowBar({
 			<span className="min-w-12 shrink-0 px-1 text-center text-xs text-muted-foreground tabular-nums">
 				{t("previewSlideshowPosition", { position: slideshow.position, total: slideshow.total })}
 			</span>
-			<DropdownMenu onOpenChange={handleMenuOpenChange}>
+			<DropdownMenu
+				open={menuOpen}
+				onOpenChange={handleMenuOpenChange}
+			>
 				<DropdownMenuTrigger
 					render={
 						<Button
