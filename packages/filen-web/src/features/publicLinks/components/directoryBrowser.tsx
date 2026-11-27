@@ -354,6 +354,7 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 				saveItem={saveable ? selected.entry.file : undefined}
 				siblings={sorted.map(entry => entry.item)}
 				references={linkReferences(sorted, link)}
+				onTreeListing={searchSession.engage}
 			/>
 		)
 	}

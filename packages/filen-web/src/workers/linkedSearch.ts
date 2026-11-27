@@ -1,6 +1,6 @@
 import type { AnyLinkedDir, DirPublicLink, File, LinkedDir, LinkedDirsAndFiles } from "@filen/sdk-rs"
 import { nameSearchKey } from "@filen/shared"
-import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
+import { narrowItem } from "@/features/drive/lib/item"
 import { sortByDriveItem, type DriveSortBy } from "@/features/drive/lib/sort"
 import { linkedItemName } from "@/features/publicLinks/lib/browse.logic"
 import { linkFingerprint } from "@/features/publicLinks/lib/queryKey.logic"
@@ -128,8 +128,17 @@ function sortMatches(matches: Match[], sort: DriveSortBy): Match[] {
 	return sortByDriveItem(decorated, entry => entry.item, sort).map(entry => entry.match)
 }
 
+// A listing under way: what it lists, and every caller's progress reporter while it downloads.
+interface Pending {
+	linkId: string
+	rootUuid: string
+	promise: Promise<void>
+	reporters: Set<Parameters<ListLinkedRecursive>[2]>
+}
+
 export function createLinkedSearch(listRecursive: ListLinkedRecursive) {
 	let held: Held | null = null
+	let pending: Pending | null = null
 	// Moves on every open and close, so a listing that lands after a newer one began (or a close) is dropped.
 	let generation = 0
 
@@ -142,19 +151,57 @@ export function createLinkedSearch(listRecursive: ListLinkedRecursive) {
 		return held.rootUuid === dirUuid || held.dirs.has(dirUuid) ? held : null
 	}
 
-	// Lists `dir` once for its searches, unless the held listing already covers it. Resolves once it is held, or once a
-	// newer open or a close has superseded it.
+	// Lists `dir` once for its searches and slideshows, unless the held listing already covers it; a second open of the
+	// same directory while its listing is under way waits on that one. Resolves once it is held, or once a newer open or
+	// a close has superseded it.
 	async function open(dir: AnyLinkedDir, link: DirPublicLink, onProgress: Parameters<ListLinkedRecursive>[2]): Promise<void> {
 		if (covering(link, dir.inner.uuid) !== null) {
 			return
 		}
 
+		const linkId = linkIdentity(link)
+
+		if (pending?.linkId === linkId && pending.rootUuid === dir.inner.uuid) {
+			const joined = pending
+
+			joined.reporters.add(onProgress)
+
+			try {
+				await joined.promise
+			} finally {
+				joined.reporters.delete(onProgress)
+			}
+
+			return
+		}
+
 		const ticket = ++generation
+		const reporters = new Set([onProgress])
 
 		// The listing it replaces goes now, not once the new one lands.
 		held = null
 
-		const listing = await listRecursive(dir, link, onProgress)
+		const listed = listRecursive(dir, link, (downloadedBytes, totalBytes) => {
+			for (const report of reporters) {
+				report(downloadedBytes, totalBytes)
+			}
+		})
+		const entry: Pending = { linkId, rootUuid: dir.inner.uuid, promise: listed.then(() => undefined), reporters }
+
+		// A failure is this caller's to throw; one who joined gets it from `promise` too.
+		entry.promise.catch(() => undefined)
+
+		pending = entry
+
+		let listing: LinkedDirsAndFiles
+
+		try {
+			listing = await listed
+		} finally {
+			if (pending === entry) {
+				pending = null
+			}
+		}
 
 		if (ticket !== generation) {
 			return
@@ -175,6 +222,7 @@ export function createLinkedSearch(listRecursive: ListLinkedRecursive) {
 	function close(): void {
 		generation++
 		held = null
+		pending = null
 	}
 
 	// A query's window over the held listing, matched by the drive's name rules (nameSearchKey). A blank query matches
@@ -249,9 +297,8 @@ export function createLinkedSearch(listRecursive: ListLinkedRecursive) {
 		}
 	}
 
-	// Everything below `dir` from the held listing (its files only those `keepFile` admits), null when it does not cover
-	// `dir`.
-	function subtree(dir: AnyLinkedDir, link: DirPublicLink, keepFile: (item: DriveItem) => boolean): LinkedDirsAndFiles | null {
+	// Everything below `dir` from the held listing, null when it does not cover `dir`.
+	function subtree(dir: AnyLinkedDir, link: DirPublicLink): LinkedDirsAndFiles | null {
 		const source = covering(link, dir.inner.uuid)
 
 		if (source === null) {
@@ -263,7 +310,7 @@ export function createLinkedSearch(listRecursive: ListLinkedRecursive) {
 
 		return {
 			dirs: source.listing.dirs.filter(entry => within(entry.inner.parent)),
-			files: source.listing.files.filter(file => within(file.parent) && keepFile(narrowItem(file)))
+			files: source.listing.files.filter(file => within(file.parent))
 		}
 	}
 

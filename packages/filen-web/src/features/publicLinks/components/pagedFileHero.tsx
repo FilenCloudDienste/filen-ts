@@ -44,7 +44,8 @@ export function PagedFileHero({
 	linkScope,
 	saveItem,
 	siblings,
-	references
+	references,
+	onTreeListing
 }: {
 	entry: FileEntry
 	pager: BrowsePagerList
@@ -59,6 +60,8 @@ export function PagedFileHero({
 	saveItem: AnyItemWithContext | undefined
 	siblings: readonly DriveItem[]
 	references: ReferenceSourceFactory
+	// A slideshow's subdirectories are listed: the worker holds the link's listing for the page from then on.
+	onTreeListing: () => void
 }) {
 	const uuid = entryKey(entry)
 	const index = pager.entries.findIndex(candidate => entryKey(candidate) === uuid)
@@ -108,7 +111,11 @@ export function PagedFileHero({
 		list: pager,
 		// Nothing here edits.
 		shown: { shown: uuid, locked: false },
-		load: fetchLinkedSlideshowTree,
+		load: (linked, signal) => {
+			onTreeListing()
+
+			return fetchLinkedSlideshowTree(linked, signal)
+		},
 		listOf: tree => (hasTwoSlides(tree.items) ? browsePagerList(treeEntries(tree.items)) : null),
 		replace: (next, on, fallbackUuid) => replacePager(next, on.shown, fallbackUuid),
 		logScope: "publicLinks",

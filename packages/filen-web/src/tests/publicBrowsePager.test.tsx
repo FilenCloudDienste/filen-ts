@@ -14,8 +14,9 @@ interface Tree {
 	dirs: ReadonlyMap<string, LinkedDir>
 }
 
-const { tree, linkedFile, zoom, listings } = vi.hoisted(() => ({
+const { tree, linkedFile, zoom, listings, searchClose } = vi.hoisted(() => ({
 	tree: { fetch: vi.fn<(source: unknown, signal: AbortSignal) => Promise<Tree>>() },
+	searchClose: vi.fn(() => Promise.resolve()),
 	// The listing by level uuid, where a test sets one.
 	listings: { byLevel: new Map<string, unknown>(), pending: new Set<string>() },
 	linkedFile: { current: undefined as LinkedFile | undefined },
@@ -44,7 +45,7 @@ vi.mock("@/lib/sdk/client", () => ({
 	sdkApi: {
 		searchLinkedOpen: () => Promise.resolve(),
 		searchLinkedRange: () => Promise.resolve({ total: LISTING.files.length, hits: LISTING.files.map(item => ({ item, trail: [] })) }),
-		searchLinkedClose: () => Promise.resolve()
+		searchLinkedClose: searchClose
 	}
 }))
 vi.mock("@/features/publicLinks/lib/download", () => ({
@@ -229,6 +230,7 @@ const exitFullscreen = vi.fn(() => {
 beforeEach(() => {
 	mockViewportHeight(element => element.getAttribute("role") === "listbox", 800)
 	tree.fetch.mockReset()
+	searchClose.mockClear()
 	listings.byLevel.clear()
 	listings.pending.clear()
 	setFullscreen(null)
@@ -357,6 +359,20 @@ describe("a public directory link's pager", () => {
 		fireEvent.click(screen.getByRole("button", { name: /^End slideshow/ }))
 		expect(viewer()).toBe("viewer a.jpg")
 		expect(screen.getByRole("button", { name: /^Next file/ }).hasAttribute("disabled")).toBe(false)
+	})
+
+	it("the link's listing a slideshow's subdirectories held is freed as the page goes", async () => {
+		tree.fetch.mockResolvedValue(treeOf(A_JPG, B_PNG, DEEP))
+		openFile("a.jpg")
+		fireEvent.click(screen.getByRole("button", { name: /^Slideshow/ }))
+		fireEvent.click(screen.getByRole("button", { name: /^Include subdirectories/ }))
+		await flush()
+
+		expect(searchClose).not.toHaveBeenCalled()
+
+		cleanup()
+
+		expect(searchClose).toHaveBeenCalledTimes(1)
 	})
 
 	it("offers no subdirectories over a search's results", async () => {

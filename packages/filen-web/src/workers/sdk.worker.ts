@@ -2614,7 +2614,7 @@ const api = {
 	// The callback the wasm listing wants is a plain progress reporter (download of the encrypted
 	// listing itself); the viewer needs no progress here, so a no-op is passed — the method resolves
 	// with the decrypted dirs+files in one shot.
-	// A directory the search's held listing covers is read from it, with no request: a link's listing is a static
+	// A directory the link's held listing (a search's or a slideshow's) covers is read from it, with no request: a link's listing is a static
 	// snapshot (no socket reaches it), so that snapshot serves every directory it covers until the page leaves the link
 	// (searchLinkedClose); a reload reads the link afresh.
 	listLinkedDirAnon(dir: AnyLinkedDir, link: DirPublicLink): Promise<LinkedDirsAndFiles> {
@@ -2630,16 +2630,15 @@ const api = {
 			})
 		)
 	},
-	// A slideshow's "include subdirectories" list of a public directory link: every dir, only slideable files. Derived
-	// from the search's held listing when it covers the directory.
+	// A slideshow's "include subdirectories" list of a public directory link: every dir, only slideable files. Read
+	// from the link's held listing (linkedSearch), opened here when nothing held covers the directory, so one listing
+	// serves the slideshow, the search, the subdirectories' listings and the subtitles beside a video.
 	async listSlideshowLinked(dir: AnyLinkedDir, link: DirPublicLink): Promise<LinkedDirsAndFiles> {
-		const held = linkedSearch.subtree(dir, link, isSlideable)
+		await linkedSearch.open(dir, link, () => undefined)
 
-		if (held !== null) {
-			return held
-		}
-
-		const result = await withLinkedUnauth(unauth => unauth.listLinkedDirRecursive(dir, link, () => undefined))
+		// Superseded meanwhile (another directory's search, the page leaving): listed for this alone.
+		const result =
+			linkedSearch.subtree(dir, link) ?? (await withLinkedUnauth(unauth => unauth.listLinkedDirRecursive(dir, link, () => undefined)))
 
 		return { dirs: result.dirs, files: result.files.filter(file => isSlideable(narrowItem(file))) }
 	},

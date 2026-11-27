@@ -266,4 +266,53 @@ describe("linked search: the held listing reused", () => {
 
 		expect(fakeUnauth.listLinkedDirRecursive).toHaveBeenCalledWith(PHOTOS, LINK, expect.any(Function))
 	})
+
+	it("holds a slideshow's listing: subdirectories off and on again list nothing more", async () => {
+		const first = await api.listSlideshowLinked(ROOT, LINK)
+		const again = await api.listSlideshowLinked(ROOT, LINK)
+
+		expect(fakeUnauth.listLinkedDirRecursive).toHaveBeenCalledTimes(1)
+		expect(again).toEqual(first)
+	})
+
+	it("a slideshow's listing serves the search after it, and the listings and slideshows below it", async () => {
+		await api.listSlideshowLinked(ROOT, LINK)
+		await api.searchLinkedOpen(ROOT, LINK, vi.fn())
+
+		expect(names(await query("beach"))).toEqual(["beach.jpg"])
+
+		const listing = await api.listLinkedDirAnon(TRIP, LINK)
+		const slides = await api.listSlideshowLinked(PHOTOS, LINK)
+
+		expect(listing.files.map(f => f.uuid)).toEqual([testUuid("beach"), testUuid("clip")])
+		expect(slides.files.map(f => f.uuid)).toEqual([testUuid("beach"), testUuid("clip")])
+		expect(fakeUnauth.listLinkedDirRecursive).toHaveBeenCalledTimes(1)
+		expect(fakeUnauth.listLinkedDir).not.toHaveBeenCalled()
+	})
+
+	it("a search opened while a slideshow's listing is under way waits on that one, its progress reported", async () => {
+		let land: (listing: LinkedDirsAndFiles) => void = () => undefined
+		let progress: (downloaded: number, total: number | undefined) => void = () => undefined
+
+		fakeUnauth.listLinkedDirRecursive.mockImplementationOnce(
+			(_dir, _link, cb) =>
+				new Promise(resolve => {
+					progress = cb
+					land = resolve
+				})
+		)
+
+		const onProgress = vi.fn()
+		const slides = api.listSlideshowLinked(ROOT, LINK)
+		const opened = api.searchLinkedOpen(ROOT, LINK, onProgress)
+
+		await Promise.resolve()
+		progress(10, 20)
+		land(TREE)
+		await Promise.all([slides, opened])
+
+		expect(fakeUnauth.listLinkedDirRecursive).toHaveBeenCalledTimes(1)
+		expect(onProgress).toHaveBeenCalledWith(10, 20)
+		expect(names(await query("beach"))).toEqual(["beach.jpg"])
+	})
 })
