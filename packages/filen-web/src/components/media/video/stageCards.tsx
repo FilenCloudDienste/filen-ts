@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import { XIcon } from "lucide-react"
 import { cn } from "@filen/shared"
 import { Button } from "@/components/ui/button"
+import { MediaTooltip } from "@/components/media/video/stageButton"
 import { STAGE_POPUP_TONE_CLASS, useRestoreStageFocus } from "@/components/media/video/stageContext"
 import { useRovingRadioGroup } from "@/components/media/video/useRovingRadioGroup"
 
@@ -107,14 +108,16 @@ export function StagePanel({ title, onClose, children }: { title: string; onClos
 		>
 			<div className="flex items-center justify-between gap-2">
 				<h2 className="text-sm font-semibold">{title}</h2>
-				<Button
-					variant="ghost"
-					size="icon-sm"
-					aria-label={t("close")}
-					onClick={onClose}
-				>
-					<XIcon />
-				</Button>
+				<MediaTooltip label={t("close")}>
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						aria-label={t("close")}
+						onClick={onClose}
+					>
+						<XIcon />
+					</Button>
+				</MediaTooltip>
 			</div>
 			{children}
 		</div>

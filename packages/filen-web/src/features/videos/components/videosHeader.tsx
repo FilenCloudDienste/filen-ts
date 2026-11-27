@@ -10,6 +10,9 @@ import { VIDEOS_HEADING_ID } from "@/features/videos/lib/focusTargets"
 import { setVideosLibrariesOpen } from "@/features/videos/store/useVideosDialogStore"
 import { VideosDensityControls } from "@/features/videos/components/videosDensityControls"
 import { Button, buttonVariants } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { Kbd } from "@/lib/keymap/kbd"
 
 const SECTION_KEY = {
 	home: "videosHome",
@@ -129,23 +132,31 @@ export function VideosHeader({ section, roots }: { section: VideosSection; roots
 					<div className="flex shrink-0 items-center gap-1">
 						{section.kind === "home" || section.kind === "search" ? null : <VideosDensityControls />}
 						{/* Phones reach search from the tabs. */}
-						<Link
-							to="/videos/search"
-							aria-label={t("videosSearch")}
-							className={buttonVariants({ variant: "ghost", size: "icon-sm", className: "max-md:hidden" })}
-						>
-							<SearchIcon />
-						</Link>
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							aria-label={t("videosManageLibraries")}
+						<Tooltip>
+							<TooltipTrigger
+								render={
+									<Link
+										to="/videos/search"
+										aria-label={t("videosSearch")}
+										className={buttonVariants({ variant: "ghost", size: "icon-sm", className: "max-md:hidden" })}
+									>
+										<SearchIcon />
+									</Link>
+								}
+							/>
+							<TooltipContent>
+								{t("videosSearch")}
+								<Kbd action="videos.openSearch" />
+							</TooltipContent>
+						</Tooltip>
+						<TooltipIconButton
+							label={t("videosManageLibraries")}
 							onClick={() => {
 								setVideosLibrariesOpen(true)
 							}}
 						>
 							<Settings2Icon />
-						</Button>
+						</TooltipIconButton>
 					</div>
 				)}
 			</header>

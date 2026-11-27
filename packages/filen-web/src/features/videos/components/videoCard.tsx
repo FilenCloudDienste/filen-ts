@@ -15,6 +15,8 @@ import { qualityLabel } from "@/features/videos/lib/videoGrid.logic"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { MenuKbd } from "@/lib/keymap/kbdHints"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipTrigger } from "@/components/ui/tooltip"
+import { LazyTooltip, RowTooltipContent } from "@/components/lazyTooltip"
 import { Badge } from "@/components/ui/badge"
 
 export type VideoCardAction = "play" | "markWatched" | "markUnwatched" | "hide"
@@ -318,42 +320,51 @@ export function VideoCard({
 				</button>
 			)}
 			{card.play === null ? null : (
-				<button
-					type="button"
-					tabIndex={-1}
-					aria-label={t("videosCardPlayLabel", { title: heading })}
-					className={cn(
-						// Takes pointer input only while shown, so an invisible button never catches a tap meant for the card.
-						"pointer-events-none absolute top-0 left-1/2 flex size-10 -translate-x-1/2 items-center justify-center rounded-full bg-black/60 text-white opacity-0 shadow-lg transition-opacity duration-150",
-						"pointer-fine:group-hover/tile:pointer-events-auto pointer-fine:group-hover/tile:opacity-100",
-						card.shape === "poster" ? "mt-[calc(75%-1.25rem)]" : "mt-[calc(28.125%-1.25rem)]"
-					)}
-					onClick={event => {
-						stopRowPropagation(event)
-						onAction("play", card)
-					}}
-				>
-					<PlayIcon className="size-4 fill-current" />
-				</button>
+				<LazyTooltip label={t("videosCardPlayLabel", { title: heading })}>
+					<button
+						type="button"
+						tabIndex={-1}
+						aria-label={t("videosCardPlayLabel", { title: heading })}
+						className={cn(
+							// Takes pointer input only while shown, so an invisible button never catches a tap meant for the card.
+							"pointer-events-none absolute top-0 left-1/2 flex size-10 -translate-x-1/2 items-center justify-center rounded-full bg-black/60 text-white opacity-0 shadow-lg transition-opacity duration-150",
+							"pointer-fine:group-hover/tile:pointer-events-auto pointer-fine:group-hover/tile:opacity-100",
+							card.shape === "poster" ? "mt-[calc(75%-1.25rem)]" : "mt-[calc(28.125%-1.25rem)]"
+						)}
+						onClick={event => {
+							stopRowPropagation(event)
+							onAction("play", card)
+						}}
+					>
+						<PlayIcon className="size-4 fill-current" />
+					</button>
+				</LazyTooltip>
 			)}
 			<DropdownMenu
 				open={menuOpen}
 				onOpenChange={setMenuOpen}
 			>
-				<DropdownMenuTrigger
-					render={
-						<Button
-							variant="secondary"
-							size="icon-xs"
-							aria-label={t("videosCardMenu", { title: heading })}
-							tabIndex={active ? 0 : -1}
-							className="absolute top-1.5 right-1.5 rounded-full bg-background/80 opacity-0 shadow-sm group-hover/tile:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100 pointer-coarse:size-8 pointer-coarse:opacity-100"
-							onClick={stopRowPropagation}
-						>
-							<MoreHorizontalIcon />
-						</Button>
-					}
-				/>
+				<Tooltip>
+					<TooltipTrigger
+						render={
+							<DropdownMenuTrigger
+								render={
+									<Button
+										variant="secondary"
+										size="icon-xs"
+										aria-label={t("videosCardMenu", { title: heading })}
+										tabIndex={active ? 0 : -1}
+										className="absolute top-1.5 right-1.5 rounded-full bg-background/80 opacity-0 shadow-sm group-hover/tile:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100 pointer-coarse:size-8 pointer-coarse:opacity-100"
+										onClick={stopRowPropagation}
+									>
+										<MoreHorizontalIcon />
+									</Button>
+								}
+							/>
+						}
+					/>
+					<RowTooltipContent>{t("videosCardMenu", { title: heading })}</RowTooltipContent>
+				</Tooltip>
 				<DropdownMenuContent align="end">
 					{card.play === null ? null : (
 						<DropdownMenuItem

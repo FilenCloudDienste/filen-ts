@@ -1,11 +1,34 @@
-import type { ComponentProps, ReactNode } from "react"
+import type { ComponentProps, ReactElement, ReactNode } from "react"
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip"
 import { cn } from "@filen/shared"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Kbd } from "@/lib/keymap/kbd"
 import { useVideoStageContainer } from "@/components/media/video/stageContext"
 
 type ButtonProps = ComponentProps<typeof Button>
+
+// The stage tone's tooltip popup: the label, then the keys of `action` in effect.
+function StageTooltipPopup({ container, label, action }: { container: HTMLElement | null; label: string; action: string | undefined }) {
+	return (
+		<TooltipPrimitive.Portal container={container}>
+			<TooltipPrimitive.Positioner
+				side="top"
+				sideOffset={6}
+				className="isolate z-50"
+			>
+				<TooltipPrimitive.Popup className="dark inline-flex w-fit items-center gap-1.5 rounded-xl bg-neutral-950/90 px-2.5 py-1 text-xs text-foreground ring-1 ring-white/15 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0">
+					{label}
+					{action === undefined ? null : (
+						<span className="[&_kbd]:bg-white/10 [&_kbd]:text-foreground/80">
+							<Kbd action={action} />
+						</span>
+					)}
+				</TooltipPrimitive.Popup>
+			</TooltipPrimitive.Positioner>
+		</TooltipPrimitive.Portal>
+	)
+}
 
 // A tooltip that portals into the video stage (so it shows in fullscreen too), with the keys of `action` in effect.
 export function StageTooltip({ label, action, children }: { label: string; action?: string | undefined; children: ReactNode }) {
@@ -14,22 +37,51 @@ export function StageTooltip({ label, action, children }: { label: string; actio
 	return (
 		<TooltipPrimitive.Root>
 			<TooltipPrimitive.Trigger render={<span className="inline-flex">{children}</span>} />
-			<TooltipPrimitive.Portal container={container}>
-				<TooltipPrimitive.Positioner
-					side="top"
-					sideOffset={6}
-					className="isolate z-50"
-				>
-					<TooltipPrimitive.Popup className="dark inline-flex w-fit items-center gap-1.5 rounded-xl bg-neutral-950/90 px-2.5 py-1 text-xs text-foreground ring-1 ring-white/15 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0">
-						{label}
-						{action === undefined ? null : (
-							<span className="[&_kbd]:bg-white/10 [&_kbd]:text-foreground/80">
-								<Kbd action={action} />
-							</span>
-						)}
-					</TooltipPrimitive.Popup>
-				</TooltipPrimitive.Positioner>
-			</TooltipPrimitive.Portal>
+			<StageTooltipPopup
+				container={container}
+				label={label}
+				action={action}
+			/>
+		</TooltipPrimitive.Root>
+	)
+}
+
+// A media control's tooltip, the control itself its trigger. Over a picture (inside the stage, or a player passing the
+// element it takes fullscreen) it takes the stage's tone and portals there; elsewhere it is the app's own.
+export function MediaTooltip({
+	label,
+	action,
+	container,
+	children
+}: {
+	label: string
+	action?: string | undefined
+	container?: HTMLElement | null | undefined
+	children: ReactElement
+}) {
+	const stage = useVideoStageContainer()
+	const target = container ?? stage
+
+	if (target === null) {
+		return (
+			<Tooltip>
+				<TooltipTrigger render={children} />
+				<TooltipContent>
+					{label}
+					{action === undefined ? null : <Kbd action={action} />}
+				</TooltipContent>
+			</Tooltip>
+		)
+	}
+
+	return (
+		<TooltipPrimitive.Root>
+			<TooltipPrimitive.Trigger render={children} />
+			<StageTooltipPopup
+				container={target}
+				label={label}
+				action={action}
+			/>
 		</TooltipPrimitive.Root>
 	)
 }

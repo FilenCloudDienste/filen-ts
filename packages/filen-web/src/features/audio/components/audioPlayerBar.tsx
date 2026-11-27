@@ -22,6 +22,9 @@ import { playerKeyTarget } from "@/lib/media/playerKeys.logic"
 import { stepMediaVolume, toggleMediaMuted } from "@/lib/media/mediaVolume"
 import type { Options } from "react-hotkeys-hook"
 import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { Kbd } from "@/lib/keymap/kbd"
 import { MediaScrubber } from "@/components/media/mediaScrubber"
 import { VolumeControl } from "@/components/media/volumeControl"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -230,36 +233,35 @@ export function AudioPlayerBar() {
 				<div className="flex flex-[2_1_0] flex-col items-center gap-1">
 					<div className="flex items-center gap-1">
 						<ShuffleToggleButton className="hidden sm:inline-flex" />
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							aria-label={t("previous")}
+						<TooltipIconButton
+							label={t("previous")}
+							shortcut={<Kbd action="audio.previous" />}
 							onClick={() => {
 								void audioEngine.skipPrevious()
 							}}
 						>
 							<SkipBack />
-						</Button>
-						<Button
+						</TooltipIconButton>
+						<TooltipIconButton
 							variant="default"
 							size="icon"
-							aria-label={isPlaying || isLoading ? t("pause") : t("play")}
+							label={isPlaying || isLoading ? t("pause") : t("play")}
+							shortcut={<Kbd action="audio.playPause" />}
 							onClick={() => {
 								audioEngine.toggle()
 							}}
 						>
 							{isLoading ? <Spinner className="size-4" /> : isPlaying ? <Pause /> : <Play />}
-						</Button>
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							aria-label={t("next")}
+						</TooltipIconButton>
+						<TooltipIconButton
+							label={t("next")}
+							shortcut={<Kbd action="audio.next" />}
 							onClick={() => {
 								void audioEngine.skipNext()
 							}}
 						>
 							<SkipForward />
-						</Button>
+						</TooltipIconButton>
 						<LoopToggleButton className="hidden sm:inline-flex" />
 						<SmoothTransitionsToggleButton className="hidden sm:inline-flex" />
 					</div>
@@ -268,24 +270,37 @@ export function AudioPlayerBar() {
 
 				{/* Right: output + queue. */}
 				<div className="flex flex-[1_1_0] items-center justify-end gap-1">
-					<VolumeControl sliderClassName="hidden lg:flex w-24" />
+					<VolumeControl
+						muteAction="audio.mute"
+						sliderClassName="hidden lg:flex w-24"
+					/>
 					<Popover
 						open={queueOpen}
 						onOpenChange={setQueueOpen}
 					>
-						<PopoverTrigger
-							render={
-								<Button
-									variant="ghost"
-									size="icon-sm"
-									aria-label={t("showQueue")}
-									aria-pressed={queueOpen}
-									className={TOGGLE_ON_CLASS}
-								>
-									<ListMusic />
-								</Button>
-							}
-						/>
+						<Tooltip>
+							<TooltipTrigger
+								render={
+									<PopoverTrigger
+										render={
+											<Button
+												variant="ghost"
+												size="icon-sm"
+												aria-label={t("showQueue")}
+												aria-pressed={queueOpen}
+												className={TOGGLE_ON_CLASS}
+											>
+												<ListMusic />
+											</Button>
+										}
+									/>
+								}
+							/>
+							<TooltipContent>
+								{t("showQueue")}
+								<Kbd action="audio.toggleQueue" />
+							</TooltipContent>
+						</Tooltip>
 						<PopoverContent
 							align="end"
 							side="top"

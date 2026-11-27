@@ -10,6 +10,8 @@ import type { QueueTrack } from "@/features/audio/store/audioQueue"
 import { ShuffleToggleButton, LoopToggleButton, NOW_PLAYING_CONTROL_CLASS } from "@/features/audio/components/queueToggles"
 import { SmoothTransitionsToggleButton } from "@/features/audio/components/smoothTransitionsToggle"
 import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
+import { LazyTooltip } from "@/components/lazyTooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { useCoarsePointer } from "@/features/office/components/ribbon/phoneMedia"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
@@ -47,17 +49,15 @@ export function NowPlayingPanel() {
 					<ShuffleToggleButton className={NOW_PLAYING_CONTROL_CLASS} />
 					<LoopToggleButton className={NOW_PLAYING_CONTROL_CLASS} />
 					<SmoothTransitionsToggleButton className={NOW_PLAYING_CONTROL_CLASS} />
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						aria-label={t("clearQueue")}
+					<TooltipIconButton
+						label={t("clearQueue")}
 						className={NOW_PLAYING_CONTROL_CLASS}
 						onClick={() => {
 							audioEngine.clearQueue()
 						}}
 					>
 						<Trash2 />
-					</Button>
+					</TooltipIconButton>
 				</div>
 			</div>
 			<QueueList
@@ -211,20 +211,25 @@ function QueueRow({
 					current={current}
 				/>
 			</button>
-			<Button
-				variant="ghost"
-				size="icon-xs"
-				aria-label={removeLabel}
-				className={cn(
-					"shrink-0 opacity-0 transition-opacity group-hover/qrow:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100 pointer-coarse:[&_svg:not([class*='size-'])]:size-4",
-					NOW_PLAYING_CONTROL_CLASS
-				)}
-				onClick={() => {
-					void audioEngine.removeAt(index)
-				}}
+			<LazyTooltip
+				label={removeLabel}
+				className="inline-flex shrink-0"
 			>
-				<X />
-			</Button>
+				<Button
+					variant="ghost"
+					size="icon-xs"
+					aria-label={removeLabel}
+					className={cn(
+						"shrink-0 opacity-0 transition-opacity group-hover/qrow:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100 pointer-coarse:[&_svg:not([class*='size-'])]:size-4",
+						NOW_PLAYING_CONTROL_CLASS
+					)}
+					onClick={() => {
+						void audioEngine.removeAt(index)
+					}}
+				>
+					<X />
+				</Button>
+			</LazyTooltip>
 		</li>
 	)
 }

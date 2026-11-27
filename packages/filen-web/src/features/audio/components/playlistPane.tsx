@@ -25,6 +25,8 @@ import { useIsOnline } from "@/lib/useIsOnline"
 import { cn } from "@filen/shared"
 import { Button } from "@/components/ui/button"
 import { KeyTooltip } from "@/lib/keymap/kbdHints"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { LazyTooltip } from "@/components/lazyTooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { REVEAL_CLASS } from "@/components/rowReveal"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -180,17 +182,24 @@ export function PlaylistPane({ playlist }: { playlist: Playlist }) {
 							</Button>
 						</KeyTooltip>
 						<DropdownMenu>
-							<DropdownMenuTrigger
-								render={
-									<Button
-										variant="ghost"
-										size="icon"
-										aria-label={t("playlistItemMenuTrigger")}
-									>
-										<MoreHorizontalIcon />
-									</Button>
-								}
-							/>
+							<Tooltip>
+								<TooltipTrigger
+									render={
+										<DropdownMenuTrigger
+											render={
+												<Button
+													variant="ghost"
+													size="icon"
+													aria-label={t("playlistItemMenuTrigger")}
+												>
+													<MoreHorizontalIcon />
+												</Button>
+											}
+										/>
+									}
+								/>
+								<TooltipContent>{t("playlistItemMenuTrigger")}</TooltipContent>
+							</Tooltip>
 							<PlaylistMenuContent
 								playlist={playlist}
 								playback={false}
@@ -629,18 +638,20 @@ function TrackRow({ playlist, file, index, playing, dragOver, removing, disabled
 				{formatBytes(file.size)}
 			</td>
 			<td className={cn(cellClass, "rounded-r-xl pr-1 text-right")}>
-				<Button
-					variant="ghost"
-					size="icon-xs"
-					aria-label={t("removeFromPlaylist")}
-					disabled={disabled || removing}
-					className={cn(REVEAL_CLASS.trow, "transition-opacity", removing && "opacity-100")}
-					onClick={() => {
-						void handleRemove()
-					}}
-				>
-					{removing ? <Spinner className="size-3.5" /> : <XIcon />}
-				</Button>
+				<LazyTooltip label={t("removeFromPlaylist")}>
+					<Button
+						variant="ghost"
+						size="icon-xs"
+						aria-label={t("removeFromPlaylist")}
+						disabled={disabled || removing}
+						className={cn(REVEAL_CLASS.trow, "transition-opacity", removing && "opacity-100")}
+						onClick={() => {
+							void handleRemove()
+						}}
+					>
+						{removing ? <Spinner className="size-3.5" /> : <XIcon />}
+					</Button>
+				</LazyTooltip>
 			</td>
 		</tr>
 	)

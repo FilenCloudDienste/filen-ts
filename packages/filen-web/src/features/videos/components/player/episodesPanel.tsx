@@ -5,6 +5,7 @@ import { CheckIcon, XIcon } from "lucide-react"
 import { deriveWatchState, itemKey, type ItemRec, type WatchStateDoc } from "@filen/shared/videos"
 import { cn } from "@filen/shared"
 import { Button } from "@/components/ui/button"
+import { MediaTooltip } from "@/components/media/video/stageButton"
 import { STAGE_POPUP_TONE_CLASS, useRestoreStageFocus } from "@/components/media/video/stageContext"
 import { episodeCode, type WatchItemTarget } from "@/features/videos/lib/player/watchTarget.logic"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
@@ -58,14 +59,16 @@ export function EpisodesPanel({
 		>
 			<div className="flex items-center justify-between px-1">
 				<h2 className="text-base font-semibold">{t("playerEpisodes")}</h2>
-				<Button
-					variant="ghost"
-					size="icon-sm"
-					aria-label={t("common:close")}
-					onClick={onClose}
-				>
-					<XIcon />
-				</Button>
+				<MediaTooltip label={t("common:close")}>
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						aria-label={t("common:close")}
+						onClick={onClose}
+					>
+						<XIcon />
+					</Button>
+				</MediaTooltip>
 			</div>
 			{seasons.length > 1 ? (
 				<div

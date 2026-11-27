@@ -888,6 +888,7 @@ export function VideoStage(props: VideoStageProps) {
 													<RotateCwIcon className="size-5" />
 												</StageIconButton>
 												<VolumeControl
+													muteAction="media.mute"
 													className="ml-1"
 													sliderClassName="max-lg:hidden"
 												/>

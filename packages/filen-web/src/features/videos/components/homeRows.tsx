@@ -31,6 +31,7 @@ import type { VideoLibraryRootView } from "@/features/videos/lib/libraryView.log
 import { VideoCard, type VideoCardAction } from "@/features/videos/components/videoCard"
 import { HomeHero } from "@/features/videos/components/homeHero"
 import { minuteStamp } from "@/lib/useNowMinute"
+import { LazyTooltip } from "@/components/lazyTooltip"
 
 // The rows' inline padding: cards start this far in, and the last card is cut at the panel's edge.
 const ROW_INSET = 16
@@ -267,28 +268,32 @@ function HomeRow({
 					aria-hidden="true"
 					className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-linear-to-l from-card to-transparent"
 				/>
-				<button
-					type="button"
-					tabIndex={-1}
-					aria-label={t("videosHomeScrollBack")}
-					className={cn(CHEVRON_CLASS, "left-1")}
-					onClick={() => {
-						scrollRow(-1)
-					}}
-				>
-					<ChevronLeftIcon className="size-4" />
-				</button>
-				<button
-					type="button"
-					tabIndex={-1}
-					aria-label={t("videosHomeScrollForward")}
-					className={cn(CHEVRON_CLASS, "right-1")}
-					onClick={() => {
-						scrollRow(1)
-					}}
-				>
-					<ChevronRightIcon className="size-4" />
-				</button>
+				<LazyTooltip label={t("videosHomeScrollBack")}>
+					<button
+						type="button"
+						tabIndex={-1}
+						aria-label={t("videosHomeScrollBack")}
+						className={cn(CHEVRON_CLASS, "left-1")}
+						onClick={() => {
+							scrollRow(-1)
+						}}
+					>
+						<ChevronLeftIcon className="size-4" />
+					</button>
+				</LazyTooltip>
+				<LazyTooltip label={t("videosHomeScrollForward")}>
+					<button
+						type="button"
+						tabIndex={-1}
+						aria-label={t("videosHomeScrollForward")}
+						className={cn(CHEVRON_CLASS, "right-1")}
+						onClick={() => {
+							scrollRow(1)
+						}}
+					>
+						<ChevronRightIcon className="size-4" />
+					</button>
+				</LazyTooltip>
 			</div>
 		</section>
 	)

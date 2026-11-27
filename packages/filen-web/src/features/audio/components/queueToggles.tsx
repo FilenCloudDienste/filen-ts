@@ -4,7 +4,8 @@ import { audioEngine } from "@/features/audio/lib/audioEngine"
 import { useAudioStore } from "@/features/audio/store/useAudioStore"
 import type { LoopMode } from "@/features/audio/store/audioQueue"
 import { nextLoopMode } from "@/features/audio/components/audioTransport.logic"
-import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
+import { Kbd } from "@/lib/keymap/kbd"
 import { TOGGLE_ON_CLASS } from "@/components/media/toggleOn"
 import { cn } from "@filen/shared"
 
@@ -24,18 +25,17 @@ export function ShuffleToggleButton({ className }: { className?: string }) {
 	const shuffleEnabled = useAudioStore(state => state.shuffleEnabled)
 
 	return (
-		<Button
-			variant="ghost"
-			size="icon-sm"
-			aria-label={t("shuffle")}
-			aria-pressed={shuffleEnabled}
+		<TooltipIconButton
+			label={t("shuffle")}
+			pressed={shuffleEnabled}
+			shortcut={<Kbd action="audio.shuffle" />}
 			className={cn(TOGGLE_ON_CLASS, className)}
 			onClick={() => {
 				audioEngine.setShuffleEnabled(!shuffleEnabled)
 			}}
 		>
 			<Shuffle />
-		</Button>
+		</TooltipIconButton>
 	)
 }
 
@@ -44,17 +44,16 @@ export function LoopToggleButton({ className }: { className?: string }) {
 	const loopMode = useAudioStore(state => state.loopMode)
 
 	return (
-		<Button
-			variant="ghost"
-			size="icon-sm"
-			aria-label={t(LOOP_LABEL_KEYS[loopMode])}
-			aria-pressed={loopMode !== "off"}
+		<TooltipIconButton
+			label={t(LOOP_LABEL_KEYS[loopMode])}
+			pressed={loopMode !== "off"}
+			shortcut={<Kbd action="audio.loop" />}
 			className={cn(TOGGLE_ON_CLASS, className)}
 			onClick={() => {
 				audioEngine.setLoopMode(nextLoopMode(loopMode))
 			}}
 		>
 			{loopMode === "one" ? <Repeat1 /> : <Repeat />}
-		</Button>
+		</TooltipIconButton>
 	)
 }

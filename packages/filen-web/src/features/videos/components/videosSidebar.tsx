@@ -19,7 +19,7 @@ import { useVideoLibraryView, useVideoRootName } from "@/features/videos/hooks/u
 import { isRootBusy, type VideoLibraryRootView } from "@/features/videos/lib/libraryView.logic"
 import { openVideosChooser, setVideosLibrariesOpen } from "@/features/videos/store/useVideosDialogStore"
 import { useIsOnline } from "@/lib/useIsOnline"
-import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/spinner"
 
@@ -132,19 +132,17 @@ export function VideosSidebar() {
 			>
 				<div className="flex shrink-0 items-center justify-between gap-2 pt-3 pr-3 pb-1 pl-5.5">
 					<h2 className="truncate pt-1 text-[15px] font-medium">{t("common:moduleVideos")}</h2>
-					<Button
-						variant="ghost"
-						size="icon-sm"
+					<TooltipIconButton
 						disabled={!isOnline}
-						aria-label={t("videosAddDirectory")}
-						title={isOnline ? undefined : t("common:offlineActionDisabled")}
+						label={t("videosAddDirectory")}
+						title={t("common:offlineActionDisabled")}
 						className="app-region-no-drag"
 						onClick={() => {
 							openVideosChooser()
 						}}
 					>
 						<PlusIcon />
-					</Button>
+					</TooltipIconButton>
 				</div>
 				<div className="flex min-h-0 flex-1 scrollbar-gutter-stable flex-col gap-0.5 overflow-y-auto px-3 pt-1 pb-3 app-region-pane">
 					<NavRow

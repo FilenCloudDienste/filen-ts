@@ -6,6 +6,7 @@ import { MediaScrubber } from "@/components/media/mediaScrubber"
 import { MediaCurrentTime, MediaDuration } from "@/components/media/mediaTime"
 import { VolumeControl } from "@/components/media/volumeControl"
 import { Button } from "@/components/ui/button"
+import { MediaTooltip } from "@/components/media/video/stageButton"
 import type { StageChapter } from "@/components/media/video/stage.logic"
 import { Spinner } from "@/components/ui/spinner"
 import { MEDIA_GLASS_SURFACE_CLASS } from "@/components/ui/surface"
@@ -411,6 +412,7 @@ export function VideoPlayer({
 					{silentCodec !== null && !gapDismissed ? (
 						<PlaybackGapNotice
 							codec={silentCodec}
+							container={container}
 							onDismiss={() => {
 								setGapDismissed(true)
 							}}
@@ -426,21 +428,27 @@ export function VideoPlayer({
 							<Spinner className="size-6" />
 						</div>
 					) : paused ? (
-						<button
-							type="button"
-							aria-label={t("audio:play")}
-							className={cn(
-								"absolute flex size-16 items-center justify-center rounded-full transition-[background-color,scale] duration-150 outline-none hover:bg-black/80 focus-visible:ring-3 focus-visible:ring-ring/50 active:scale-97 motion-reduce:transition-none",
-								MEDIA_GLASS_SURFACE_CLASS
-							)}
-							onClick={() => {
-								if (video !== null) {
-									playMedia(video)
-								}
-							}}
+						<MediaTooltip
+							label={t("audio:play")}
+							action="media.playPause"
+							container={container}
 						>
-							<PlayIcon className="size-7 translate-x-0.5 fill-current" />
-						</button>
+							<button
+								type="button"
+								aria-label={t("audio:play")}
+								className={cn(
+									"absolute flex size-16 items-center justify-center rounded-full transition-[background-color,scale] duration-150 outline-none hover:bg-black/80 focus-visible:ring-3 focus-visible:ring-ring/50 active:scale-97 motion-reduce:transition-none",
+									MEDIA_GLASS_SURFACE_CLASS
+								)}
+								onClick={() => {
+									if (video !== null) {
+										playMedia(video)
+									}
+								}}
+							>
+								<PlayIcon className="size-7 translate-x-0.5 fill-current" />
+							</button>
+						</MediaTooltip>
 					) : null}
 					<div
 						role="group"
@@ -459,18 +467,24 @@ export function VideoPlayer({
 							visible ? "opacity-100" : "pointer-events-none opacity-0"
 						)}
 					>
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							aria-label={paused ? t("audio:play") : t("audio:pause")}
-							onClick={() => {
-								if (video !== null) {
-									toggleMediaPlayback(video)
-								}
-							}}
+						<MediaTooltip
+							label={paused ? t("audio:play") : t("audio:pause")}
+							action="media.playPause"
+							container={container}
 						>
-							{paused ? <PlayIcon className="fill-current" /> : <PauseIcon className="fill-current" />}
-						</Button>
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								aria-label={paused ? t("audio:play") : t("audio:pause")}
+								onClick={() => {
+									if (video !== null) {
+										toggleMediaPlayback(video)
+									}
+								}}
+							>
+								{paused ? <PlayIcon className="fill-current" /> : <PauseIcon className="fill-current" />}
+							</Button>
+						</MediaTooltip>
 						{pendingSeek === null ? (
 							<MediaCurrentTime
 								media={video}
@@ -501,12 +515,17 @@ export function VideoPlayer({
 							media={video}
 							className="min-w-9"
 						/>
-						<VolumeControl sliderClassName="@max-md:hidden" />
+						<VolumeControl
+							muteAction="media.mute"
+							tooltipContainer={container}
+							sliderClassName="@max-md:hidden"
+						/>
 						{chapters.length >= 2 ? (
 							<ChaptersMenu
 								chapters={chapters}
 								media={video}
 								container={fullscreen ? container : null}
+								tooltipContainer={container}
 								onOpenChange={open => {
 									// A held seek lands before the menu can seek, never after the chapter picked.
 									if (open) {
@@ -528,16 +547,22 @@ export function VideoPlayer({
 							}}
 							size={Number(item.data.size)}
 							container={fullscreen ? container : null}
+							tooltipContainer={container}
 							onOpenChange={setMenuOpen}
 						/>
-						{signals === null ? <RepeatButton /> : null}
+						{signals === null ? <RepeatButton tooltipContainer={container} /> : null}
 						<PlaybackSpeedMenu
 							media={video}
 							// Only a fullscreen player needs the menu inside it; elsewhere it portals as usual.
 							container={fullscreen ? container : null}
 							onOpenChange={setMenuOpen}
 						/>
-						{pictureInPictureSupported() ? <PictureInPictureButton video={video} /> : null}
+						{pictureInPictureSupported() ? (
+							<PictureInPictureButton
+								video={video}
+								container={container}
+							/>
+						) : null}
 						{fullscreenSupported() ? (
 							<FullscreenButton
 								container={container}
@@ -616,31 +641,37 @@ function PlaybackSpeedMenu({
 	)
 }
 
-function PictureInPictureButton({ video }: { video: HTMLVideoElement | null }) {
+function PictureInPictureButton({ video, container }: { video: HTMLVideoElement | null; container: HTMLElement | null }) {
 	const { t } = useTranslation("preview")
 	const active = useMediaPictureInPicture(video)
 
 	return (
-		<Button
-			variant="ghost"
-			size="icon-sm"
-			aria-label={active ? t("previewMediaExitPictureInPicture") : t("previewMediaPictureInPicture")}
-			aria-pressed={active}
-			className="@max-sm:hidden"
-			onClick={() => {
-				if (video === null) {
-					return
-				}
-
-				if (active) {
-					void document.exitPictureInPicture().catch(() => undefined)
-				} else {
-					void video.requestPictureInPicture().catch(() => undefined)
-				}
-			}}
+		<MediaTooltip
+			label={active ? t("previewMediaExitPictureInPicture") : t("previewMediaPictureInPicture")}
+			action="media.pictureInPicture"
+			container={container}
 		>
-			<PictureInPicture2Icon />
-		</Button>
+			<Button
+				variant="ghost"
+				size="icon-sm"
+				aria-label={active ? t("previewMediaExitPictureInPicture") : t("previewMediaPictureInPicture")}
+				aria-pressed={active}
+				className="@max-sm:hidden"
+				onClick={() => {
+					if (video === null) {
+						return
+					}
+
+					if (active) {
+						void document.exitPictureInPicture().catch(() => undefined)
+					} else {
+						void video.requestPictureInPicture().catch(() => undefined)
+					}
+				}}
+			>
+				<PictureInPicture2Icon />
+			</Button>
+		</MediaTooltip>
 	)
 }
 
@@ -648,24 +679,30 @@ function FullscreenButton({ container, fullscreen }: { container: HTMLElement | 
 	const { t } = useTranslation("preview")
 
 	return (
-		<Button
-			variant="ghost"
-			size="icon-sm"
-			aria-label={fullscreen ? t("previewMediaExitFullscreen") : t("previewMediaFullscreen")}
-			onClick={() => {
-				if (container !== null) {
-					void toggleFullscreen(container).catch(() => undefined)
-				}
-			}}
+		<MediaTooltip
+			label={fullscreen ? t("previewMediaExitFullscreen") : t("previewMediaFullscreen")}
+			action="media.fullscreen"
+			container={container}
 		>
-			{fullscreen ? <MinimizeIcon /> : <MaximizeIcon />}
-		</Button>
+			<Button
+				variant="ghost"
+				size="icon-sm"
+				aria-label={fullscreen ? t("previewMediaExitFullscreen") : t("previewMediaFullscreen")}
+				onClick={() => {
+					if (container !== null) {
+						void toggleFullscreen(container).catch(() => undefined)
+					}
+				}}
+			>
+				{fullscreen ? <MinimizeIcon /> : <MaximizeIcon />}
+			</Button>
+		</MediaTooltip>
 	)
 }
 
 // Over a video that plays without its sound or its picture: names the codec the browser cannot decode,
 // offers the file instead, and leaves playback alone.
-function PlaybackGapNotice({ codec, onDismiss }: { codec: CodecId; onDismiss: () => void }) {
+function PlaybackGapNotice({ codec, container, onDismiss }: { codec: CodecId; container: HTMLElement | null; onDismiss: () => void }) {
 	const { t } = useTranslation("preview")
 	const { kind, label } = CODECS[codec]
 
@@ -684,14 +721,19 @@ function PlaybackGapNotice({ codec, onDismiss }: { codec: CodecId; onDismiss: ()
 				variant="ghost"
 				size="sm"
 			/>
-			<Button
-				variant="ghost"
-				size="icon-sm"
-				aria-label={t("previewMediaNoticeDismiss")}
-				onClick={onDismiss}
+			<MediaTooltip
+				label={t("previewMediaNoticeDismiss")}
+				container={container}
 			>
-				<XIcon />
-			</Button>
+				<Button
+					variant="ghost"
+					size="icon-sm"
+					aria-label={t("previewMediaNoticeDismiss")}
+					onClick={onDismiss}
+				>
+					<XIcon />
+				</Button>
+			</MediaTooltip>
 		</div>
 	)
 }

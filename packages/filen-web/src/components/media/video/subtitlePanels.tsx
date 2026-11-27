@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next"
 import { MinusIcon, PlusIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { MediaTooltip } from "@/components/media/video/stageButton"
 import { ChoiceRow, StagePanel } from "@/components/media/video/stageCards"
 import {
 	SUBTITLE_BACKGROUNDS,
@@ -154,32 +155,42 @@ export function SubtitleDelayPanel({
 			onClose={onClose}
 		>
 			<div className="flex items-center justify-between gap-2">
-				<Button
-					variant="outline"
-					size="icon"
-					aria-label={t("subtitleDelayEarlier")}
-					onClick={() => {
-						onChange(clampSubtitleDelay(delay - SUBTITLE_DELAY_STEP_SECONDS))
-					}}
+				<MediaTooltip
+					label={t("subtitleDelayEarlier")}
+					action="media.subtitleEarlier"
 				>
-					<MinusIcon />
-				</Button>
+					<Button
+						variant="outline"
+						size="icon"
+						aria-label={t("subtitleDelayEarlier")}
+						onClick={() => {
+							onChange(clampSubtitleDelay(delay - SUBTITLE_DELAY_STEP_SECONDS))
+						}}
+					>
+						<MinusIcon />
+					</Button>
+				</MediaTooltip>
 				<output
 					aria-live="polite"
 					className="text-lg font-medium tabular-nums"
 				>
 					{formatSubtitleDelay(delay)}
 				</output>
-				<Button
-					variant="outline"
-					size="icon"
-					aria-label={t("subtitleDelayLater")}
-					onClick={() => {
-						onChange(clampSubtitleDelay(delay + SUBTITLE_DELAY_STEP_SECONDS))
-					}}
+				<MediaTooltip
+					label={t("subtitleDelayLater")}
+					action="media.subtitleLater"
 				>
-					<PlusIcon />
-				</Button>
+					<Button
+						variant="outline"
+						size="icon"
+						aria-label={t("subtitleDelayLater")}
+						onClick={() => {
+							onChange(clampSubtitleDelay(delay + SUBTITLE_DELAY_STEP_SECONDS))
+						}}
+					>
+						<PlusIcon />
+					</Button>
+				</MediaTooltip>
 			</div>
 			<p className="text-xs text-muted-foreground">{t("subtitleDelayHint")}</p>
 			<div className="flex justify-end">

@@ -3,7 +3,8 @@ import { useTranslation } from "react-i18next"
 import { PauseIcon, PlayIcon, SkipBackIcon, SkipForwardIcon } from "lucide-react"
 import { cn } from "@filen/shared"
 import { MediaScrubber } from "@/components/media/mediaScrubber"
-import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
+import { Kbd } from "@/lib/keymap/kbd"
 import { MEDIA_GLASS_SURFACE_CLASS } from "@/components/ui/surface"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { itemTypeExtension } from "@/features/drive/lib/preview.logic"
@@ -273,38 +274,35 @@ export function AnimatedImagePlayer({ source, alt }: { source: AnimationSource; 
 					visible ? "opacity-100" : "pointer-events-none opacity-0"
 				)}
 			>
-				<Button
-					variant="ghost"
-					size="icon-sm"
-					aria-label={snapshot.playing ? t("audio:pause") : t("audio:play")}
+				<TooltipIconButton
+					label={snapshot.playing ? t("audio:pause") : t("audio:play")}
+					shortcut={<Kbd action="media.playPause" />}
 					onClick={() => {
 						playback.toggle()
 					}}
 				>
 					{snapshot.playing ? <PauseIcon className="fill-current" /> : <PlayIcon className="fill-current" />}
-				</Button>
-				<Button
-					variant="ghost"
-					size="icon-sm"
-					aria-label={t("previewAnimationPreviousFrame")}
+				</TooltipIconButton>
+				<TooltipIconButton
+					label={t("previewAnimationPreviousFrame")}
+					shortcut={<Kbd action="media.frameBack" />}
 					disabled={snapshot.index <= 0}
 					onClick={() => {
 						playback.step(-1)
 					}}
 				>
 					<SkipBackIcon />
-				</Button>
-				<Button
-					variant="ghost"
-					size="icon-sm"
-					aria-label={t("previewAnimationNextFrame")}
+				</TooltipIconButton>
+				<TooltipIconButton
+					label={t("previewAnimationNextFrame")}
+					shortcut={<Kbd action="media.frameForward" />}
 					disabled={snapshot.complete && snapshot.index >= last}
 					onClick={() => {
 						playback.step(1)
 					}}
 				>
 					<SkipForwardIcon />
-				</Button>
+				</TooltipIconButton>
 				<MediaScrubber
 					value={snapshot.index}
 					duration={last}

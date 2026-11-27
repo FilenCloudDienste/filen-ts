@@ -3,6 +3,7 @@ import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 import { XIcon } from "lucide-react"
 import { cn } from "@filen/shared"
 import { Button } from "@/components/ui/button"
+import { MediaTooltip } from "@/components/media/video/stageButton"
 import { STAGE_POPUP_TONE_CLASS, useVideoStageContainer } from "@/components/media/video/stageContext"
 import { ShortcutsList } from "@/lib/keymap/shortcutsList"
 
@@ -30,17 +31,19 @@ export function ShortcutsDialog({ open, onOpenChange }: { open: boolean; onOpenC
 				>
 					<div className="flex items-center justify-between">
 						<DialogPrimitive.Title className="text-base font-semibold">{t("shortcutsTitle")}</DialogPrimitive.Title>
-						<DialogPrimitive.Close
-							render={
-								<Button
-									variant="ghost"
-									size="icon-sm"
-									aria-label={t("close")}
-								/>
-							}
-						>
-							<XIcon />
-						</DialogPrimitive.Close>
+						<MediaTooltip label={t("close")}>
+							<DialogPrimitive.Close
+								render={
+									<Button
+										variant="ghost"
+										size="icon-sm"
+										aria-label={t("close")}
+									/>
+								}
+							>
+								<XIcon />
+							</DialogPrimitive.Close>
+						</MediaTooltip>
 					</div>
 					<ShortcutsList
 						variant="dialog"

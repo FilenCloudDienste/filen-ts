@@ -36,6 +36,8 @@ import { EpisodeRows } from "@/features/videos/components/detail/episodeRows"
 import { TitleMenu } from "@/features/videos/components/detail/titleMenu"
 import { ArtImage } from "@/features/videos/components/videoCard"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { LazyTooltip } from "@/components/lazyTooltip"
 import { Separator } from "@/components/ui/separator"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -242,31 +244,43 @@ function EpisodeRow({
 			</div>
 			<div className="-mr-2 flex shrink-0 items-center gap-1 md:mr-0">
 				{play === null || unsupported ? null : (
-					<Button
-						variant="ghost"
-						size="icon"
-						tabIndex={-1}
+					<LazyTooltip
+						label={t("videosCardPlayLabel", { title: label })}
 						className="hidden md:inline-flex"
-						aria-label={t("videosCardPlayLabel", { title: label })}
-						onClick={() => {
-							void navigate({ to: "/videos/watch/$uuid", params: { uuid: seriesId }, search: { file: play } })
-						}}
 					>
-						<PlayIcon className="fill-current" />
-					</Button>
+						<Button
+							variant="ghost"
+							size="icon"
+							tabIndex={-1}
+							className="hidden md:inline-flex"
+							aria-label={t("videosCardPlayLabel", { title: label })}
+							onClick={() => {
+								void navigate({ to: "/videos/watch/$uuid", params: { uuid: seriesId }, search: { file: play } })
+							}}
+						>
+							<PlayIcon className="fill-current" />
+						</Button>
+					</LazyTooltip>
 				)}
 				<DropdownMenu>
-					<DropdownMenuTrigger
-						render={
-							<Button
-								variant="ghost"
-								size="icon"
-								aria-label={t("detailEpisodeMenu", { title: label })}
-							>
-								<MoreHorizontalIcon />
-							</Button>
-						}
-					/>
+					<Tooltip>
+						<TooltipTrigger
+							render={
+								<DropdownMenuTrigger
+									render={
+										<Button
+											variant="ghost"
+											size="icon"
+											aria-label={t("detailEpisodeMenu", { title: label })}
+										>
+											<MoreHorizontalIcon />
+										</Button>
+									}
+								/>
+							}
+						/>
+						<TooltipContent>{t("detailEpisodeMenu", { title: label })}</TooltipContent>
+					</Tooltip>
 					<DropdownMenuContent align="end">
 						{unsupported ? null : played ? (
 							<DropdownMenuItem
@@ -658,17 +672,24 @@ export function SeriesDetail({
 							<p className="min-w-0 flex-1 text-sm font-medium">{t("playerSeason", { number: season.number })}</p>
 						)}
 						<DropdownMenu>
-							<DropdownMenuTrigger
-								render={
-									<Button
-										variant="ghost"
-										size="icon"
-										aria-label={t("detailSeasonMenu", { number: season.number })}
-									>
-										<MoreHorizontalIcon />
-									</Button>
-								}
-							/>
+							<Tooltip>
+								<TooltipTrigger
+									render={
+										<DropdownMenuTrigger
+											render={
+												<Button
+													variant="ghost"
+													size="icon"
+													aria-label={t("detailSeasonMenu", { number: season.number })}
+												>
+													<MoreHorizontalIcon />
+												</Button>
+											}
+										/>
+									}
+								/>
+								<TooltipContent>{t("detailSeasonMenu", { number: season.number })}</TooltipContent>
+							</Tooltip>
 							<DropdownMenuContent align="end">
 								<DropdownMenuItem
 									onClick={() => {

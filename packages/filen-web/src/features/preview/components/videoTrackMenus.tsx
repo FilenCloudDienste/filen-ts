@@ -4,6 +4,7 @@ import { CaptionsIcon, ListIcon } from "lucide-react"
 import { cn, formatSecondsToMediaClock } from "@filen/shared"
 import { languageName, type LadderDecision, type VideoProbe } from "@filen/shared/videos"
 import { Button } from "@/components/ui/button"
+import { MediaTooltip } from "@/components/media/video/stageButton"
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -102,6 +103,7 @@ export function TracksMenu({
 	onAudio,
 	size,
 	container,
+	tooltipContainer,
 	onOpenChange
 }: {
 	subtitles: PreviewSubtitles
@@ -113,6 +115,8 @@ export function TracksMenu({
 	// The file's bytes, for the "converted" note's decoder questions.
 	size: number
 	container: HTMLElement | null
+	// The element the player takes fullscreen, which its tooltips portal into.
+	tooltipContainer: HTMLElement | null
 	onOpenChange: (open: boolean) => void
 }) {
 	const { t, i18n } = useTranslation(["preview", "videos"])
@@ -147,17 +151,22 @@ export function TracksMenu({
 				onOpenChange(next)
 			}}
 		>
-			<DropdownMenuTrigger
-				render={
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						aria-label={label}
-					>
-						<CaptionsIcon />
-					</Button>
-				}
-			/>
+			<MediaTooltip
+				label={label}
+				container={tooltipContainer}
+			>
+				<DropdownMenuTrigger
+					render={
+						<Button
+							variant="ghost"
+							size="icon-sm"
+							aria-label={label}
+						>
+							<CaptionsIcon />
+						</Button>
+					}
+				/>
+			</MediaTooltip>
 			<DropdownMenuContent
 				side="top"
 				align="end"
@@ -239,11 +248,14 @@ export function ChaptersMenu({
 	chapters,
 	media,
 	container,
+	tooltipContainer,
 	onOpenChange
 }: {
 	chapters: readonly StageChapter[]
 	media: HTMLMediaElement | null
 	container: HTMLElement | null
+	// The element the player takes fullscreen, which its tooltips portal into.
+	tooltipContainer: HTMLElement | null
 	onOpenChange: (open: boolean) => void
 }) {
 	const { t } = useTranslation("preview")
@@ -258,17 +270,22 @@ export function ChaptersMenu({
 				onOpenChange(next)
 			}}
 		>
-			<DropdownMenuTrigger
-				render={
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						aria-label={t("previewMediaChapters")}
-					>
-						<ListIcon />
-					</Button>
-				}
-			/>
+			<MediaTooltip
+				label={t("previewMediaChapters")}
+				container={tooltipContainer}
+			>
+				<DropdownMenuTrigger
+					render={
+						<Button
+							variant="ghost"
+							size="icon-sm"
+							aria-label={t("previewMediaChapters")}
+						>
+							<ListIcon />
+						</Button>
+					}
+				/>
+			</MediaTooltip>
 			<DropdownMenuContent
 				side="top"
 				align="end"

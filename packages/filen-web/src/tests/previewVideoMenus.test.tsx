@@ -69,6 +69,7 @@ function tracksMenu(probe: VideoProbe | null, onAudio: (index: number) => void =
 		onAudio,
 		size: 0,
 		container: null,
+		tooltipContainer: null,
 		onOpenChange: () => undefined
 	})
 }
@@ -107,6 +108,7 @@ describe("the preview player's track menus", () => {
 				],
 				media: null,
 				container: null,
+				tooltipContainer: null,
 				onOpenChange: () => undefined
 			})
 		)
@@ -157,6 +159,7 @@ describe("a menu that goes away while open", () => {
 				chapters,
 				media: null,
 				container: null,
+				tooltipContainer: null,
 				onOpenChange: open => changes.push(open)
 			})
 		)
@@ -182,6 +185,7 @@ describe("a menu that goes away while open", () => {
 				onAudio: () => undefined,
 				size: 0,
 				container: null,
+				tooltipContainer: null,
 				onOpenChange: (open: boolean) => changes.push(open)
 			})
 		const view = render(menu(probeWith([audioTrack(1, "eng", 6), audioTrack(2, "deu", 2)])))

@@ -21,6 +21,7 @@ import {
 	DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import type { VideoTitleView } from "@/workers/videoIndex/view.logic"
 
 // A detail page's More menu: Versions (only with two or more), Reveal in Drive and Download for the chosen file,
@@ -54,17 +55,24 @@ export function TitleMenu({
 
 	return (
 		<DropdownMenu>
-			<DropdownMenuTrigger
-				render={
-					<Button
-						variant="ghost"
-						size="icon"
-						aria-label={t("detailMenu", { title: title.title })}
-					>
-						<MoreHorizontalIcon />
-					</Button>
-				}
-			/>
+			<Tooltip>
+				<TooltipTrigger
+					render={
+						<DropdownMenuTrigger
+							render={
+								<Button
+									variant="ghost"
+									size="icon"
+									aria-label={t("detailMenu", { title: title.title })}
+								>
+									<MoreHorizontalIcon />
+								</Button>
+							}
+						/>
+					}
+				/>
+				<TooltipContent>{t("detailMenu", { title: title.title })}</TooltipContent>
+			</Tooltip>
 			<DropdownMenuContent align="end">
 				{versions === null ? null : (
 					<DropdownMenuSub>

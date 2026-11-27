@@ -13,7 +13,7 @@ import { formatRelativeTime } from "@/lib/relativeTime"
 import { useNowMinute } from "@/lib/useNowMinute"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useIsOnline } from "@/lib/useIsOnline"
-import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { LoadingState } from "@/components/loadingState"
 import { DropdownMenu } from "@/components/ui/dropdown-menu"
 import { RowMenuTrigger } from "@/components/rowMenuTrigger"
@@ -41,19 +41,17 @@ export function PlaylistsSidebar() {
 			<div className="flex min-h-0 flex-1 scrollbar-gutter-stable flex-col overflow-y-auto p-3 app-region-pane">
 				<div className="flex items-center justify-between gap-2 pb-2.5 pl-2.5">
 					<h2 className="truncate pt-1 text-[15px] font-medium">{t("common:modulePlaylists")}</h2>
-					<Button
-						variant="ghost"
-						size="icon-sm"
+					<TooltipIconButton
 						disabled={!isOnline}
-						aria-label={t("newPlaylist")}
-						title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+						label={t("newPlaylist")}
+						title={t("common:offlineActionDisabled")}
 						className="app-region-no-drag"
 						onClick={() => {
 							openPlaylistDialog({ kind: "create" })
 						}}
 					>
 						<PlusIcon />
-					</Button>
+					</TooltipIconButton>
 				</div>
 				{playlistsQuery.status === "pending" ? (
 					<LoadingState

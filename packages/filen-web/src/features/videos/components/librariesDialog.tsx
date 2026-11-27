@@ -25,6 +25,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 
@@ -190,17 +191,24 @@ function RootCard({
 						{t("videosRescan")}
 					</Button>
 					<DropdownMenu>
-						<DropdownMenuTrigger
-							render={
-								<Button
-									variant="ghost"
-									size="icon-sm"
-									aria-label={t("videosLibraryMenu", { name })}
-								>
-									<MoreHorizontalIcon />
-								</Button>
-							}
-						/>
+						<Tooltip>
+							<TooltipTrigger
+								render={
+									<DropdownMenuTrigger
+										render={
+											<Button
+												variant="ghost"
+												size="icon-sm"
+												aria-label={t("videosLibraryMenu", { name })}
+											>
+												<MoreHorizontalIcon />
+											</Button>
+										}
+									/>
+								}
+							/>
+							<TooltipContent>{t("videosLibraryMenu", { name })}</TooltipContent>
+						</Tooltip>
 						<DropdownMenuContent align="end">
 							<DropdownMenuItem
 								disabled={chain === null}

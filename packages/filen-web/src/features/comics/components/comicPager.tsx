@@ -31,7 +31,8 @@ import { comicViews, landscapeOf, onScreen, pageOpens, viewLabel, viewOf } from 
 import { setComicDirection, setComicLayout, useComicDirection, useComicLayout } from "@/features/comics/lib/comicPreferences"
 import { ComicPage } from "@/features/comics/components/comicPage"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
-import { Button } from "@/components/ui/button"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
+import { Kbd } from "@/lib/keymap/kbd"
 import { Slider } from "@/components/ui/slider"
 
 export interface ComicPagerProps {
@@ -413,15 +414,15 @@ export function ComicPager({ source, store, pages, session }: ComicPagerProps) {
 				</div>
 			</ImageKeyGroupContext>
 			<div className="flex shrink-0 items-center gap-2 border-t px-3 py-2">
-				<Button
-					variant="ghost"
+				<TooltipIconButton
 					size="icon"
-					aria-label={direction === "rtl" ? t("previewComicNext") : t("previewComicPrevious")}
+					label={direction === "rtl" ? t("previewComicNext") : t("previewComicPrevious")}
+					shortcut={<Kbd action={direction === "rtl" ? "preview.comicNextPage" : "preview.comicPreviousPage"} />}
 					disabled={direction === "rtl" ? atEnd : atStart}
 					onClick={left}
 				>
 					<ChevronLeftIcon />
-				</Button>
+				</TooltipIconButton>
 				<div
 					dir={direction}
 					className="flex max-w-96 flex-1"
@@ -460,42 +461,40 @@ export function ComicPager({ source, store, pages, session }: ComicPagerProps) {
 				>
 					{t("previewComicCounter", { pages: label, total: pages.length })}
 				</span>
-				<Button
-					variant="ghost"
+				<TooltipIconButton
 					size="icon"
-					aria-label={direction === "rtl" ? t("previewComicPrevious") : t("previewComicNext")}
+					label={direction === "rtl" ? t("previewComicPrevious") : t("previewComicNext")}
+					shortcut={<Kbd action={direction === "rtl" ? "preview.comicPreviousPage" : "preview.comicNextPage"} />}
 					disabled={direction === "rtl" ? atStart : atEnd}
 					onClick={right}
 				>
 					<ChevronRightIcon />
-				</Button>
+				</TooltipIconButton>
 				<div className="ml-auto flex shrink-0 items-center gap-1">
 					{narrow ? null : (
-						<Button
+						<TooltipIconButton
 							variant={storedLayout === "spread" ? "secondary" : "ghost"}
 							size="icon"
-							aria-label={t("previewComicSpread")}
-							title={t("previewComicSpread")}
-							aria-pressed={storedLayout === "spread"}
+							label={t("previewComicSpread")}
+							pressed={storedLayout === "spread"}
 							onClick={() => {
 								setComicLayout(storedLayout === "spread" ? "single" : "spread")
 							}}
 						>
 							<Columns2Icon />
-						</Button>
+						</TooltipIconButton>
 					)}
-					<Button
+					<TooltipIconButton
 						variant={direction === "rtl" ? "secondary" : "ghost"}
 						size="icon"
-						aria-label={t("previewComicRightToLeft")}
-						title={t("previewComicRightToLeft")}
-						aria-pressed={direction === "rtl"}
+						label={t("previewComicRightToLeft")}
+						pressed={direction === "rtl"}
 						onClick={() => {
 							setComicDirection(direction === "rtl" ? "ltr" : "rtl")
 						}}
 					>
 						<ArrowLeftRightIcon />
-					</Button>
+					</TooltipIconButton>
 				</div>
 			</div>
 			<ConfirmDialog
