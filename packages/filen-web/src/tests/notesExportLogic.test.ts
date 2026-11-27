@@ -6,14 +6,8 @@
 
 import { describe, expect, it } from "vitest"
 import type { NoteType } from "@filen/sdk-rs"
-import {
-	exportFilename,
-	exportContent,
-	exportMimeType,
-	checklistToMarkdown,
-	checklistToMarkdownLines,
-	dedupeExportNames
-} from "@/features/notes/lib/export.logic"
+import { exportFilename, exportContent, exportMimeType, dedupeExportNames } from "@/features/notes/lib/export.logic"
+import { checklistToMarkdown, checklistToMarkdownLines } from "@/features/notes/lib/checklistMarkdown"
 
 const FALLBACK = "Untitled note"
 

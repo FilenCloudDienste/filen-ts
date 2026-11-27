@@ -1,5 +1,6 @@
 import type { Note, NoteTag } from "@filen/sdk-rs"
 import { compareIds, fastLocaleCompare, matchesNameSearch, nameSearchKey } from "@filen/shared"
+import type { NoteSearchHits } from "@/features/notes/lib/searchIndex.logic"
 
 // Port of mobile's notesSorter.sort (src/lib/sort.ts) onto the wasm Note shape. `editedTimestamp`
 // is a bigint on this surface — every comparison below stays in bigint (`<`/`>`), never Number(): a
@@ -73,23 +74,17 @@ export function normalizeSearch(search: string): string {
 	return nameSearchKey(search)
 }
 
-// Title-only half of the search match — exported so useNoteSearchBodies.ts can skip fetching a note's
-// body when its title already qualifies (a title hit never needs its body checked too), keeping the
-// eager content fetch scoped to only the notes that actually need it. A query equal to the full uuid
-// also matches, so an undecryptable note stays findable without phantom single-character hits.
+// Title-only half of the search match: a title hit never needs its body searched. A query equal to the full
+// uuid also matches, so an undecryptable note stays findable without phantom single-character hits.
 export function noteTitleMatchesSearch(note: Note, normalizedSearch: string): boolean {
 	return note.uuid.toLowerCase() === normalizedSearch || matchesNameSearch(noteSearchTitle(note), normalizedSearch)
 }
 
-// Search filter over title + full decrypted body (mirrors mobile's filterNoteListItemsBySearchQuery
-// parity: matches title + eagerly-fetched content, not just a short summary). `bodies` is the
-// uuid-keyed map of bodies ALREADY FOLDED by nameSearchKey (lowercased, NFC when non-ASCII, the same form
-// as the key, so a body hit and its preview fallback agree) useNoteSearchBodies.ts eagerly fetches ONLY while a
-// search is active (opt-in, per its own doc comment) — a note absent from the map (fetch still in
-// flight, or the caller never wired bodies through at all) falls back to `preview`, the SDK's own short summary of the same content, so a
-// body-only match briefly reads as "not found" rather than crashing or matching everything. Empty/
-// whitespace query returns the list unchanged, same as mobile.
-export function filterNotesBySearch(notes: readonly Note[], search: string, bodies?: ReadonlyMap<string, string | undefined>): Note[] {
+// Search filter over title, then the note's indexed body (`hits`, searchIndex.ts), mirroring mobile's title +
+// content search. A note the index holds no text for (not read yet, unreadable, undecryptable, or no index at
+// all) falls back to `preview`, the SDK's short summary of the same content. Empty/whitespace query returns the
+// list unchanged, same as mobile.
+export function filterNotesBySearch(notes: readonly Note[], search: string, hits?: NoteSearchHits): Note[] {
 	const normalized = normalizeSearch(search)
 
 	if (normalized.length === 0) {
@@ -97,14 +92,12 @@ export function filterNotesBySearch(notes: readonly Note[], search: string, bodi
 	}
 
 	return notes.filter(note => {
-		if (noteTitleMatchesSearch(note, normalized)) {
+		if (noteTitleMatchesSearch(note, normalized) || hits?.body.has(note.uuid) === true) {
 			return true
 		}
 
-		const body = bodies?.get(note.uuid)
-
-		if (body !== undefined) {
-			return body.includes(normalized)
+		if (hits?.indexed.has(note.uuid) === true) {
+			return false
 		}
 
 		return note.preview !== undefined && matchesNameSearch(note.preview, normalized)
@@ -113,6 +106,6 @@ export function filterNotesBySearch(notes: readonly Note[], search: string, bodi
 
 // Filter first (search narrows the set the sort then walks), sort second. Filtering before sorting is
 // also strictly cheaper — the bucket/timestamp comparator runs over the narrowed set, not the full list.
-export function sortAndFilterNotes(notes: readonly Note[], search = "", bodies?: ReadonlyMap<string, string | undefined>): Note[] {
-	return sortNotes(filterNotesBySearch(notes, search, bodies))
+export function sortAndFilterNotes(notes: readonly Note[], search = "", hits?: NoteSearchHits): Note[] {
+	return sortNotes(filterNotesBySearch(notes, search, hits))
 }

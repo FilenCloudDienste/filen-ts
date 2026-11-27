@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { noteSearchHits } from "@/tests/support/noteSearchHits"
 import type { ChatParticipant, Dir, DirPublicLink, LinkedDirsAndFiles, LinkedRootDir } from "@filen/sdk-rs"
 import { narrowItem } from "@/features/drive/lib/item"
 import { filterDriveItemsByLocalSearch } from "@/features/drive/components/directoryListing.logic"
@@ -11,7 +12,6 @@ import { buildNotesByTag, filterTagsForView } from "@/features/notes/components/
 import { testUuid } from "@/tests/support/uuid"
 import { mockNote, mockNoteTag } from "@/tests/fixtures/notes"
 import { mockChatParticipant } from "@/tests/fixtures/sdk"
-import { nameSearchKey } from "@filen/shared"
 
 // A name uploaded from macOS arrives decomposed; the query is typed composed (and the reverse).
 const NFC_NAME = "Übersicht"
@@ -104,13 +104,12 @@ describe("local name search across Unicode compositions", () => {
 		expect(filterNotesBySearch([note, other], "übers")).toEqual([note])
 	})
 
-	it("filterNotesBySearch matches a folded NFD body with an NFC query, agreeing with the preview fallback", () => {
+	it("filterNotesBySearch matches an NFD preview with an NFC query, as the indexed body does", () => {
 		const body = `Meeting notes: ${NFD_NAME} for Q3`
 		const note = mockNote({ uuid: testUuid("note-body"), title: "Untitled", preview: body })
 		const other = mockNote({ uuid: testUuid("note-body-other"), title: "Groceries", preview: "" })
-		const loaded = new Map([[note.uuid, nameSearchKey(body)]])
 
-		expect(filterNotesBySearch([note, other], "übersicht", loaded)).toEqual([note])
+		expect(filterNotesBySearch([note, other], "übersicht", noteSearchHits([note.uuid], [other.uuid]))).toEqual([note])
 		expect(filterNotesBySearch([note, other], "übersicht")).toEqual([note])
 	})
 

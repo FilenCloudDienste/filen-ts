@@ -13,13 +13,16 @@ vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/t
 // The outbox singleton only matters to the reload action, which these tests never take.
 vi.mock("@/features/notes/lib/sync", () => ({ sync: {} }))
 
+const index = vi.hoisted(() => ({ record: vi.fn(), remove: vi.fn() }))
+
+vi.mock("@/features/notes/lib/searchIndex", () => ({ noteSearchIndex: index }))
+
 import { queryClient } from "@/queries/client"
 import { queryClientWrapper } from "@/tests/testQueryClient"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
-import { NOTES_QUERY_KEY } from "@/features/notes/queries/notes"
+import { NOTES_QUERY_KEY, notesQueryRemove } from "@/features/notes/queries/notes"
 import { noteContentQueryKey, useNoteContentQuery } from "@/features/notes/queries/noteContent"
 import { handleNoteEvent } from "@/features/notes/lib/socketHandlers"
-import { useNoteSearchBodies } from "@/features/notes/hooks/useNoteSearchBodies"
 import { useNotesInflightStore } from "@/features/notes/store/useNotesInflight"
 import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
 import { testUuid } from "@/tests/support/uuid"
@@ -207,40 +210,29 @@ describe("note content request counts", () => {
 
 		expect(getNoteContent).toHaveBeenCalledTimes(2)
 	})
-
-	it("opening a note whose body a search read reuses that read", async () => {
-		const { unmount } = renderHook(() => useNoteSearchBodies(NOTES, "body"), { wrapper })
-		await drain()
-		unmount()
-
-		expect(getNoteContent).toHaveBeenCalledTimes(NOTES.length)
-
-		await visit(NOTE_A)
-
-		expect(getNoteContent).toHaveBeenCalledTimes(NOTES.length)
-	})
 })
 
-describe("useNoteSearchBodies", () => {
-	it("doesn't re-render on outbox writes that flip no candidate's editing state", async () => {
-		let renders = 0
-		renderHook(
-			({ search }: { search: string }) => {
-				renders++
+describe("search index sources", () => {
+	beforeEach(() => {
+		index.record.mockClear()
+		index.remove.mockClear()
+	})
 
-				return useNoteSearchBodies(NOTES, search)
-			},
-			{ wrapper, initialProps: { search: "" } }
-		)
-		await drain()
-		const settled = renders
+	it("indexes the editor's content read at the note's listed edited time", async () => {
+		await visit(NOTE_A)
 
-		act(() => {
-			for (let i = 0; i < 5; i++) {
-				useNotesInflightStore.getState().setInflightContent(prev => ({ ...prev, [NOTE_A.uuid]: [] }))
-			}
-		})
+		expect(index.record).toHaveBeenCalledWith(NOTE_A, `body ${NOTE_A.uuid}`)
+	})
 
-		expect(renders).toBe(settled)
+	it("indexes a decrypted socket content edit, from this account or another", () => {
+		handleNoteEvent(contentEdited(NOTE_A, 99))
+
+		expect(index.record).toHaveBeenCalledWith({ uuid: NOTE_A.uuid, editedTimestamp: 1n, noteType: "text" }, "remote")
+	})
+
+	it("drops a deleted note's text", () => {
+		notesQueryRemove(NOTE_A.uuid)
+
+		expect(index.remove).toHaveBeenCalledWith([NOTE_A.uuid])
 	})
 })

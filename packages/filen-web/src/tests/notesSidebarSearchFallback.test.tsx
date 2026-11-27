@@ -43,15 +43,15 @@ vi.mock("@/features/notes/hooks/useNoteDialogHost", () => ({
 		renderActiveDialog: () => null
 	})
 }))
-vi.mock("@/features/notes/hooks/useNoteSearchBodies", async importOriginal => {
-	const actual = await importOriginal<typeof import("@/features/notes/hooks/useNoteSearchBodies")>()
-
-	return {
-		...actual,
-		useNoteSearchBodies: () => ({ bodies: new Map(), pending: searchCounts.pending, failed: searchCounts.failed })
-	}
-})
-vi.mock("@/lib/storage/adapter", () => ({ kvGetJson: () => Promise.resolve(null), kvSetJson: () => Promise.resolve() }))
+vi.mock("@/features/notes/hooks/useNoteSearch", () => ({
+	useNoteSearch: () => ({ hits: { body: new Map(), indexed: new Set() }, pending: searchCounts.pending, failed: searchCounts.failed })
+}))
+vi.mock("@/lib/storage/adapter", () => ({
+	kvGetJson: () => Promise.resolve(null),
+	kvSetJson: () => Promise.resolve(),
+	storage: () => new Promise(() => undefined),
+	isMissingStorageMethod: () => false
+}))
 
 const { NotesSidebar } = await import("@/features/notes/components/notesSidebar")
 const { queryClient } = await import("@/queries/client")

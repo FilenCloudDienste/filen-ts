@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { noteSearchHits } from "@/tests/support/noteSearchHits"
 import type { Note } from "@filen/sdk-rs"
 import {
 	buildNotesGroupedRows,
@@ -92,10 +93,8 @@ describe("notesSidebar.logic — tags view filtering", () => {
 	})
 
 	// A member note's full body (not just its title/preview) can also qualify its tag.
-	it("keeps a tag when a MEMBER note's full body matches, via the bodies map", () => {
-		const bodies = new Map([[standup.uuid, "quarterly roadmap review"]])
-
-		const kept = filterTagsForView([work, home], notesByTag, "roadmap", bodies)
+	it("keeps a tag when a MEMBER note's indexed body matches", () => {
+		const kept = filterTagsForView([work, home], notesByTag, "roadmap", noteSearchHits([standup.uuid]))
 
 		expect(kept.map(t => t.uuid)).toStrictEqual([work.uuid])
 	})
@@ -168,8 +167,8 @@ describe("notesSidebar.logic — buildTagsViewRows flattening", () => {
 		expect(noteRowUuids(memberMatched)).toStrictEqual([a.uuid])
 	})
 
-	it("the bodies map threads through to a member-matched tag's own expansion", () => {
-		const bodies = new Map([[a.uuid, "a rare term nowhere in the title"]])
+	it("the index hits thread through to a member-matched tag's own expansion", () => {
+		const hits = noteSearchHits([a.uuid])
 
 		const rows = buildTagsViewRows({
 			tags: [work, home],
@@ -178,7 +177,7 @@ describe("notesSidebar.logic — buildTagsViewRows flattening", () => {
 			search: "rare term",
 			sortBy: DEFAULT_NOTE_TAGS_SORT_BY,
 			untaggedLabel: "Untagged",
-			bodies
+			hits
 		})
 
 		expect(tagRowUuids(rows)).toStrictEqual([work.uuid])

@@ -84,7 +84,7 @@ export function setFailedNotes(uuids: readonly string[]): void {
 // elsewhere may reseed the editor is a different question: whether it holds unsynced changes
 // (socketHandlers.ts). Only the entries this tab may show count: another live tab's typing is not this
 // tab's editing, and must not keep this tab's content from loading. Exported in state form too, for a
-// caller that already holds a store snapshot (useNoteSearchBodies).
+// caller that already holds a store snapshot (the assistant's note tools).
 export function noteIsEditing(state: NotesInflightStore, uuid: string): boolean {
 	return (state.inflightContent[uuid] ?? []).some(entryIsShowable) || state.editingSessions[uuid] === true
 }

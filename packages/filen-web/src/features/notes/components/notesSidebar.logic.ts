@@ -3,6 +3,7 @@ import {
 	sortNotes,
 	filterNotesBySearch,
 	normalizeSearch,
+	noteTitleMatchesSearch,
 	tagDisplayName,
 	compareEditedDescThenUuid
 } from "@/features/notes/lib/sort"
@@ -16,6 +17,7 @@ import {
 	type NoteBucketId
 } from "@filen/shared"
 import type { Note, NoteTag } from "@filen/sdk-rs"
+import type { NoteSearchHits } from "@/features/notes/lib/searchIndex.logic"
 
 // Pure view-model builders for the two-view sidebar. No React, no cache — the
 // component feeds in the raw notes/tags lists + the current search/expand/sort state, and gets back the
@@ -93,9 +95,19 @@ function headerForBucket(bucketId: NoteBucketId): Extract<NotesSidebarRow, { kin
 	return { kind: "header", id: `year-${String(bucketId.year)}`, label: { kind: "literal", text: String(bucketId.year) } }
 }
 
+// A search's order inside a section: title matches first, then body matches best first, then preview matches;
+// edited time breaks ties.
+function searchTier(note: Note, key: string, hits: NoteSearchHits | undefined): number {
+	if (noteTitleMatchesSearch(note, key)) {
+		return -1
+	}
+
+	return hits?.body.get(note.uuid)?.rank ?? Number.MAX_SAFE_INTEGER
+}
+
 // Partition + emit. `now` is injected (not read from Date.now inside) so the bucket thresholds are
-// deterministic under test.
-export function groupNotesForView(notes: readonly Note[], now: number): NotesSidebarRow[] {
+// deterministic under test. With a search `key`, each section is in searchTier order.
+export function groupNotesForView(notes: readonly Note[], now: number, key = "", hits?: NoteSearchHits): NotesSidebarRow[] {
 	const entries: GroupEntry[] = notes.map(note => ({
 		pinned: note.pinned,
 		favorite: note.favorite,
@@ -105,7 +117,13 @@ export function groupNotesForView(notes: readonly Note[], now: number): NotesSid
 		note
 	}))
 
-	const buckets = partitionNotesByBucket(entries, now, compareByEditedDesc)
+	const tiers = key.length > 0 ? new Map(notes.map(note => [note.uuid, searchTier(note, key, hits)])) : null
+	const compare =
+		tiers === null
+			? compareByEditedDesc
+			: (a: GroupEntry, b: GroupEntry): number =>
+					(tiers.get(a.note.uuid) ?? 0) - (tiers.get(b.note.uuid) ?? 0) || compareByEditedDesc(a, b)
+	const buckets = partitionNotesByBucket(entries, now, compare)
 	const rows: NotesSidebarRow[] = []
 
 	for (const bucket of buckets) {
@@ -121,14 +139,9 @@ export function groupNotesForView(notes: readonly Note[], now: number): NotesSid
 
 // The notes view's full row model: search-filter first (narrowing the set grouping then walks), then
 // partition into the interleaved header + note rows. `now` is injected for deterministic bucketing.
-// `bodies` holds bodies folded by nameSearchKey (see filterNotesBySearch).
-export function buildNotesGroupedRows(
-	notes: readonly Note[],
-	search: string,
-	now: number,
-	bodies?: ReadonlyMap<string, string | undefined>
-): NotesSidebarRow[] {
-	return groupNotesForView(filterNotesBySearch(notes, search, bodies), now)
+// `hits` is the search's index view (see filterNotesBySearch), which also ranks each section.
+export function buildNotesGroupedRows(notes: readonly Note[], search: string, now: number, hits?: NoteSearchHits): NotesSidebarRow[] {
+	return groupNotesForView(filterNotesBySearch(notes, search, hits), now, normalizeSearch(search), hits)
 }
 
 // ── View 2 (tags) ─────────────────────────────────────────────────────────────
@@ -182,13 +195,12 @@ function tagNameMatches(tag: NoteTag, normalized: string): boolean {
 }
 
 // A tag is shown in the tags view when the search matches its NAME or any of its member notes
-// (title or full body — `bodies` is the eager-fetched, nameSearchKey-folded full-body map from
-// useNoteSearchBodies.ts, undefined outside an active search). Empty search shows all.
+// (title or indexed body — `hits`, from useNoteSearch, undefined outside an active search). Empty search shows all.
 export function filterTagsForView(
 	tags: readonly NoteTag[],
 	notesByTag: Record<string, readonly Note[]>,
 	search: string,
-	bodies?: ReadonlyMap<string, string | undefined>
+	hits?: NoteSearchHits
 ): NoteTag[] {
 	const normalized = normalizeSearch(search)
 
@@ -201,19 +213,14 @@ export function filterTagsForView(
 			return true
 		}
 
-		return filterNotesBySearch(notesByTag[tag.uuid] ?? [], search, bodies).length > 0
+		return filterNotesBySearch(notesByTag[tag.uuid] ?? [], search, hits).length > 0
 	})
 }
 
 // The notes shown inside an expanded tag group: all of them (sorted) when the search is empty or the
 // tag NAME itself matched — a name match reveals the whole group — otherwise only the members that
-// match the search. Always sorted by the shared note sort. `bodies` holds nameSearchKey-folded bodies.
-function notesForExpandedTag(
-	tag: NoteTag,
-	notesByTag: Record<string, readonly Note[]>,
-	search: string,
-	bodies?: ReadonlyMap<string, string | undefined>
-): Note[] {
+// match the search. Always sorted by the shared note sort.
+function notesForExpandedTag(tag: NoteTag, notesByTag: Record<string, readonly Note[]>, search: string, hits?: NoteSearchHits): Note[] {
 	const notes = notesByTag[tag.uuid] ?? []
 	const normalized = normalizeSearch(search)
 
@@ -221,7 +228,7 @@ function notesForExpandedTag(
 		return sortNotes(notes)
 	}
 
-	return sortAndFilterNotes(notes, search, bodies)
+	return sortAndFilterNotes(notes, search, hits)
 }
 
 // A notes-view section header's label: either a static catalog key (Pinned/Favorited/Today/…) or a
@@ -257,8 +264,8 @@ export interface TagsViewParams {
 	sortBy: NoteTagsSortBy
 	// Localized label for the synthesized untagged row (the logic layer stays React-free).
 	untaggedLabel: string
-	// Eager-fetched, nameSearchKey-folded full-body map, undefined outside an active search (see filterTagsForView).
-	bodies?: ReadonlyMap<string, string | undefined>
+	// The search's index view, undefined outside an active search (see filterTagsForView).
+	hits?: NoteSearchHits | undefined
 }
 
 export function buildTagsViewRows({
@@ -268,14 +275,14 @@ export function buildTagsViewRows({
 	search,
 	sortBy,
 	untaggedLabel,
-	bodies
+	hits
 }: TagsViewParams): NotesSidebarRow[] {
 	const untaggedNotes = notesByTag[UNTAGGED_TAG_UUID] ?? []
 	// Appended AFTER the sort — always the bottom row regardless of the tags-sort preference — and run
 	// through the SAME search filter as a real tag so it is findable by label or by member note.
 	const visible = [
-		...sortNoteTags(filterTagsForView(tags, notesByTag, search, bodies), sortBy, notesByTag, tagDisplayName),
-		...(untaggedNotes.length > 0 ? filterTagsForView([createUntaggedTag(untaggedLabel)], notesByTag, search, bodies) : [])
+		...sortNoteTags(filterTagsForView(tags, notesByTag, search, hits), sortBy, notesByTag, tagDisplayName),
+		...(untaggedNotes.length > 0 ? filterTagsForView([createUntaggedTag(untaggedLabel)], notesByTag, search, hits) : [])
 	]
 	const rows: NotesSidebarRow[] = []
 
@@ -285,7 +292,7 @@ export function buildTagsViewRows({
 		rows.push({ kind: "tag", tag, noteCount: (notesByTag[tag.uuid] ?? []).length, expanded })
 
 		if (expanded) {
-			for (const note of notesForExpandedTag(tag, notesByTag, search, bodies)) {
+			for (const note of notesForExpandedTag(tag, notesByTag, search, hits)) {
 				rows.push({ kind: "note", note, tagUuid: tag.uuid })
 			}
 		}

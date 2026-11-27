@@ -3,6 +3,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
 import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { useNoteEditing } from "@/features/notes/store/useNotesInflight"
+import { noteSearchIndex } from "@/features/notes/lib/searchIndex"
 import type { Note } from "@filen/sdk-rs"
 
 // Per-note content, keyed on uuid so switching between two notes' editors never shows a stale read
@@ -72,6 +73,9 @@ export async function fetchTrackedNoteContent(note: Note): Promise<string> {
 	const epoch = currentSocketEpoch()
 	const editEvents = contentEditEvents
 	const content = await fetchNoteContentOrThrow(note)
+
+	// The search index takes every read for free (searchIndex.ts).
+	noteSearchIndex.record(note, content)
 
 	if (epoch !== null && socketLiveSince(epoch) && editEvents === contentEditEvents) {
 		contentReads.set(note.uuid, { epoch, content })

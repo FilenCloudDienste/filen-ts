@@ -1,4 +1,5 @@
-import { checklistParser, extensionStart } from "@filen/shared"
+import { extensionStart } from "@filen/shared"
+import { checklistToMarkdown } from "@/features/notes/lib/checklistMarkdown"
 import type { NoteType } from "@filen/sdk-rs"
 import { extensionOf, codeMirrorLanguageFor } from "@/features/drive/lib/preview.logic"
 import { sanitizeRichTextHtml } from "@/features/notes/lib/sanitizeRichText"
@@ -45,19 +46,6 @@ export function exportFilename(title: string | undefined, noteType: NoteType, fa
 	const suffix = `.${ext}`
 
 	return base.toLowerCase().endsWith(suffix.toLowerCase()) ? base : `${base}${suffix}`
-}
-
-// Checklist -> markdown task lines, preserving order and checked state exactly. checklistParser.parse
-// already flattens every `<ul data-checked>` run in document order (including multiple runs of the
-// same checked state — mobile/old-web's own "multi-run" shape), so no re-grouping is needed here; an
-// item with empty content still emits its own line (`- [ ] ` / `- [x] `, no trailing text) rather
-// than being dropped, matching the editor's own empty-row-is-valid rule (checklistEditor.logic.ts).
-export function checklistToMarkdownLines(html: string): string[] {
-	return checklistParser.parse(html).map(item => `- [${item.checked ? "x" : " "}] ${item.content}`)
-}
-
-export function checklistToMarkdown(html: string): string {
-	return checklistToMarkdownLines(html).join("\n")
 }
 
 // The exported file's actual bytes for a note's raw content, by type. text/md/code are byte-faithful

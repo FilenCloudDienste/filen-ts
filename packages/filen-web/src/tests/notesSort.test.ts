@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { noteSearchHits } from "@/tests/support/noteSearchHits"
 import {
 	filterNotesBySearch,
 	isNoteUndecryptable,
@@ -131,32 +132,30 @@ describe("filterNotesBySearch", () => {
 		expect(filterNotesBySearch(notes, "nonexistent")).toEqual([])
 	})
 
-	// Full-body search — a `bodies` map, when supplied, wins over the SDK preview snippet.
-	it("matches against the eagerly-fetched full body when supplied, even when it differs from the preview", () => {
-		const bodies = new Map([[testUuid("c"), "the quarterly plan mentions a deep-dive on onboarding metrics"]])
-
-		expect(filterNotesBySearch(notes, "onboarding metrics", bodies).map(n => n.title)).toEqual(["Work notes"])
+	// Full-body search: the index's verdict wins over the SDK preview snippet.
+	it("matches a note the index matched, even when its preview does not", () => {
+		expect(filterNotesBySearch(notes, "onboarding metrics", noteSearchHits([testUuid("c")])).map(n => n.title)).toEqual(["Work notes"])
 	})
 
-	it("falls back to the preview for a note absent from the bodies map (still in flight)", () => {
-		const bodies = new Map([[testUuid("a"), "unrelated body text"]])
-
-		expect(filterNotesBySearch(notes, "quarterly", bodies).map(n => n.title)).toEqual(["Work notes"])
+	it("does not fall back to the preview of a note the index holds text for", () => {
+		expect(filterNotesBySearch(notes, "quarterly", noteSearchHits([], [testUuid("c")]))).toEqual([])
 	})
 
-	it("never checks the body at all for a note whose title already matches", () => {
-		const bodies = new Map([[testUuid("a"), "this body text never gets read"]])
-
-		expect(filterNotesBySearch(notes, "groceries", bodies).map(n => n.title)).toEqual(["Groceries"])
+	it("falls back to the preview for a note the index holds no text for (still being read)", () => {
+		expect(filterNotesBySearch(notes, "quarterly", noteSearchHits([], [testUuid("a")])).map(n => n.title)).toEqual(["Work notes"])
 	})
 
-	// The bodies map arrives pre-lowercased (useNoteSearchBodies' select); only the preview is lowered here.
-	it("matches a mixed-case query against a pre-lowercased body and a mixed-case preview", () => {
+	it("keeps a title match whatever the index says", () => {
+		expect(filterNotesBySearch(notes, "groceries", noteSearchHits([], [testUuid("a")])).map(n => n.title)).toEqual(["Groceries"])
+	})
+
+	it("matches a mixed-case query against an index hit and a mixed-case preview", () => {
 		const bodyNote = mockNote({ uuid: testUuid("d"), title: "delta", preview: "" })
 		const previewNote = mockNote({ uuid: testUuid("e"), title: "echo", preview: "Launch Checklist" })
-		const bodies = new Map([[bodyNote.uuid, "the launch checklist lives here"]])
 
-		expect(filterNotesBySearch([bodyNote, previewNote], "  LAUNCH Checklist ", bodies).map(n => n.title)).toEqual(["delta", "echo"])
+		expect(
+			filterNotesBySearch([bodyNote, previewNote], "  LAUNCH Checklist ", noteSearchHits([bodyNote.uuid])).map(n => n.title)
+		).toEqual(["delta", "echo"])
 	})
 })
 
@@ -214,11 +213,10 @@ describe("sortAndFilterNotes", () => {
 		expect(sortAndFilterNotes([b, a]).map(n => n.title)).toEqual(["a", "b"])
 	})
 
-	it("narrows by full body via the bodies map when neither title nor preview matches", () => {
+	it("narrows by the index's body match when neither title nor preview matches", () => {
 		const note = mockNote({ uuid: testUuid("body-only"), title: "gamma", preview: "preview" })
-		const bodies = new Map([[note.uuid, "a term buried deep in the note body"]])
 
-		expect(sortAndFilterNotes([note], "buried", bodies).map(n => n.uuid)).toStrictEqual([note.uuid])
+		expect(sortAndFilterNotes([note], "buried", noteSearchHits([note.uuid])).map(n => n.uuid)).toStrictEqual([note.uuid])
 		expect(sortAndFilterNotes([note], "buried")).toHaveLength(0)
 	})
 })

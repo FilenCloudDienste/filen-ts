@@ -49,6 +49,10 @@ vi.mock("sonner", () => ({ toast }))
 
 vi.mock("@/lib/i18n", () => ({ i18n: { t: (key: string) => key } }))
 
+const { indexRecord } = vi.hoisted(() => ({ indexRecord: vi.fn() }))
+
+vi.mock("@/features/notes/lib/searchIndex", () => ({ noteSearchIndex: { record: indexRecord, remove: vi.fn() } }))
+
 import { queryClient as testQueryClient } from "@/queries/client"
 import { Sync } from "@/features/notes/lib/sync"
 import { NOTES_QUERY_KEY, notesQueryUpdate } from "@/features/notes/queries/notes"
@@ -266,6 +270,37 @@ describe("push loop — prune by LOCAL author-time during the round trip (#4)", 
 
 		expect(remaining).toHaveLength(1)
 		expect(remaining?.[0]?.content).toBe("typed-during-push")
+	})
+})
+
+describe("push loop — search index", () => {
+	it("indexes the pushed content at the edited time the push returned", async () => {
+		const s = await startedSync()
+		const note = makeNote("a")
+		const pushed = { ...note, editedTimestamp: 50n }
+
+		indexRecord.mockClear()
+		setNoteContent.mockResolvedValue(pushed)
+		setStore({ a: [{ timestamp: 100, content: "pushed text", note }] })
+
+		s.executeNow()
+		await settled()
+
+		expect(indexRecord).toHaveBeenCalledWith(pushed, "pushed text")
+	})
+
+	it("indexes nothing for a push that failed", async () => {
+		const s = await startedSync()
+		const note = makeNote("a")
+
+		indexRecord.mockClear()
+		setNoteContent.mockRejectedValue(new Error("network"))
+		setStore({ a: [{ timestamp: 100, content: "unsent", note }] })
+
+		s.executeNow()
+		await settled()
+
+		expect(indexRecord).not.toHaveBeenCalled()
 	})
 })
 

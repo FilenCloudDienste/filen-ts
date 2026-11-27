@@ -30,6 +30,7 @@ import { kvGetJson, kvSetJson, kvDelete } from "@/lib/storage/adapter"
 import { decodeOutboxPayload, type OutboxChannelTransport, type OutboxRole, type PushDetail } from "@/lib/storage/outboxChannel"
 import { resendDelay } from "@/lib/storage/outboxResend"
 import { noteContentQueryKey, readNoteContent } from "@/features/notes/queries/noteContent"
+import { noteSearchIndex } from "@/features/notes/lib/searchIndex"
 import { fetchNotes, notesQueryFind, notesQueryUpdate } from "@/features/notes/queries/notes"
 import {
 	useNotesInflightStore,
@@ -1236,6 +1237,10 @@ export class Sync {
 
 					if (push.data !== undefined) {
 						patchRowAfterPush(push.data)
+
+						if (!isAborted(signal)) {
+							noteSearchIndex.record(push.data, mostRecentContent.content)
+						}
 					}
 
 					// A successful push clears any accumulated rejection count for this note.

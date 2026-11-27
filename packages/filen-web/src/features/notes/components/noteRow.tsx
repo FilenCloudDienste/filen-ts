@@ -7,6 +7,7 @@ import { cn } from "@filen/shared"
 import { noteRowIcon } from "@/features/notes/lib/icon.logic"
 import { noteDisplayTitle } from "@/features/notes/lib/displayTitle"
 import { tagDisplayName } from "@/features/notes/lib/sort"
+import { splitSnippet } from "@/features/notes/lib/searchIndex.logic"
 import { selectionAwareLinkClick } from "@/features/drive/lib/listbox"
 import {
 	NOTE_ROW_MAX_TAGS,
@@ -49,6 +50,8 @@ export interface NoteRowProps {
 	inflight: boolean
 	// The user's default note type (Appearance → Notes): its notes carry no type mark.
 	defaultNoteType: NoteType
+	// The text around the active search's hits in this note's body (searchIndex.ts), shown instead of the preview.
+	snippet?: string | undefined
 	// Threaded straight through to the row's own menu (noteMenu.tsx's onAction/onDuplicated) — the
 	// sidebar's ONE dialog host (useNoteDialogHost) is the actual dialog-opening implementation, not
 	// this row.
@@ -120,6 +123,22 @@ function RowFlagToggle({
 	)
 }
 
+// A search snippet with its hits marked. Plain text nodes only: the snippet is note text.
+function SearchSnippet({ snippet }: { snippet: string }) {
+	return splitSnippet(snippet).map((part, index) =>
+		part.hit ? (
+			<mark
+				key={index}
+				className="rounded-sm bg-transparent font-medium text-foreground"
+			>
+				{part.text}
+			</mark>
+		) : (
+			<span key={index}>{part.text}</span>
+		)
+	)
+}
+
 // One note row, shared by both sidebar views (the notes list and a tag group's expanded members). The
 // row container carries the selection state; the Link inside it is the activation target — a Link to
 // /notes/$uuid, where the uuid is a selection key, not a path hierarchy — with the pin/favorite toggles
@@ -141,6 +160,7 @@ export function NoteRow({
 	isOnline,
 	inflight,
 	defaultNoteType,
+	snippet,
 	onAction,
 	onDuplicated,
 	onPointerSelect,
@@ -233,7 +253,14 @@ export function NoteRow({
 							</span>
 							<span className="truncate text-xs text-muted-foreground">
 								{noteRowTime(Number(note.editedTimestamp), now)}
-								{preview !== undefined ? ` · ${preview}` : null}
+								{snippet !== undefined ? (
+									<>
+										{" · "}
+										<SearchSnippet snippet={snippet} />
+									</>
+								) : preview !== undefined ? (
+									` · ${preview}`
+								) : null}
 							</span>
 							{tags.length > 0 ? (
 								<span className="flex min-w-0 gap-1 overflow-hidden pt-0.5">

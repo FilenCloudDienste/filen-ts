@@ -4,6 +4,7 @@ import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
 import { queryClient } from "@/queries/client"
 import { cachedQuery, patchQuery, replaceOrAppend } from "@/queries/patch"
 import type { Note } from "@filen/sdk-rs"
+import { noteSearchIndex } from "@/features/notes/lib/searchIndex"
 
 // One global list query, mirroring mobile's useNotesWithContent.query.ts — every variant (all
 // notes / tags view / a single tag's notes) derives from this one cache slice client-side (see
@@ -107,7 +108,9 @@ export function notesQueryUpsert(note: Note): void {
 	notesQueryUpdate(prev => replaceOrAppend(prev, note, n => n.uuid === note.uuid))
 }
 
+// The note is gone for this account (deleted, or left): so is its indexed text.
 export function notesQueryRemove(uuid: string): void {
+	noteSearchIndex.remove([uuid])
 	notesQueryUpdate(prev => prev.filter(n => n.uuid !== uuid))
 }
 

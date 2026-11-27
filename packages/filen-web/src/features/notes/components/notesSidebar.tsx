@@ -58,7 +58,9 @@ import { selectableNotesForSelectAll } from "@/features/notes/lib/selectionFlags
 import { useNotesSelectionStore } from "@/features/notes/store/useNotesSelectionStore"
 import { useNotesListSelection } from "@/features/notes/hooks/useNotesListSelection"
 import { useNoteDialogHost } from "@/features/notes/hooks/useNoteDialogHost"
-import { noteSearchEmptyState, useNoteSearchBodies } from "@/features/notes/hooks/useNoteSearchBodies"
+import { useNoteSearch } from "@/features/notes/hooks/useNoteSearch"
+import { noteSearchEmptyState } from "@/features/notes/lib/searchIndex"
+import type { NoteSearchHits } from "@/features/notes/lib/searchIndex.logic"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { useNowMinute } from "@/lib/useNowMinute"
 import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
@@ -316,10 +318,10 @@ export function NotesSidebar() {
 	// the same "just don't include it" mechanism the selection ghost-purge already relies on, no separate
 	// purge step needed.
 	const allNotes = filterNotesByBlockedOwner(notesQuery.data ?? [], blocked)
-	// Eager, opt-in full-body fetch feeding the filters below; see useNoteSearchBodies.ts's own
-	// doc comment for why this never fires a single request outside an active search.
-	const searchBodies = useNoteSearchBodies(allNotes, search)
-	const searchEmptyState = noteSearchEmptyState(searchBodies)
+	// The on-device full-text index feeding the filters below; nothing is read outside an active search.
+	const searchResult = useNoteSearch(allNotes, search)
+	const searchHits = search.trim().length > 0 ? searchResult.hits : undefined
+	const searchEmptyState = noteSearchEmptyState(searchResult)
 
 	// One host for every row's menu (noteRow.tsx never opens a dialog itself — it only calls onAction).
 	// currentUuid drives the delete/leave nav-away guard: a row-triggered delete of the currently-open
@@ -340,7 +342,7 @@ export function NotesSidebar() {
 	// member notes interleaved.
 	const rows: NotesSidebarRow[] =
 		viewMode === "notes"
-			? buildNotesGroupedRows(allNotes, search, now, searchBodies.bodies)
+			? buildNotesGroupedRows(allNotes, search, now, searchHits)
 			: buildTagsViewRows({
 					tags: allTags,
 					notesByTag: buildNotesByTag(allNotes),
@@ -348,7 +350,7 @@ export function NotesSidebar() {
 					search,
 					sortBy: tagsSortBy,
 					untaggedLabel: t("notesTagUntagged"),
-					bodies: searchBodies.bodies
+					hits: searchHits
 				})
 
 	// The ordered, currently-visible note set click-selection ranges walk (search-filtered, spans both
@@ -713,7 +715,7 @@ export function NotesSidebar() {
 						<SidebarNotice
 							icon={<SearchIcon />}
 							title={t("notesSearchEmptyTitle")}
-							description={t("notesSearchUnsearchedBodies", { count: searchBodies.failed })}
+							description={t("notesSearchUnsearchedBodies", { count: searchResult.failed })}
 						/>
 					)
 				}
@@ -938,6 +940,7 @@ export function NotesSidebar() {
 						isOnline={isOnline}
 						inflightUuids={inflightUuids}
 						defaultNoteType={defaultNoteType}
+						searchHits={searchHits}
 						selectableIndexByRowKey={selectableIndexByRowKey}
 						onToggleTag={toggleTag}
 						onOpenNote={openNote}
@@ -982,6 +985,8 @@ interface NotesSidebarListProps {
 	isOnline: boolean
 	inflightUuids: ReadonlySet<string>
 	defaultNoteType: NoteType
+	// The active search's body matches: a matching row shows its snippet.
+	searchHits: NoteSearchHits | undefined
 	selectableIndexByRowKey: ReadonlyMap<string, number>
 	onToggleTag: (uuid: string) => void
 	onOpenNote: (note: Note) => Promise<void>
@@ -1009,6 +1014,7 @@ function NotesSidebarList({
 	isOnline,
 	inflightUuids,
 	defaultNoteType,
+	searchHits,
 	selectableIndexByRowKey,
 	onToggleTag,
 	onOpenNote,
@@ -1219,6 +1225,7 @@ function NotesSidebarList({
 								isOnline={isOnline}
 								inflight={inflightUuids.has(row.note.uuid)}
 								defaultNoteType={defaultNoteType}
+								snippet={searchHits?.body.get(row.note.uuid)?.snippet}
 								onAction={onNoteAction}
 								onDuplicated={duplicated => {
 									void onOpenNote(duplicated)

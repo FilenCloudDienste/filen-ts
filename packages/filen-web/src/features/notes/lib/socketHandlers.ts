@@ -10,6 +10,7 @@ import { useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdi
 import { sync } from "@/features/notes/lib/sync"
 import { notePreviewFor } from "@/features/notes/lib/sync.logic"
 import { notesQueryUpdate, notesQueryRemove, notesQueryFind, notesQueryRefetch, notesQueryUpsert } from "@/features/notes/queries/notes"
+import { noteSearchIndex } from "@/features/notes/lib/searchIndex"
 import { markNoteContentUnsynced, noteContentQueryKey, readNoteContent } from "@/features/notes/queries/noteContent"
 import { isOwnNotePush, recordNotePush } from "@/features/notes/lib/pushEchoes"
 import {
@@ -154,6 +155,11 @@ function handleContentEdited(inner: Extract<NoteSocketEvent["inner"], { type: "c
 	markNoteContentUnsynced(inner.note)
 
 	const content = decryptedOrSkip(inner.content, "note contentEdited")
+
+	// The cloud's text at this edit, whatever this tab holds unsynced.
+	if (content !== undefined) {
+		noteSearchIndex.record({ uuid: inner.note, editedTimestamp: inner.editedTimestamp, noteType: inner.noteType }, content)
+	}
 
 	// Echo suppression. The server sends an edit back to every session of its author, this browser's own
 	// pushes included, and applying one as an edit made elsewhere would clobber the editor that typed it.

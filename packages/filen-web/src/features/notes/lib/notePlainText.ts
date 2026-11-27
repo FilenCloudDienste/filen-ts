@@ -1,5 +1,5 @@
 import type { Note } from "@filen/sdk-rs"
-import { checklistToMarkdown } from "@/features/notes/lib/export.logic"
+import { checklistToMarkdown } from "@/features/notes/lib/checklistMarkdown"
 
 // Block breaks become line breaks, then the markup goes: what the reader would show, as plain text.
 function richTextToPlain(html: string): string {
@@ -12,7 +12,7 @@ function richTextToPlain(html: string): string {
 }
 
 // A note's content as plain text, by its type.
-export function notePlainText(note: Note, content: string): string {
+export function notePlainText(note: Pick<Note, "noteType">, content: string): string {
 	switch (note.noteType) {
 		case "rich":
 			return richTextToPlain(content)

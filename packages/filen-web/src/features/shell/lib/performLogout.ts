@@ -1,5 +1,6 @@
 import { runLogout } from "@/lib/logout"
 import { sync as notesSync } from "@/features/notes/lib/sync"
+import { noteSearchIndex } from "@/features/notes/lib/searchIndex"
 import { sync as chatsSync } from "@/features/chats/lib/sync"
 import { clearAllTyping } from "@/features/chats/lib/typing"
 import { detachUnreadBadges } from "@/features/chats/lib/messagesVersion"
@@ -202,6 +203,8 @@ async function signOut(run: SignOutRun): Promise<boolean> {
 	// (useUnsyncedWork) instead of promising it syncs back on the next sign-in.
 	notesSync.cancel()
 	chatsSync.cancel()
+	// The notes search index likewise: no write may land after the wipe, which also drops its tables.
+	noteSearchIndex.close()
 	// Videos watch state likewise: its upload aborts, and the progress it kept in localStorage (which the kv wipe
 	// doesn't reach) goes now.
 	watchState.cancel()
