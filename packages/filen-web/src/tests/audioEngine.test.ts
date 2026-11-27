@@ -31,6 +31,8 @@ vi.mock("@/lib/storage/leader", () => ({
 import { useAudioStore } from "@/features/audio/store/useAudioStore"
 import { MEDIA_FORMAT_UNSUPPORTED, mediaFailureDTO } from "@/lib/media/mediaFailure"
 import { ErrorWithDTO } from "@/lib/sdk/errors"
+import { MediaSessionOwners } from "@/lib/media/mediaSessionOwner"
+import { claimOnPlay } from "@/features/audio/lib/mediaSession"
 import { setMediaVolume, toggleMediaMuted, useMediaVolumeStore } from "@/lib/media/mediaVolume"
 import {
 	AudioEngine,
@@ -709,6 +711,39 @@ function mediaSessionSpy(): { states: string[]; publisher: NonNullable<AudioEngi
 		}
 	}
 }
+
+describe("the Media Session while another player holds it", () => {
+	it("takes it back on resume, pausing that player, so the media keys follow the music again", async () => {
+		const owners = new MediaSessionOwners(null)
+		const music = owners.create("audio")
+		const previewPaused = vi.fn()
+		const preview = owners.create("preview")
+		const session = mediaSessionSpy()
+		const h = makeHarness({ mediaSession: claimOnPlay(session.publisher, music) })
+
+		music.acquire()
+		await h.engine.enqueueAndPlay([track("a")], 0)
+		await flush()
+		h.engine.pause()
+
+		preview.setOnPreempt(previewPaused)
+		preview.acquire()
+		expect(music.active).toBe(false)
+
+		h.engine.resume()
+		await flush()
+
+		expect(music.active).toBe(true)
+		expect(previewPaused).toHaveBeenCalledTimes(1)
+		expect(session.states.at(-1)).toBe("playing")
+
+		// Already on top: a later play takes nothing from anyone.
+		h.engine.pause()
+		h.engine.resume()
+		await flush()
+		expect(previewPaused).toHaveBeenCalledTimes(1)
+	})
+})
 
 describe("a play() the browser refused", () => {
 	it("holds paused on the track instead of skipping it, and plays it in place on the next resume", async () => {

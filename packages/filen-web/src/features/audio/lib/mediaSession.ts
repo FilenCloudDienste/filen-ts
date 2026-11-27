@@ -190,6 +190,26 @@ function makeMetadata(fields: { title: string; artist: string; album: string }, 
 	return new MediaMetadata({ ...fields, artwork: [entry] })
 }
 
+// The engine's publisher taking the Media Session back whenever playback starts: a preview or the video stage holding
+// it pauses (its owner's onPreempt), and the media keys and lock screen follow the music again. Only on the transition
+// to playing, and only when another owner is on top.
+export function claimOnPlay(
+	publisher: MediaSessionPublisher,
+	owner: { readonly active: boolean; acquire: () => void }
+): MediaSessionPublisher {
+	return {
+		setMetadata: publisher.setMetadata,
+		setPositionState: publisher.setPositionState,
+		setPlaybackState: state => {
+			if (state === "playing" && !owner.active) {
+				owner.acquire()
+			}
+
+			publisher.setPlaybackState(state)
+		}
+	}
+}
+
 // The browser publisher (engine → OS). Every method no-ops when Media Session is unsupported. Position
 // state is guarded against the non-finite/zero durations setPositionState rejects (it throws on those),
 // and clamped so position never exceeds duration.

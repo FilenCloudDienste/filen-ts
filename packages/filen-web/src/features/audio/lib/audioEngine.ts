@@ -1,7 +1,7 @@
 import { onlineManager } from "@tanstack/react-query"
 import { AudioEngine } from "@/features/audio/lib/engine"
 import { createDomAudioAdapter, createDomPrefetchAdapter, resolveTrackSource } from "@/features/audio/lib/bytes"
-import { bindMediaSessionActions, createMediaSessionPublisher } from "@/features/audio/lib/mediaSession"
+import { bindMediaSessionActions, claimOnPlay, createMediaSessionPublisher } from "@/features/audio/lib/mediaSession"
 import { trackMetadata } from "@/features/audio/lib/trackMetadata"
 import { notifyFormatFailure } from "@/features/audio/lib/formatFailureNotice"
 import { hydrateAudioPrefs, useAudioStore } from "@/features/audio/store/useAudioStore"
@@ -17,6 +17,7 @@ import { log } from "@/lib/log"
 
 // The audio engine's share of the page's Media Session: the bottom of the owner stack. A video player taking
 // the session over pauses the engine; when it lets go the engine's metadata and handlers come back.
+// Playing again takes it back (claimOnPlay), pausing that player.
 export const audioMediaSession = mediaSessionOwners.create("audio", {
 	onPreempt: () => {
 		audioEngine.pause()
@@ -61,7 +62,7 @@ export const audioEngine = new AudioEngine({
 	createElement: createDomAudioAdapter,
 	createPrefetchElement: createDomPrefetchAdapter,
 	resolveSource: resolveTrackSource,
-	mediaSession: createMediaSessionPublisher(audioMediaSession),
+	mediaSession: claimOnPlay(createMediaSessionPublisher(audioMediaSession), audioMediaSession),
 	resolveCover: track => trackMetadata.playbackCover(track),
 	onFormatFailure: notifyFormatFailure,
 	isOnline: () => onlineManager.isOnline(),
