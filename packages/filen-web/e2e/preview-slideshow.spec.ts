@@ -25,11 +25,36 @@ function previewOf(page: Page, name: string): Locator {
 	return page.getByRole("dialog", { name, exact: true })
 }
 
-async function shownName(page: Page): Promise<string> {
-	return page
-		.getByRole("dialog")
-		.filter({ has: slideshowBar(page) })
-		.evaluate(dialog => document.getElementById(dialog.getAttribute("aria-labelledby") ?? "")?.textContent ?? "")
+// Records, in the page, each file the slideshow shows from now on (consecutive repeats dropped): every title change is
+// seen, however late the test looks, so the first slide is never missed while the bar is worked. Read with seenNames.
+async function recordShownNames(page: Page): Promise<void> {
+	await page.evaluate(() => {
+		const seen: string[] = []
+		const read = (): void => {
+			const dialog = [...document.querySelectorAll('[role="dialog"]')].find(
+				candidate => candidate.querySelector('[role="group"][aria-label="Slideshow controls"]') !== null
+			)
+			const name =
+				dialog === undefined ? "" : (document.getElementById(dialog.getAttribute("aria-labelledby") ?? "")?.textContent ?? "")
+
+			if (name !== "" && seen.at(-1) !== name) {
+				seen.push(name)
+			}
+		}
+
+		read()
+		new MutationObserver(read).observe(document.body, {
+			subtree: true,
+			childList: true,
+			characterData: true,
+			attributeFilter: ["aria-labelledby"]
+		})
+		Object.assign(window, { slideshowSeen: seen })
+	})
+}
+
+async function seenNames(page: Page): Promise<string[]> {
+	return page.evaluate(() => [...((window as unknown as { slideshowSeen?: string[] }).slideshowSeen ?? [])])
 }
 
 // Picks a time per image on the bar; the menu closes on the pick.
@@ -69,25 +94,12 @@ test.describe("preview slideshow", () => {
 		const bar = await openAndStart(page)
 		const interval = bar.getByRole("button", { name: "Time per image", exact: true })
 
+		// Every file shown, in order, from the first slide on (it may step while the interval is picked).
+		await recordShownNames(page)
 		await pickInterval(page, "3 s")
+		await expect.poll(async () => (await seenNames(page)).at(-1), { timeout: STEP_TIMEOUT_MS * 2 }).toBe(THIRD)
 
-		// Every file shown, in order, sampled far more often than a slide changes.
-		const seen: string[] = []
-
-		await expect
-			.poll(
-				async () => {
-					const name = await shownName(page)
-
-					if (name !== "" && seen.at(-1) !== name) {
-						seen.push(name)
-					}
-
-					return name
-				},
-				{ timeout: STEP_TIMEOUT_MS * 2, intervals: [200] }
-			)
-			.toBe(THIRD)
+		const seen = await seenNames(page)
 
 		expect(seen).toEqual([FIRST, SECOND, THIRD])
 		expect(seen).not.toContain(TEXT)
