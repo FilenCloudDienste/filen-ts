@@ -8,8 +8,8 @@ import {
 	openCompressDialog,
 	openExtractDialog,
 	openRowMenu,
+	openSelectionMenu,
 	openSubmenu,
-	selectionBar,
 	selectRows,
 	setArchiveMemory,
 	type CompressDialogPO
@@ -180,8 +180,10 @@ test.describe("archive dialogs", () => {
 
 		// An archive with a text file: no bulk Extract; two archives would have one (below).
 		await selectRows(listbox, [DIALOG_A, DIALOG_C])
-		await expect(selectionBar(page).getByRole("button", { name: "Compress", exact: true })).toBeVisible()
-		await expect(selectionBar(page).getByRole("button", { name: "Extract", exact: true })).toHaveCount(0)
+		await openSelectionMenu(page)
+		await expect(page.getByRole("menuitem", { name: menuItemName("Compress") })).toBeVisible()
+		await expect(page.getByRole("menuitem", { name: menuItemName("Extract") })).toHaveCount(0)
+		await dismissOverlays(page)
 
 		// A directory: Compress, no Extract.
 		const root = await toFixtureRoot(page)
@@ -231,8 +233,10 @@ test.describe("archive dialogs", () => {
 		await dismissOverlays(page)
 
 		await selectRows(browse.listbox, [TREE, SMALL, LOCKED])
-		await expect(selectionBar(page).getByRole("button", { name: "Extract", exact: true })).toBeVisible()
-		await expect(selectionBar(page).getByRole("button", { name: "Compress", exact: true })).toBeVisible()
+		await openSelectionMenu(page)
+		await expect(page.getByRole("menuitem", { name: menuItemName("Extract") })).toBeVisible()
+		await expect(page.getByRole("menuitem", { name: menuItemName("Compress") })).toBeVisible()
+		await dismissOverlays(page)
 
 		expect(cspViolations).toEqual([])
 	})
@@ -272,12 +276,16 @@ test.describe("archive dialogs", () => {
 			await dismissOverlays(page)
 			await selectRows(listbox, [TREE, SMALL])
 
-			for (const name of ["Compress", "Extract"]) {
-				const button = selectionBar(page).getByRole("button", { name, exact: true })
+			await openSelectionMenu(page)
 
-				await expect(button).toBeDisabled()
-				await expect(button).toHaveAccessibleDescription(OFFLINE_TITLE)
+			for (const name of ["Compress", "Extract"]) {
+				const trigger = page.getByRole("menuitem", { name: menuItemName(name) })
+
+				await expect(trigger).toHaveAttribute("aria-disabled", "true")
+				await expect(trigger).toHaveAttribute("title", OFFLINE_TITLE)
 			}
+
+			await dismissOverlays(page)
 
 			// The options dialog opens online and loses its submit offline.
 			await setAppOffline(page, false)

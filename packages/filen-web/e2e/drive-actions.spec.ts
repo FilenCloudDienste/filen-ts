@@ -47,8 +47,7 @@ test.describe("drive bulk actions", () => {
 		// Trash is never gated by undecryptable — always present for a /drive selection regardless of
 		// what this unknown account's first item happens to be.
 		await expect(page.getByRole("button", { name: "Trash", exact: true })).toBeVisible()
-		// No bulk color surface exists (mobile parity) — proven live, not just by the closed BulkActionId
-		// union at the type level.
+		// Color is never pinned to the bar's face: it sits in the bar's More actions menu, where the item takes one.
 		await expect(page.getByRole("button", { name: "Color", exact: true })).toHaveCount(0)
 
 		await page.getByRole("button", { name: "Clear selection", exact: true }).click()
@@ -58,7 +57,7 @@ test.describe("drive bulk actions", () => {
 		await expect(page.getByRole("button", { name: "Clear selection", exact: true })).toHaveCount(0)
 	})
 
-	test("the bulk Move button opens the destination picker without moving anything", async ({ page }) => {
+	test("the bulk Move menu opens the destination picker without moving anything", async ({ page }) => {
 		await bootTo(page)
 		const { listbox, hasItems } = await waitForListingSettled(page)
 		test.skip(!hasItems, "drive root has no items in this account — nothing to select")
@@ -72,6 +71,7 @@ test.describe("drive bulk actions", () => {
 		await expect(moveButton).toBeVisible()
 
 		await moveButton.click()
+		await page.getByRole("menuitem", { name: menuItemName("Choose destination…") }).click()
 
 		const dialog = page.getByRole("dialog")
 		await expect(dialog).toBeVisible()

@@ -31,6 +31,7 @@ import {
 	waitForListingSettled,
 	LIVE_WRITE_TIMEOUT_MS
 } from "./helpers/listing"
+import { menuItemName } from "./helpers/menu"
 import { resolveModKey } from "./helpers/modkey"
 
 // Copies land through the SDK's copy job (download + re-upload), so each leg waits on the job's own
@@ -106,10 +107,11 @@ test.describe("drive copy", () => {
 			await uploadTextFile(page, listbox, secondName)
 			await expect(listbox.getByRole("option")).toHaveCount(2, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
-			// Both rows selected: the bulk bar's Copy opens the picker on the whole selection.
+			// Both rows selected: the bulk bar's Copy menu opens the picker on the whole selection.
 			await listbox.getByRole("option", { name: firstName }).click()
 			await listbox.getByRole("option", { name: secondName }).click({ modifiers: ["Shift"] })
 			await page.getByRole("toolbar", { name: "Selection actions" }).getByRole("button", { name: "Copy", exact: true }).click()
+			await page.getByRole("menuitem", { name: menuItemName("Choose destination…") }).click()
 
 			const dialog = page.getByRole("dialog", { name: "Copy to" })
 

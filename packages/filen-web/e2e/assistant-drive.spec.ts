@@ -9,6 +9,7 @@ import {
 	waitForAssistantTurnEnd
 } from "./helpers/assistant"
 import { trackCspViolations } from "./helpers/csp"
+import { menuItemName } from "./helpers/menu"
 import {
 	descendInto,
 	LIVE_WRITE_TIMEOUT_MS,
@@ -216,6 +217,7 @@ test.describe("assistant drive writes", () => {
 			await fileRow.click()
 			await expect(fileRow).toHaveAttribute("aria-selected", "true")
 			await page.getByRole("button", { name: "Move", exact: true }).click()
+			await page.getByRole("menuitem", { name: menuItemName("Choose destination…") }).click()
 
 			const dialog = page.getByRole("dialog").filter({ has: page.getByRole("heading", { name: "Select destination", exact: true }) })
 

@@ -165,7 +165,13 @@ export function selectionBar(page: Page): Locator {
 	return page.getByRole("toolbar", { name: "Selection actions" })
 }
 
-// The Compress or Extract entries for `names`: one row's submenu, or the selection bar's menu for several.
+// The selection bar's More actions menu: every entry of the selection's menu the bar does not pin.
+export async function openSelectionMenu(page: Page): Promise<void> {
+	await selectionBar(page).getByRole("button", { name: "More actions", exact: true }).click()
+	await expect(page.getByRole("menu").first()).toBeVisible()
+}
+
+// The Compress or Extract entries for `names`: one row's submenu, or the selection bar's More actions submenu for several.
 async function openArchiveEntries(page: Page, listbox: Locator, names: readonly string[], action: "Compress" | "Extract"): Promise<void> {
 	const [only] = names
 
@@ -177,8 +183,8 @@ async function openArchiveEntries(page: Page, listbox: Locator, names: readonly 
 	}
 
 	await selectRows(listbox, names)
-	await selectionBar(page).getByRole("button", { name: action, exact: true }).click()
-	await expect(page.getByRole("menu").first()).toBeVisible()
+	await openSelectionMenu(page)
+	await openSubmenu(page, action)
 }
 
 // ── Compress ────────────────────────────────────────────────────────────────────────────────────────

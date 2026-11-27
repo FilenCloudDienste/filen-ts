@@ -17,8 +17,9 @@ import {
 	openCompressDialog,
 	openExtractDialog,
 	openExtractSubmenu,
+	openSelectionMenu,
+	openSubmenu,
 	pickTreeTarget,
-	selectionBar,
 	selectRows,
 	uploadArchives
 } from "./helpers/archive"
@@ -553,7 +554,8 @@ test.describe("archive extract", () => {
 			const fixture = await gotoFixture(page, "archive-bulk")
 
 			await selectRows(fixture, [BULK_A, BULK_B, BULK_C])
-			await selectionBar(page).getByRole("button", { name: "Extract", exact: true }).click()
+			await openSelectionMenu(page)
+			await openSubmenu(page, "Extract")
 			await pickTreeTarget(page, "Extract to", [scratchName, destName], "Extract here")
 
 			// The first encrypted one asks; once the second waits too, the prompt offers it the same password.
@@ -593,7 +595,8 @@ test.describe("archive extract", () => {
 			const scratch = await gotoDirectory(page, [scratchName])
 
 			await selectRows(scratch, [ownA, ownB])
-			await selectionBar(page).getByRole("button", { name: "Extract", exact: true }).click()
+			await openSelectionMenu(page)
+			await openSubmenu(page, "Extract")
 			await page.getByRole("menuitem", { name: menuItemName("Extract here (each into its own directory)") }).click()
 			await expectEntries(scratch, [destName, ownA, ownB, archiveStem(ownA), archiveStem(ownB)])
 			await expect(pendingUploadsList(page)).toHaveCount(0, { timeout: ARCHIVE_JOB_TIMEOUT_MS })

@@ -22,8 +22,8 @@ import { menuItemLabels, menuItemName } from "./helpers/menu"
 // browser-side counterpart: it opens the real context menu / bulk bar and reads back menuitem text.
 //
 // Every expected sequence below is an ID list — the SAME id sequence the unit tests already pin for
-// each variant/type (itemMenu.logic.ts's driveItemActions / bulkActionBar.logic.ts's
-// driveBulkActions) — never a hand-typed English string. Each id is resolved to its rendered label
+// each variant/type (selectionActions.ts's driveSelectionActions, one item or several) — never a hand-typed
+// English string. Each id is resolved to its rendered label
 // through ACTION_DEFS + the real English "drive" catalog, so a copy-edited label can never desync
 // silently from what this file asserts.
 type ActionId = keyof typeof ACTION_DEFS
@@ -38,7 +38,7 @@ function labelsFor(ids: ActionId[]): string[] {
 
 // Neither row is an archive, so neither menu has Extract (archive-dialogs.spec.ts covers it), and Copy
 // link is offered in the links view only.
-// Drive-variant directory (itemMenu.test.ts's own "drive variant, directory" case): color, no versions.
+// Drive-variant directory (selectionActionsSingle.test.ts's own "drive variant, directory" case): color, no versions.
 const DIRECTORY_MENU_IDS: ActionId[] = [
 	"rename",
 	"move",
@@ -53,7 +53,7 @@ const DIRECTORY_MENU_IDS: ActionId[] = [
 	"publicLink",
 	"trash"
 ]
-// Drive-variant file (itemMenu.test.ts's own "drive variant, file" case): versions, no color.
+// Drive-variant file (selectionActionsSingle.test.ts's own "drive variant, file" case): versions, no color.
 const FILE_MENU_IDS: ActionId[] = [
 	"rename",
 	"move",
@@ -68,11 +68,12 @@ const FILE_MENU_IDS: ActionId[] = [
 	"publicLink",
 	"trash"
 ]
-// Trash variant, either type (itemMenu.test.ts's own "trash variant" case) — the maximally-reduced set.
+// Trash variant, either type (selectionActionsSingle.test.ts's own "trash variant" case) — the maximally-reduced set.
 const TRASH_MENU_IDS: ActionId[] = ["restore", "deletePermanently", "info", "copyId"]
-// Bulk bar, plain drive-variant selection (bulkActionBar.test.ts's own "drive variant" case) — no
-// color/versions id exists in the bulk builder at all, per-type or not.
-const BULK_MENU_IDS: ActionId[] = ["favorite", "move", "copy", "compress", "share", "download", "trash"]
+// A directory and a file selected together (selectionActions.test.ts's own "mixed" case): no Color (not every item is
+// a directory) and no single-item entries. The bar pins all but Compress, which sits in its More actions menu.
+const BULK_MENU_IDS: ActionId[] = ["move", "copy", "compress", "favorite", "download", "share", "trash"]
+const BULK_BAR_IDS: ActionId[] = ["move", "copy", "favorite", "download", "share", "trash"]
 // Above an item's own actions: Open for anything that opens (a directory, a previewable file), then a
 // writable directory's New submenu and Paste. Those two are not item actions, so they resolve straight
 // from the catalog.
@@ -186,8 +187,9 @@ test.describe("context menus", () => {
 			await expect(page.getByText("2 selected", { exact: true })).toBeVisible()
 
 			const expectedBulkLabels = labelsFor(BULK_MENU_IDS)
+			const expectedBarLabels = labelsFor(BULK_BAR_IDS)
 			const bulkButtons = await Promise.all(
-				expectedBulkLabels.map(async label => {
+				expectedBarLabels.map(async label => {
 					const button = page.getByRole("button", { name: label, exact: true })
 					await expect(button).toBeVisible()
 					const box = await button.boundingBox()
@@ -195,11 +197,20 @@ test.describe("context menus", () => {
 				})
 			)
 			const renderOrder = [...bulkButtons].sort((a, b) => a.x - b.x).map(entry => entry.label)
-			expect(renderOrder).toEqual(expectedBulkLabels)
-			// No color/versions button ever renders in the bulk bar — neither id exists in
-			// driveBulkActions at all, per-type or not (unlike the per-item menu above).
+			expect(renderOrder).toEqual(expectedBarLabels)
 			await expect(page.getByRole("button", { name: "Color", exact: true })).toHaveCount(0)
 			await expect(page.getByRole("button", { name: "Versions", exact: true })).toHaveCount(0)
+
+			// The rest of the selection's menu sits under the bar's More actions.
+			await page
+				.getByRole("toolbar", { name: "Selection actions" })
+				.getByRole("button", { name: "More actions", exact: true })
+				.click()
+			const overflowMenu = page.getByRole("menu")
+			await expect(overflowMenu).toBeVisible()
+			await expect.poll(() => menuItemLabels(overflowMenu.getByRole("menuitem"))).toEqual(labelsFor(["compress"]))
+			await page.keyboard.press("Escape")
+			await expect(overflowMenu).toHaveCount(0)
 
 			// 2b. Right-clicking a row that is PART of the current 2+ selection opens the BULK menu — the
 			// same descriptor set the bar above renders, from the same builder.

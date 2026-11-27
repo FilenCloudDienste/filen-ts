@@ -297,7 +297,11 @@ test("the whole selection downloads as one archive of PDFs from the selection ba
 		)
 		await listbox.getByRole("option", { name: document }).click()
 		await listbox.getByRole("option", { name: workbook }).click({ modifiers: [MOD_KEY] })
-		await page.getByRole("button", { name: drive.driveActionDownloadAs, exact: true }).click()
+		await page
+			.getByRole("toolbar", { name: "Selection actions" })
+			.getByRole("button", { name: drive.driveItemMenuTrigger, exact: true })
+			.click()
+		await page.getByRole("menuitem", { name: menuItemName(drive.driveActionDownloadAs) }).click()
 		await page.getByRole("menuitem", { name: menuItemName(drive.driveDownloadAsPdf) }).click()
 		// Several files arrive as one zip (no browser limit on downloads started without a click drops any).
 		await expect.poll(() => downloads.length, { timeout: EXPORT_TIMEOUT_MS }).toBe(1)
