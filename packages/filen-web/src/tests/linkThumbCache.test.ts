@@ -16,12 +16,26 @@ function notFound(): DOMException {
 	return new DOMException("no such entry", "NotFoundError")
 }
 
-// Enough of OPFS for a store: nested directories, files written through a sync access handle, listing, removal.
+// Enough of OPFS for a store: nested directories, files written through a sync access handle, listing, removal. A
+// handle to a removed directory answers NotFound, as a real one does.
 class FakeDirectory {
 	readonly directories = new Map<string, FakeDirectory>()
 	readonly files = new Map<string, Uint8Array<ArrayBuffer>>()
+	removed = false
+
+	private markRemoved(): void {
+		this.removed = true
+
+		for (const directory of this.directories.values()) {
+			directory.markRemoved()
+		}
+	}
 
 	getDirectoryHandle(name: string, options?: FileSystemGetDirectoryOptions): Promise<FakeDirectory> {
+		if (this.removed) {
+			return Promise.reject(notFound())
+		}
+
 		const existing = this.directories.get(name)
 
 		if (existing === undefined && options?.create !== true) {
@@ -36,6 +50,10 @@ class FakeDirectory {
 	}
 
 	getFileHandle(name: string, options?: FileSystemGetFileOptions): Promise<unknown> {
+		if (this.removed) {
+			return Promise.reject(notFound())
+		}
+
 		if (!this.files.has(name)) {
 			if (options?.create !== true) {
 				return Promise.reject(notFound())
@@ -74,6 +92,8 @@ class FakeDirectory {
 	}
 
 	removeEntry(name: string): Promise<void> {
+		this.directories.get(name)?.markRemoved()
+
 		if (this.directories.delete(name) || this.files.delete(name)) {
 			return Promise.resolve()
 		}
@@ -110,7 +130,8 @@ vi.mock("comlink", () => ({ transfer: <T>(value: T) => value }))
 
 type CacheModule = typeof import("@/features/publicLinks/lib/thumbCache")
 
-// A new visit: a fresh module (a new tab's key and directory) over the same disk.
+// A new visit: a fresh module (a new tab's key and directory) over the same disk. The worker's write side is loaded
+// apart from the page's, so each keeps its own memoized directory handles, as two realms do.
 async function visit(): Promise<CacheModule> {
 	vi.resetModules()
 
@@ -118,6 +139,7 @@ async function visit(): Promise<CacheModule> {
 	const { linkThumbStore } = await import("@/features/publicLinks/lib/thumbCache.logic")
 
 	storeLinkedThumbnail.mockImplementation((tab, uuid, sealed) => writeStoreEntry(linkThumbStore(tab), uuid, sealed))
+	vi.resetModules()
 
 	return await import("@/features/publicLinks/lib/thumbCache")
 }
@@ -274,6 +296,23 @@ describe("the tab's sealed store", () => {
 		await cache.wipeLinkThumbnailStore()
 
 		expect(root.directories.has("linkThumbnails")).toBe(false)
+		expect(await cache.readLinkThumbnail("u1")).toBeNull()
+		// Reading after the wipe created nothing.
+		expect(root.directories.has("linkThumbnails")).toBe(false)
+	})
+
+	it("stores and reads back again in the same tab after a wipe", async () => {
+		const cache = await visit()
+
+		await cache.storeLinkThumbnail("u1", BYTES)
+		expect(await cache.readLinkThumbnail("u1")).not.toBeNull()
+
+		await cache.wipeLinkThumbnailStore()
+		await cache.storeLinkThumbnail("u2", BYTES)
+
+		const blob = await cache.readLinkThumbnail("u2")
+
+		expect(new Uint8Array((await blob?.arrayBuffer()) ?? new ArrayBuffer(0))).toEqual(BYTES)
 		expect(await cache.readLinkThumbnail("u1")).toBeNull()
 	})
 

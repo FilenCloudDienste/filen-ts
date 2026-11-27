@@ -73,6 +73,9 @@ export interface OpfsBlobStore {
 	// False for a store a logout wipe must stay gone from: a write landing in its directory after the directory was
 	// removed is dropped instead of re-creating it, and no read, delete or sweep creates it.
 	recreateWhenRemoved?: boolean
+	// True for a store whose directory only a write creates (a write after a wipe creates it again): a read, delete,
+	// listing or sweep of a missing one finds nothing and leaves no directory behind.
+	createOnWriteOnly?: boolean
 }
 
 // How many entries of one directory are sized at once: enough to overlap the getFile round trips, few enough to

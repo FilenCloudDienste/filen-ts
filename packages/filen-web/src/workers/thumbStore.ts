@@ -135,9 +135,14 @@ export async function copyThumbs(copies: readonly ThumbnailCopy[]): Promise<void
 }
 
 // A store that must stay wiped is reached through the session's memoized handle, which keeps failing once a wipe
-// removed its directory, and is never created here; any other is walked (and created) afresh.
+// removed its directory, and is never created here; one only a write creates is walked afresh without creating it;
+// any other is walked (and created) afresh.
 function storeDirectory(store: OpfsBlobStore): Promise<FileSystemDirectoryHandle> {
-	return store.recreateWhenRemoved === false ? cachedOpfsDirectory(store.dir, false) : opfsDirectory(store.dir)
+	if (store.recreateWhenRemoved === false) {
+		return cachedOpfsDirectory(store.dir, false)
+	}
+
+	return opfsDirectory(store.dir, store.createOnWriteOnly !== true)
 }
 
 // Enumerates every entry of a store with its on-disk size and last-write time — sweepStore's own

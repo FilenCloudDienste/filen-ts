@@ -182,4 +182,17 @@ describe("OPFS blob stores", () => {
 		expect(await at(root, ["videos", "art"])).toBeNull()
 		expect(await readStoreBlob(ART_STORE, "a.p")).toBeNull()
 	})
+
+	it("creates a store only a write creates on its first write, never on a read, delete or sweep", async () => {
+		const store = { dir: ["writeOnly", "t"], ext: ".x", createOnWriteOnly: true }
+
+		expect(await readStoreBlob(store, "a")).toBeNull()
+		await deleteStoreEntry(store, "a")
+		await sweepStore(store, 1)
+		expect(await at(root, ["writeOnly"])).toBeNull()
+
+		await writeStoreEntry(store, "a", new Uint8Array(2))
+		expect((await at(root, store.dir))?.files.size).toBe(1)
+		forgetOpfsDirectory(store.dir)
+	})
 })

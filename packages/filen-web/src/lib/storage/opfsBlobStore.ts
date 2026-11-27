@@ -4,9 +4,9 @@ import { cachedOpfsDirectory, forgetOpfsDirectory, isNotFoundError, type OpfsBlo
 // which only a dedicated worker has: see workers/thumbStore.ts).
 
 // Neither a read nor a delete creates a store that must stay wiped: in Chromium a handle is a path, so re-creating
-// the directory would let a write still out in a worker through its pre-wipe handle.
+// the directory would let a write still out in a worker through its pre-wipe handle. Nor one only a write creates.
 function storeDirectory(store: OpfsBlobStore): Promise<FileSystemDirectoryHandle> {
-	return cachedOpfsDirectory(store.dir, store.recreateWhenRemoved !== false)
+	return cachedOpfsDirectory(store.dir, store.recreateWhenRemoved !== false && store.createOnWriteOnly !== true)
 }
 
 // A miss (never written, or evicted) resolves null. A NotFoundError may also mean the memoized directory

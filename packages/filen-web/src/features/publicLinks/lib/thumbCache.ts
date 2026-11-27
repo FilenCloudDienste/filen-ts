@@ -175,7 +175,7 @@ export async function deleteLinkThumbnail(uuid: string): Promise<void> {
 }
 
 // Sign-out and the Storage page's clear: every tab's sealed thumbnails, those of every other open link tab included
-// (they regenerate on demand). This tab keeps its key and writes on.
+// (they regenerate on demand). This tab keeps its key, and its next write creates the tree again.
 export async function wipeLinkThumbnailStore(): Promise<void> {
 	const tab = opened === null ? null : await opened
 
