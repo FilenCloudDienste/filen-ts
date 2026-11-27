@@ -593,8 +593,36 @@ export const drive = {
 	driveColorRed: "Red",
 	/** Directory color swatch */
 	driveColorGray: "Gray",
-	/** Color dialog — label on the custom color swatch/field pair (the native browser color picker plus its accompanying hex input) */
+	/** Directory color swatch */
+	driveColorOrange: "Orange",
+	/** Directory color swatch */
+	driveColorYellow: "Yellow",
+	/** Directory color swatch */
+	driveColorLime: "Lime",
+	/** Directory color swatch */
+	driveColorMint: "Mint",
+	/** Directory color swatch */
+	driveColorTeal: "Teal",
+	/** Directory color swatch */
+	driveColorCyan: "Cyan",
+	/** Directory color swatch */
+	driveColorIndigo: "Indigo",
+	/** Directory color swatch */
+	driveColorPink: "Pink",
+	/** Directory color swatch */
+	driveColorBrown: "Brown",
+	/** Directory color swatch */
+	driveColorMaroon: "Maroon",
+	/** Directory color swatch */
+	driveColorSlate: "Slate",
+	/** Color dialog — accessible name of the swatch group */
+	driveColorSwatchesLabel: "Colors",
+	/** Color dialog — label on the swatch opening the custom color picker, and on the picker itself */
 	driveColorCustomLabel: "Custom color",
+	/** Color dialog — label of the hex text field in the custom color picker */
+	driveColorHexLabel: "Hex value",
+	/** Color dialog — accessible name of the row of recently used custom colors */
+	driveColorRecentLabel: "Recent colors",
 	/** Color dialog — button applying the currently entered custom hex to the directory */
 	driveColorCustomApply: "Apply",
 

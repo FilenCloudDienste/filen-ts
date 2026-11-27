@@ -1338,6 +1338,9 @@ importers:
       react:
         specifier: ^19.3.1
         version: 19.3.1
+      react-colorful:
+        specifier: 5.8.2
+        version: 5.8.2(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       react-dom:
         specifier: ^19.3.1
         version: 19.3.1(react@19.3.1)
@@ -9599,6 +9602,12 @@ packages:
   rc@1.2.8:
     resolution: {integrity: sha512-y3bGgqKj3QBdxLbLkomlohkvsA8gdAiUQlSBJnBhfn+BPxg4bc62d8TcBW15wavDfgexCgccckhcZvywyQYPOw==}
     hasBin: true
+
+  react-colorful@5.8.2:
+    resolution: {integrity: sha512-gZ35jg1OQ71cwpHK74WoIFU4poCy9EjjjYqUGP1C04hn9gH7CD4cd2fGgLT2G/m8oAoxG2bJXjTVP+bBUzonKQ==}
+    peerDependencies:
+      react: '>=16.8.0'
+      react-dom: '>=16.8.0'
 
   react-devtools-core@6.1.5:
     resolution: {integrity: sha512-ePrwPfxAnB+7hgnEr8vpKxL9cmnp7F322t8oqcPshbIQQhDKgFDW4tjhF2wjVbdXF9O/nyuy3sQWd9JGpiLPvA==}
@@ -20842,8 +20851,6 @@ snapshots:
     dependencies:
       whatwg-url: 5.0.0
 
-  node-forge@1.4.0: {}
-
   node-forge@1.4.3: {}
 
   node-gyp@12.4.0:
@@ -21463,6 +21470,11 @@ snapshots:
       ini: 1.3.8
       minimist: 1.2.8
       strip-json-comments: 2.0.1
+
+  react-colorful@5.8.2(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
+    dependencies:
+      react: 19.3.1
+      react-dom: 19.3.1(react@19.3.1)
 
   react-devtools-core@6.1.5:
     dependencies:

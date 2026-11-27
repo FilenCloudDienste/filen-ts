@@ -1,60 +1,86 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { CheckIcon } from "lucide-react"
+import { Radio as RadioPrimitive } from "@base-ui/react/radio"
 import type { DirColor } from "@filen/sdk-rs"
-import type { DriveKey } from "@/lib/i18n"
 import { type DirectoryItem, setColor } from "@/features/drive/lib/actions"
-import { DEFAULT_CUSTOM_HEX, isCustomDirColor, normalizeCustomHex } from "@/features/drive/lib/dirColor"
+import {
+	DEFAULT_CUSTOM_HEX,
+	DIR_COLOR_SWATCHES,
+	dirColorRadioValue,
+	isCustomDirColor,
+	withRecentDirColor
+} from "@/features/drive/lib/dirColor"
+import { loadRecentDirColors, saveRecentDirColors } from "@/features/drive/lib/recentDirColors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { cn, dirColorHex } from "@filen/shared"
+import { dirColorHex } from "@filen/shared"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { pendingGuardedOpenChange } from "@/components/dialogs/dismissal.logic"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Field, FieldContent, FieldLabel } from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
-import { Spinner } from "@/components/ui/spinner"
+import { RadioGroup } from "@/components/ui/radio-group"
+import { CustomColorPopover } from "@/features/drive/components/customColorPopover"
 
 export interface ColorDialogProps {
 	directory: DirectoryItem
 	onClose: () => void
 }
 
-interface Swatch {
-	color: DirColor
-	labelKey: DriveKey
+interface SwatchProps {
+	value: string
+	label: string
+	fill: string
+	disabled: boolean
+	title: string
 }
 
-// The 6 named quick-pick colors — each swatch's fill comes from the shared dirColorHex map so it
-// matches the tint the same directory shows in its listing row/tile and info-dialog hero. A freeform
-// custom color (DirColor's own string arm) is offered separately below via the native browser color
-// picker (mobile parity: DirColor.Custom, minus a hand-rolled hue/saturation canvas — see the custom
-// section's own comment for why the native input is preferred here).
-const SWATCHES: Swatch[] = [
-	{ color: "default", labelKey: "driveColorDefault" },
-	{ color: "blue", labelKey: "driveColorBlue" },
-	{ color: "green", labelKey: "driveColorGreen" },
-	{ color: "purple", labelKey: "driveColorPurple" },
-	{ color: "red", labelKey: "driveColorRed" },
-	{ color: "gray", labelKey: "driveColorGray" }
-]
+function Swatch({ value, label, fill, disabled, title }: SwatchProps) {
+	return (
+		<RadioPrimitive.Root
+			value={value}
+			disabled={disabled}
+			aria-label={label}
+			title={title}
+			className="flex size-10 items-center justify-center rounded-full focus-ring-row ring-1 ring-foreground/10 outline-none data-checked:ring-2 data-checked:ring-ring data-checked:ring-offset-2 data-checked:ring-offset-popover data-disabled:pointer-events-none data-disabled:opacity-50"
+			style={{ backgroundColor: fill }}
+		>
+			<RadioPrimitive.Indicator>
+				<CheckIcon
+					aria-hidden="true"
+					className="size-4 text-white"
+				/>
+			</RadioPrimitive.Indicator>
+		</RadioPrimitive.Root>
+	)
+}
 
-// Small swatch-grid modal, mounted-when-active by the listing's dialog host (directoryListing.tsx) —
-// there's no trigger element left to anchor a popover to by the time this opens (the context menu it
-// was dispatched from is already closed), so this renders as a modal like its sibling dialogs.
+// Mounted-when-active by the listing's dialog host (directoryListing.tsx): there's no trigger left to
+// anchor a popover to once the context menu that dispatched it has closed.
 export function ColorDialog({ directory, onClose }: ColorDialogProps) {
 	const { t } = useTranslation(["drive", "common"])
 	const isOnline = useIsOnline()
 	const [pending, setPending] = useState(false)
-	// Seeded from the directory's own current custom color when it has one, else a neutral starting
-	// point — never one of the 6 named DIR_COLOR_HEX values, so the custom field never silently reads
-	// as "already applied" for a directory that's merely using a named color.
-	const [customHex, setCustomHex] = useState(
-		isCustomDirColor(directory.data.color) ? dirColorHex(directory.data.color) : DEFAULT_CUSTOM_HEX
-	)
-	const normalizedCustomHex = normalizeCustomHex(customHex)
-	const customSelected = isCustomDirColor(directory.data.color)
+	const [recent, setRecent] = useState<string[]>([])
+	const current = directory.data.color
+	const selectedValue = dirColorRadioValue(current)
+	const disabled = pending || !isOnline
+	const offlineTitle = isOnline ? undefined : t("common:offlineActionDisabled")
+	const onSwatch = DIR_COLOR_SWATCHES.some(swatch => swatch.value === selectedValue)
+	const onRecent = recent.includes(selectedValue)
+
+	useEffect(() => {
+		let cancelled = false
+
+		void loadRecentDirColors().then(list => {
+			if (!cancelled) {
+				setRecent(list)
+			}
+		})
+
+		return () => {
+			cancelled = true
+		}
+	}, [])
 
 	const handleOpenChange = pendingGuardedOpenChange(pending, next => {
 		if (!next) {
@@ -72,6 +98,14 @@ export function ColorDialog({ directory, onClose }: ColorDialogProps) {
 			return
 		}
 
+		if (isCustomDirColor(color)) {
+			const next = withRecentDirColor(recent, color)
+
+			if (next.length !== recent.length || next.some((each, index) => each !== recent[index])) {
+				saveRecentDirColors(next)
+			}
+		}
+
 		onClose()
 	}
 
@@ -84,91 +118,65 @@ export function ColorDialog({ directory, onClose }: ColorDialogProps) {
 				<DialogHeader>
 					<DialogTitle>{t("driveColorDialogTitle")}</DialogTitle>
 				</DialogHeader>
-				<div className="grid grid-cols-6 gap-3 py-2">
-					{SWATCHES.map(swatch => {
-						const selected = directory.data.color === swatch.color
-
-						return (
-							<button
-								key={swatch.color}
-								type="button"
-								disabled={pending || !isOnline}
-								aria-pressed={selected}
-								aria-label={t(swatch.labelKey)}
-								title={!isOnline ? t("common:offlineActionDisabled") : undefined}
-								onClick={() => {
-									void handleSelect(swatch.color)
-								}}
-								className={cn(
-									"flex size-10 items-center justify-center rounded-full focus-ring-row ring-1 ring-foreground/10 transition-transform outline-none disabled:pointer-events-none disabled:opacity-50",
-									selected && "ring-2 ring-ring ring-offset-2 ring-offset-popover"
-								)}
-								style={{ backgroundColor: dirColorHex(swatch.color) }}
-							>
-								{selected ? (
-									<CheckIcon
-										aria-hidden="true"
-										className="size-4 text-white"
-									/>
-								) : null}
-							</button>
-						)
-					})}
-				</div>
-				{/* Custom color — a native <input type="color"> rather than a hand-rolled hue/saturation
-				canvas: every target browser's own color picker already renders exactly the "hue slider +
-				saturation/value panel" mobile's screen describes, with its own hex entry, fully theme/
-				accessibility-aware, at zero added bundle weight or pointer-math surface to maintain. The
-				swatch shows the live picked color and doubles as the trigger (native inputs of this type
-				open their picker on click/Enter); the text field mirrors the same value so a hex can also
-				be typed or pasted directly, each side updating the other. */}
-				<div className="flex items-center gap-3 border-t border-border/50 pt-4">
-					<Field
-						orientation="horizontal"
-						className="flex-1 items-center"
-					>
-						<input
-							type="color"
-							aria-label={t("driveColorCustomLabel")}
-							disabled={pending || !isOnline}
-							value={normalizedCustomHex ?? DEFAULT_CUSTOM_HEX}
-							onChange={event => {
-								setCustomHex(event.target.value)
-							}}
-							className={cn(
-								"size-10 shrink-0 appearance-none rounded-full border-0 bg-transparent p-0 outline-none disabled:pointer-events-none disabled:opacity-50 [&::-moz-color-swatch]:rounded-full [&::-moz-color-swatch]:border-0 [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-0 [&::-webkit-color-swatch-wrapper]:rounded-full [&::-webkit-color-swatch-wrapper]:p-0",
-								customSelected && "ring-2 ring-ring ring-offset-2 ring-offset-popover"
-							)}
-						/>
-						<FieldContent>
-							<FieldLabel htmlFor="drive-color-custom-hex">{t("driveColorCustomLabel")}</FieldLabel>
-							<Input
-								id="drive-color-custom-hex"
-								value={customHex}
-								disabled={pending || !isOnline}
-								placeholder="#RRGGBB"
-								maxLength={7}
-								onChange={event => {
-									setCustomHex(event.target.value)
-								}}
+				<RadioGroup
+					value={selectedValue}
+					disabled={disabled}
+					aria-label={t("driveColorSwatchesLabel")}
+					className="gap-4 py-2"
+					onValueChange={value => {
+						if (typeof value === "string") {
+							void handleSelect(value)
+						}
+					}}
+				>
+					<div className="grid grid-cols-6 gap-3">
+						{DIR_COLOR_SWATCHES.map(swatch => (
+							<Swatch
+								key={swatch.value}
+								value={swatch.value}
+								label={t(swatch.labelKey)}
+								fill={dirColorHex(swatch.value)}
+								disabled={disabled}
+								title={offlineTitle ?? t(swatch.labelKey)}
 							/>
-						</FieldContent>
-					</Field>
-					<Button
-						type="button"
-						size="sm"
-						disabled={pending || !isOnline || normalizedCustomHex === null}
-						title={!isOnline ? t("common:offlineActionDisabled") : undefined}
-						onClick={() => {
-							if (normalizedCustomHex !== null) {
-								void handleSelect(normalizedCustomHex)
-							}
-						}}
-					>
-						{pending && <Spinner data-icon="inline-start" />}
-						{t("driveColorCustomApply")}
-					</Button>
-				</div>
+						))}
+						<CustomColorPopover
+							initialHex={isCustomDirColor(current) ? dirColorHex(current) : DEFAULT_CUSTOM_HEX}
+							disabled={disabled}
+							selected={!onSwatch && !onRecent}
+							offlineTitle={offlineTitle}
+							onApply={hex => {
+								void handleSelect(hex)
+							}}
+						/>
+					</div>
+					{recent.length > 0 ? (
+						<div
+							role="group"
+							aria-label={t("driveColorRecentLabel")}
+							className="flex flex-col gap-2 border-t border-border/50 pt-4"
+						>
+							<span
+								aria-hidden="true"
+								className="text-xs text-muted-foreground"
+							>
+								{t("driveColorRecentLabel")}
+							</span>
+							<div className="flex gap-3">
+								{recent.map(hex => (
+									<Swatch
+										key={hex}
+										value={hex}
+										label={hex.toUpperCase()}
+										fill={hex}
+										disabled={disabled}
+										title={offlineTitle ?? hex.toUpperCase()}
+									/>
+								))}
+							</div>
+						</div>
+					) : null}
+				</RadioGroup>
 			</DialogContent>
 		</Dialog>
 	)
