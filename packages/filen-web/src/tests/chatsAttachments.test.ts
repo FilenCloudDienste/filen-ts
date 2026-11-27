@@ -44,6 +44,7 @@ const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }))
 
 vi.mock("sonner", () => ({ toast: { error: toastError } }))
 
+import { useReminderStore } from "@/features/shell/store/useReminderStore"
 import { uploadAttachment, attachExistingDriveItem, preflightAttachments } from "@/features/chats/lib/attachments"
 import { resetDotFilen } from "@/lib/dotFilen"
 import { narrowItem } from "@/features/drive/lib/item"
@@ -157,7 +158,9 @@ describe("preflightAttachments", () => {
 
 		expect(await preflightAttachments([mockBrowserFile("a.jpg", 1_024), mockBrowserFile("b.jpg", 1_024)])).toBe(false)
 		expect(getUserInfo).toHaveBeenCalledOnce()
-		expect(toastError).toHaveBeenCalledExactlyOnceWith(expect.stringContaining(formatBytes(2_048)))
+		// On the storage-full dialog every refusal shows, not a toast.
+		expect(useReminderStore.getState().storageFullDetail).toContain(formatBytes(2_048))
+		expect(toastError).not.toHaveBeenCalled()
 		expect(createDirectory).not.toHaveBeenCalled()
 		expect(uploadFile).not.toHaveBeenCalled()
 	})

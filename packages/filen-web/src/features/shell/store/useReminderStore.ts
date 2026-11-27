@@ -5,6 +5,8 @@ interface ReminderState {
 	storageDismissed: boolean
 	// A storage-full refusal asked for the dialog; cleared when it closes.
 	storageFullRequested: boolean
+	// What the refusal said beyond the dialog's own words (how much was needed, how much is free).
+	storageFullDetail: string | null
 	dismissKeys: () => void
 	dismissStorage: () => void
 	closeStorageFull: () => void
@@ -17,6 +19,7 @@ export const useReminderStore = create<ReminderState>(set => ({
 	keysDismissed: false,
 	storageDismissed: false,
 	storageFullRequested: false,
+	storageFullDetail: null,
 	dismissKeys: () => {
 		set({ keysDismissed: true })
 	},
@@ -24,14 +27,17 @@ export const useReminderStore = create<ReminderState>(set => ({
 		set({ storageDismissed: true })
 	},
 	closeStorageFull: () => {
-		set({ storageFullRequested: false })
+		set({ storageFullRequested: false, storageFullDetail: null })
 	}
 }))
 
-// Raises the storage-full dialog (accountReminders.tsx) from anywhere, e.g. after the server refused an
-// upload for storage. A request while it is already up is the same occurrence, so it never stacks.
-export function openStorageFull(): void {
-	if (!useReminderStore.getState().storageFullRequested) {
-		useReminderStore.setState({ storageFullRequested: true })
+// Raises the storage-full dialog (accountReminders.tsx) from anywhere: the one surface every storage refusal shows,
+// an upload's pre-flight or the server's. A request while it is already up is the same occurrence, so it never
+// stacks; a `detail` it brings replaces the one shown.
+export function openStorageFull(detail?: string): void {
+	const state = useReminderStore.getState()
+
+	if (!state.storageFullRequested || (detail !== undefined && detail !== state.storageFullDetail)) {
+		useReminderStore.setState({ storageFullRequested: true, ...(detail === undefined ? {} : { storageFullDetail: detail }) })
 	}
 }

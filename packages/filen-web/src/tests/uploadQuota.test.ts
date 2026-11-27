@@ -43,6 +43,7 @@ import { ACCOUNT_QUERY_KEY, ACCOUNT_QUOTA_TRUST_MS, fetchAccount, markAccountSta
 import { addAccountStorageUsed, checkUploadQuota } from "@/features/drive/lib/quota"
 import { startUploads } from "@/features/drive/lib/upload"
 import { startDirectoryUpload } from "@/features/drive/lib/uploadDirectory"
+import { useReminderStore } from "@/features/shell/store/useReminderStore"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { i18n } from "@/lib/i18n"
 import { testUuid } from "@/tests/support/uuid"
@@ -85,6 +86,12 @@ function sdkFile(size: bigint): SdkFile {
 	}
 }
 
+// Every refusal shows on the storage-full dialog, with how much was needed and is free; never as a toast.
+function expectRefused(needed: number, free: number): void {
+	expect(useReminderStore.getState()).toMatchObject({ storageFullRequested: true, storageFullDetail: exceededMessage(needed, free) })
+	expect(toastError).not.toHaveBeenCalled()
+}
+
 function exceededMessage(needed: number, free: number): string {
 	return i18n.t("transfers:transfersQuotaExceeded", { needed: formatBytes(needed), free: formatBytes(free) })
 }
@@ -96,6 +103,7 @@ beforeEach(async () => {
 	getUserInfo.mockClear()
 	queryClient.clear()
 	useTransfersStore.setState({ transfers: [] })
+	useReminderStore.getState().closeStorageFull()
 	uploadFile.mockImplementation((_parent, _id, file) => Promise.resolve(sdkFile(BigInt(file.size))))
 	createDirectory.mockImplementation((_parent, name) =>
 		Promise.resolve({
@@ -149,7 +157,7 @@ describe("startUploads quota pre-flight", () => {
 		expect(getUserInfo).toHaveBeenCalledOnce()
 		expect(uploadFile).not.toHaveBeenCalled()
 		expect(useTransfersStore.getState().transfers).toEqual([])
-		expect(toastError).toHaveBeenCalledExactlyOnceWith(exceededMessage(1_200, 1_000))
+		expectRefused(1_200, 1_000)
 		expect(toastSuccess).not.toHaveBeenCalled()
 	})
 
@@ -307,7 +315,7 @@ describe("optimistic storage used after an upload", () => {
 
 		expect(getUserInfo).toHaveBeenCalledOnce()
 		expect(uploadFile).toHaveBeenCalledOnce()
-		expect(toastError).toHaveBeenCalledExactlyOnceWith(exceededMessage(1_000, 500))
+		expectRefused(1_000, 500)
 	})
 })
 
@@ -331,9 +339,9 @@ describe("startDirectoryUpload quota pre-flight", () => {
 		expect(createDirectory).not.toHaveBeenCalled()
 		expect(uploadFile).not.toHaveBeenCalled()
 		expect(useTransfersStore.getState().transfers).toEqual([])
-		// Swaps the scanning toast in place rather than stacking a second one.
-		expect(toastError).toHaveBeenCalledExactlyOnceWith(exceededMessage(2_000, 1_500), { id: "scan-toast-id" })
-		expect(toastDismiss).not.toHaveBeenCalled()
+		// The scanning toast goes; the dialog says why.
+		expectRefused(2_000, 1_500)
+		expect(toastDismiss).toHaveBeenCalledExactlyOnceWith("scan-toast-id")
 	})
 })
 

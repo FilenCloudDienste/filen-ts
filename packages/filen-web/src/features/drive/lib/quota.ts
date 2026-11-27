@@ -1,7 +1,7 @@
-import { toast } from "sonner"
 import { formatBytes, resolveQuotaVerdict, type QuotaCheckDeps, type QuotaVerdict } from "@filen/shared"
 import { i18n } from "@/lib/i18n"
 import { accountQueryGet, accountQueryUpdate, fetchAccountFresh, isAccountReadRecent } from "@/queries/account"
+import { openStorageFull } from "@/features/shell/store/useReminderStore"
 
 // The fresh read also refreshes every other account consumer, unless the account was written meanwhile.
 // A cached "fits" older than this page's last recent read (a restored persisted account above all) is
@@ -24,7 +24,12 @@ export function quotaExceededMessage(verdict: Extract<QuotaVerdict, { status: "e
 	})
 }
 
-// For entry points with no outcome of their own to carry the message: toasts it and returns false.
+// A pre-flight refusal, on the storage-full dialog every refusal shows, with how much was needed and is free.
+export function refuseForQuota(verdict: Extract<QuotaVerdict, { status: "exceeds" }>): void {
+	openStorageFull(quotaExceededMessage(verdict))
+}
+
+// For entry points with no outcome of their own to carry the refusal: shows it and returns false.
 export async function ensureUploadQuota(neededBytes: bigint): Promise<boolean> {
 	const verdict = await checkUploadQuota(neededBytes)
 
@@ -32,7 +37,7 @@ export async function ensureUploadQuota(neededBytes: bigint): Promise<boolean> {
 		return true
 	}
 
-	toast.error(quotaExceededMessage(verdict))
+	refuseForQuota(verdict)
 
 	return false
 }

@@ -12,6 +12,9 @@ import type { UserInfo } from "@filen/sdk-rs"
 const { getUserInfo } = vi.hoisted(() => ({ getUserInfo: vi.fn<() => Promise<UserInfo>>() }))
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { getUserInfo } }))
+vi.mock("@tanstack/react-router", () => ({
+	Link: ({ to, children }: { to: string; children: unknown }) => createElement("a", { href: to }, children as never)
+}))
 vi.mock("@/queries/client", () => ({
 	queryClient: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } })
 }))
@@ -53,6 +56,15 @@ describe("StorageMeter", () => {
 
 		expect(queryClient.getQueryState(ACCOUNT_QUERY_KEY)?.status).toBe("error")
 		expect(screen.getByRole("progressbar")).toBeDefined()
+	})
+
+	it("links to the account settings' storage breakdown", async () => {
+		getUserInfo.mockResolvedValueOnce(ACCOUNT)
+		renderMeter()
+
+		await screen.findByRole("progressbar")
+
+		expect(screen.getByRole("link").getAttribute("href")).toBe("/settings/account")
 	})
 
 	it("renders no meter when the first read fails with nothing cached", async () => {

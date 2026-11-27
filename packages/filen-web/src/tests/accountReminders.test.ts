@@ -7,7 +7,6 @@ import "@/lib/i18n"
 import { auth as EN_AUTH } from "@/locales/en/auth"
 import { AccountReminders } from "@/features/shell/components/accountReminders"
 import { openStorageFull, useReminderStore } from "@/features/shell/store/useReminderStore"
-import { settings as EN_SETTINGS } from "@/locales/en/settings"
 
 // Covers the wiring the e2e suite deliberately no longer exercises. src/main.tsx latches both reminders
 // closed before the first render, because a standing modal aria-hides the whole shell and made every
@@ -56,7 +55,7 @@ function renderReminders(): void {
 // keeps a value a test armed on it.
 beforeEach(() => {
 	desktopBridge.mockReset()
-	useReminderStore.setState({ keysDismissed: false, storageDismissed: false, storageFullRequested: false })
+	useReminderStore.setState({ keysDismissed: false, storageDismissed: false, storageFullRequested: false, storageFullDetail: null })
 })
 
 describe("AccountReminders", () => {
@@ -158,7 +157,25 @@ describe("AccountReminders", () => {
 })
 
 describe("the storage-full dialog on demand", () => {
-	const UPGRADE = EN_SETTINGS.settingsStorageFullUpgrade
+	const UPGRADE = EN_AUTH.storageLimitReminderViewPlans
+	const OPEN_TRASH = EN_AUTH.storageLimitReminderOpenTrash
+
+	it("says what the refusal said, and Open trash goes to the trash", () => {
+		useAccountQuery.mockReturnValue(account())
+		renderReminders()
+
+		act(() => {
+			openStorageFull("This upload needs 2 KB, 1 KB is free.")
+		})
+
+		expect(screen.getByText(`${EN_AUTH.storageLimitReminderBody} This upload needs 2 KB, 1 KB is free.`)).toBeDefined()
+
+		fireEvent.click(screen.getByRole("button", { name: OPEN_TRASH }))
+
+		expect(navigate).toHaveBeenCalledWith({ to: "/trash" })
+		expect(screen.queryByText(STORAGE_TITLE)).toBeNull()
+		expect(useReminderStore.getState()).toMatchObject({ storageFullRequested: false, storageFullDetail: null })
+	})
 
 	it("opens when a refusal asks for it, even once the boot reminder was dismissed, and closes on dismiss", () => {
 		useAccountQuery.mockReturnValue(account())

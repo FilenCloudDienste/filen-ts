@@ -41,6 +41,7 @@ const { toastTransferStarted } = vi.hoisted(() => ({ toastTransferStarted: vi.fn
 
 vi.mock("@/features/transfers/lib/transferStartToast", () => ({ toastTransferStarted }))
 
+import { useReminderStore } from "@/features/shell/store/useReminderStore"
 import { queryClient as testQueryClient } from "@/queries/client"
 import { driveListingQueryKey } from "@/features/drive/queries/drive"
 import { ACCOUNT_QUERY_KEY, fetchAccount } from "@/queries/account"
@@ -1116,7 +1117,9 @@ describe("startDirectoryUpload — a drop's directory rows", () => {
 		expect(uploadFile).not.toHaveBeenCalled()
 		expect(useTransfersStore.getState().transfers).toEqual([])
 		expect(useTransfersStore.getState().uploadBatches).toEqual({})
-		expect(toastError).toHaveBeenCalledWith(expect.any(String), { id: "scan-toast-id" })
+		expect(toastDismiss).toHaveBeenCalledWith("scan-toast-id")
+		expect(useReminderStore.getState().storageFullRequested).toBe(true)
+		useReminderStore.getState().closeStorageFull()
 	})
 
 	it("removes the scanning row when the walk fails", async () => {

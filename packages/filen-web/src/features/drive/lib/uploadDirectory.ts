@@ -47,7 +47,7 @@ import {
 	type HeicUploadDeps
 } from "@/features/drive/lib/heicUpload"
 import { batchListingPatches, driveListingQueryUpdate } from "@/features/drive/queries/drive"
-import { checkUploadQuota, quotaExceededMessage } from "@/features/drive/lib/quota"
+import { checkUploadQuota, refuseForQuota } from "@/features/drive/lib/quota"
 
 // Directory upload: pick/drop a whole directory and recreate its sub-directory tree in the current
 // listing, uploading every file into its recreated parent. The wasm SDK has no recursive-upload
@@ -823,7 +823,8 @@ async function uploadCollected({
 
 	if (verdict.status === "exceeds") {
 		discardUploadRuns(new Set([...directoryRuns.values()].map(run => run.id)))
-		toast.error(quotaExceededMessage(verdict), { id: scanningToastId })
+		toast.dismiss(scanningToastId)
+		refuseForQuota(verdict)
 
 		return
 	}

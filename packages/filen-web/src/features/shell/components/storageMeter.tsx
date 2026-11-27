@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next"
+import { Link } from "@tanstack/react-router"
 import { clampedRatio, formatBytes, storageUsageLevel, type StorageUsageLevel } from "@filen/shared"
 import { useAccountQuery } from "@/queries/account"
 import { Progress } from "@/components/ui/progress"
@@ -25,12 +26,16 @@ const BLOCK_HEIGHT = "h-9"
 // the account query's UserInfo (storageUsed / maxStorage bigints — see queries/account.ts). Formatted
 // with the shared byte formatter. Pending renders a same-height spinner; a first read that failed, or
 // a zero-quota account, renders an empty same-height slot rather than a broken bar — no layout shift.
+// The whole block links to the account settings' Storage group, the full breakdown.
 export function StorageMeter() {
 	const { t } = useTranslation("common")
 	const accountQuery = useAccountQuery()
 
 	return (
-		<div>
+		<Link
+			to="/settings/account"
+			className="-m-1.5 block rounded-xl p-1.5 focus-ring transition-colors outline-none app-region-no-drag hover:bg-sidebar-accent/60"
+		>
 			<p className="mb-2 text-xs font-medium text-muted-foreground/80">{t("usage")}</p>
 			{/* Cached data wins over a failed background refetch: the meter keeps its last known value. */}
 			{accountQuery.data !== undefined ? (
@@ -49,7 +54,7 @@ export function StorageMeter() {
 					className={BLOCK_HEIGHT}
 				/>
 			)}
-		</div>
+		</Link>
 	)
 }
 

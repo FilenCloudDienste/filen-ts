@@ -23,8 +23,10 @@ import {
 // each render by the pure one-at-a-time selector (keys before storage) — no arming effect, so no
 // setState-in-effect. Dismissal flips the page-load-scoped reminder store, so the selector re-runs
 // and advances the sequence (keys → storage → done). The storage dialog doubles as the storage-full
-// dialog any refused upload raises through openStorageFull; it waits behind the keys reminder rather
-// than stacking on it. Upgrade opens the plans; the desktop app opens web billing in the browser.
+// dialog every refused upload raises through openStorageFull, with what the refusal said; it waits
+// behind the keys reminder rather than stacking on it. Open trash goes where deleting for good frees
+// space; View plans opens the plans, and on the desktop app (which has no Plans page) web billing in
+// the browser.
 export function AccountReminders() {
 	const { t } = useTranslation(["auth", "settings"])
 	const navigate = useNavigate()
@@ -34,6 +36,7 @@ export function AccountReminders() {
 	const dismissKeys = useReminderStore(state => state.dismissKeys)
 	const dismissStorage = useReminderStore(state => state.dismissStorage)
 	const storageFullRequested = useReminderStore(state => state.storageFullRequested)
+	const storageFullDetail = useReminderStore(state => state.storageFullDetail)
 	const closeStorageFull = useReminderStore(state => state.closeStorageFull)
 
 	const data = accountQuery.data
@@ -53,7 +56,12 @@ export function AccountReminders() {
 		closeStorageFull()
 	}
 
-	function upgrade(): void {
+	function openTrash(): void {
+		closeStorage()
+		void navigate({ to: "/trash" })
+	}
+
+	function viewPlans(): void {
 		closeStorage()
 
 		if (isDesktopBilling()) {
@@ -96,15 +104,20 @@ export function AccountReminders() {
 				<AlertDialogContent>
 					<AlertDialogHeader>
 						<AlertDialogTitle>{t("storageLimitReminderTitle")}</AlertDialogTitle>
-						<AlertDialogDescription>{t("storageLimitReminderBody")}</AlertDialogDescription>
+						<AlertDialogDescription>
+							{storageFullRequested && storageFullDetail !== null
+								? `${t("storageLimitReminderBody")} ${storageFullDetail}`
+								: t("storageLimitReminderBody")}
+						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>
 						<AlertDialogCancel>{t("storageLimitReminderDismiss")}</AlertDialogCancel>
+						<AlertDialogCancel onClick={openTrash}>{t("storageLimitReminderOpenTrash")}</AlertDialogCancel>
 						<AlertDialogAction
 							autoFocus
-							onClick={upgrade}
+							onClick={viewPlans}
 						>
-							{t("settings:settingsStorageFullUpgrade")}
+							{t("storageLimitReminderViewPlans")}
 						</AlertDialogAction>
 					</AlertDialogFooter>
 				</AlertDialogContent>

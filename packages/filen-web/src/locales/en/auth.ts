@@ -307,8 +307,12 @@ export const auth = {
 	storageLimitReminderTitle: "Storage limit reached",
 	/** Storage-over-limit reminder dialog — body telling the user to free up space or upgrade */
 	storageLimitReminderBody: "You've reached your storage limit. Delete some files or upgrade your plan to keep uploading.",
-	/** Storage-over-limit reminder dialog — sole acknowledge/dismiss button (no upgrade deep-link on web) */
+	/** Storage-over-limit reminder dialog, also every upload refused for storage — acknowledge/dismiss button */
 	storageLimitReminderDismiss: "OK",
+	/** Storage-over-limit dialog — button opening the trash, where deleting items for good frees space */
+	storageLimitReminderOpenTrash: "Open trash",
+	/** Storage-over-limit dialog — button opening the plans (the web app's billing, in the browser, on the desktop app) */
+	storageLimitReminderViewPlans: "View plans",
 
 	// ── Delete account: two-stage confirm, then "check your email" ─────────────
 	/** Delete-account section — heading and first confirmation dialog title */
