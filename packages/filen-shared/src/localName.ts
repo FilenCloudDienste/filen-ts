@@ -162,7 +162,8 @@ export function keepBothName(name: string, n: number, kind: "file" | "directory"
 	return fitName(name, kind === "file" ? extensionStart(name) : -1, ` (${n})`)
 }
 
-// The key two local names collide on (APFS and NTFS are case-insensitive by default; APFS also normalization-insensitive).
+// The key two local names collide on (APFS and NTFS are case-insensitive by default; APFS also normalization-insensitive,
+// which nameCollisionKey's NFC covers).
 export function localCollisionKey(name: string): string {
-	return nameCollisionKey(name.normalize("NFC"))
+	return nameCollisionKey(name)
 }

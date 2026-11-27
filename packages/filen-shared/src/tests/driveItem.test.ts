@@ -28,4 +28,13 @@ describe("nameCollisionKey", () => {
 		// "." is case-ignorable and letters follow, so the sigma is not final (as in Rust).
 		expect(nameCollisionKey("ΟΔΟΣ.txt")).toBe("οδοσ.txt")
 	})
+
+	it("makes a decomposed (NFD) name collide with its composed (NFC) form, as the SDK stores names NFC", () => {
+		const nfc = "Café.txt"
+		const nfd = "Café.txt"
+
+		expect(nfc).not.toBe(nfd)
+		expect(nameCollisionKey(nfd)).toBe(nameCollisionKey(nfc))
+		expect(nameCollisionKey("CAFÉ.TXT")).toBe("café.txt")
+	})
 })
