@@ -214,6 +214,8 @@ export const drive = {
 	// ── Breadcrumb ───────────────────────────────────────────────────────────
 	/** Drive breadcrumb — accessible label on the breadcrumb navigation landmark */
 	driveBreadcrumbLabel: "Breadcrumb",
+	/** Drive breadcrumb — accessible label on the "…" button that lists the ancestor directories a narrow trail hides */
+	driveBreadcrumbHidden: "Show hidden directories",
 
 	// ── Listing ──────────────────────────────────────────────────────────────
 	/** Drive listing — accessible name for the list/grid region (ARIA listbox) */
