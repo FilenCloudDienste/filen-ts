@@ -14,6 +14,7 @@ import {
 	type UploadFile
 } from "./helpers/listing"
 import { closeLinkDialog, createLink, openAsVisitor, openLinkDialog } from "./helpers/publicLinks"
+import { revealSlideshowBar, slideshowBar } from "./helpers/slideshow"
 
 // A slideshow over a tree of its own: two images beside a directory holding a third. In the preview, "Include
 // subdirectories" adds the nested image; on a public directory link (premium) the visitor pages through the files
@@ -29,10 +30,6 @@ const LINKED = "linked"
 // A slide stays up 5 s by default once shown; a step is due well within this. The subdirectories' list is a tree
 // walk on top.
 const STEP_TIMEOUT_MS = 30_000
-
-function slideshowBar(page: Page): Locator {
-	return page.getByRole("group", { name: "Slideshow controls", exact: true })
-}
 
 // The two images and `extra` here, the nested image in a directory below, back up on `parent` (the directory shown).
 async function fillTree(page: Page, listbox: Locator, parent: string, extra: readonly UploadFile[]): Promise<void> {
@@ -91,6 +88,7 @@ test.describe("preview slideshow (write)", () => {
 			const subdirectories = bar.getByRole("button", { name: "Include subdirectories", exact: true })
 
 			await expect(bar.getByText("1/2", { exact: true })).toBeVisible()
+			await revealSlideshowBar(page)
 			await subdirectories.click()
 			await expect(subdirectories).toHaveAttribute("aria-pressed", "true")
 			await expect(bar.getByText(/^\d\/3$/u)).toBeVisible({ timeout: STEP_TIMEOUT_MS })
@@ -99,6 +97,11 @@ test.describe("preview slideshow (write)", () => {
 				timeout: STEP_TIMEOUT_MS * 2
 			})
 
+			// Remembered on the device: back off.
+			await revealSlideshowBar(page)
+			await subdirectories.click()
+			await expect(subdirectories).toHaveAttribute("aria-pressed", "false")
+			await revealSlideshowBar(page)
 			await bar.getByRole("button", { name: "End slideshow", exact: true }).click()
 			await expect(bar).toHaveCount(0)
 		})
@@ -126,9 +129,10 @@ test.describe("preview slideshow (write)", () => {
 
 				const bar = slideshowBar(visitor)
 
-				// The document between the images is no slide.
+				// The PDF, first in the list, is no slide.
 				await expect(bar.getByText("1/2", { exact: true })).toBeVisible()
 				await expect(bar.getByText("2/2", { exact: true })).toBeVisible({ timeout: STEP_TIMEOUT_MS })
+				await revealSlideshowBar(visitor)
 				await bar.getByRole("button", { name: "End slideshow", exact: true }).click()
 				await expect(bar).toHaveCount(0)
 				await expect(visitor.getByRole("button", { name: "Next file", exact: true })).toBeVisible()
