@@ -4,6 +4,7 @@ import { i18n } from "@/lib/i18n"
 import { canDragVariant, assembleDragPayload } from "@/features/drive/lib/dnd.logic"
 import { pressPointerDrag } from "@/features/drive/lib/pointerDrag"
 import { moveItems } from "@/features/drive/lib/actions"
+import { resolveMoveConflicts } from "@/features/drive/lib/moveConflicts"
 import { confirmDotFilenOperation, includesRootDotFilen } from "@/features/drive/lib/dotFilenGuard"
 import { type BulkOutcome } from "@/lib/actions/bulk"
 import { runBulkActivity, type BulkActivitySpec } from "@/lib/activity/activity"
@@ -166,18 +167,23 @@ export function buildTreeDragSourceProps(resolveItem: () => DriveItem | undefine
 	}
 }
 
-// A move of items into a directory as an activity, named by where they go.
-export function moveActivity(items: readonly DriveItem[], destination: CopyDestination): BulkActivitySpec<DriveItem> {
-	return driveActivity(items, DRIVE_MOVE, (targets, onSettled) => moveItems(targets, destination.uuid, onSettled), {
+// A move of items into a directory as an activity, named by where they go. `renames`: the names conflicts gave
+// (resolveMoveConflicts).
+export function moveActivity(
+	items: readonly DriveItem[],
+	destination: CopyDestination,
+	renames?: ReadonlyMap<string, string>
+): BulkActivitySpec<DriveItem> {
+	return driveActivity(items, DRIVE_MOVE, (targets, onSettled) => moveItems(targets, destination.uuid, onSettled, renames), {
 		// A destination whose name isn't cached (a tree level never listed) still reads as a sentence.
 		values: { destination: destination.name === "" ? i18n.t("drive:driveMoveDestinationFallback") : destination.name }
 	})
 }
 
-// Runs the move for a completed drop, a pick in the item menu's directory tree (transferSubmenu.tsx) or
-// a pasted cut (clipboard.ts), as an activity toast; the move dialog (moveTargetDialog.tsx) runs
-// moveActivity itself. Moving the root `.filen` asks for its name first (lib/dotFilenGuard.ts) unless the caller
-// already did (`confirmed`); a cancel moves nothing.
+// Runs the move for a completed drop, a pick in the item menu's directory tree (transferSubmenu.tsx), a pasted cut
+// (clipboard.ts) or the move dialog's confirm (moveTargetDialog.tsx), as an activity toast. Moving the root `.filen`
+// asks for its name first (lib/dotFilenGuard.ts) unless the caller already did (`confirmed`); names the destination
+// already holds are asked about (moveConflicts.ts). A cancel moves nothing; a skip leaves its item.
 export async function performMove(
 	items: readonly DriveItem[],
 	destination: CopyDestination,
@@ -187,5 +193,11 @@ export async function performMove(
 		return { succeeded: [], failed: [] }
 	}
 
-	return await runBulkActivity(moveActivity(items, destination))
+	const resolved = await resolveMoveConflicts(items, destination.uuid)
+
+	if (resolved.items.length === 0) {
+		return { succeeded: [], failed: [] }
+	}
+
+	return await runBulkActivity(moveActivity(resolved.items, destination, resolved.renames))
 }

@@ -34,7 +34,7 @@ import {
 	type DriveItem
 } from "@/features/drive/lib/item"
 import { dropFromClipboard, followClipboardItem } from "@/features/drive/lib/clipboardSync"
-import { asErrorDTO, plainErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
+import { asErrorDTO, ErrorWithDTO, plainErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { runBulk, runBulkOutcomes, type BulkOutcome, type BulkProgress } from "@/lib/actions/bulk"
 import { attemptOp, runOp, type ActionOutcome as GenericActionOutcome, type VoidActionOutcome } from "@/lib/actions/outcome"
 import { emitBranchChange } from "@/features/drive/lib/branchChanges"
@@ -154,19 +154,50 @@ async function renameAndPatch(item: DriveItem, newName: string): Promise<ActionO
 
 // ── Move (bulk) ──────────────────────────────────────────────────────────
 
-export function moveItems(items: DriveItem[], targetParentUuid: string | null, onSettled?: BulkProgress): Promise<BulkOutcome<DriveItem>> {
+// `renames` (by uuid): items moved under another name (Keep both on a name conflict), renamed where they are first,
+// as no call moves and renames at once. A move that fails after its rename names the item back.
+export async function moveItems(
+	items: DriveItem[],
+	targetParentUuid: string | null,
+	onSettled?: BulkProgress,
+	renames?: ReadonlyMap<string, string>
+): Promise<BulkOutcome<DriveItem>> {
 	const rootUuid = currentRootUuid()
-
-	return batchListingPatches(() =>
+	const outcome = await batchListingPatches(() =>
 		runBulk(
 			items,
 			async item => {
-				const base = asDirectoryOrFile(item)
-				const moved = await runOp<Dir | File>(
-					base.type === "directory"
-						? sdkApi.moveDirectory(base.data, targetParentUuid)
-						: sdkApi.moveFile(base.data, targetParentUuid)
-				)
+				const newName = renames?.get(item.data.uuid)
+				let source = item
+
+				if (newName !== undefined) {
+					const outcome = await renameAndPatch(item, newName)
+
+					if (outcome.status === "error") {
+						throw new ErrorWithDTO(outcome.dto)
+					}
+
+					source = outcome.item
+				}
+
+				const base = asDirectoryOrFile(source)
+				let moved: Dir | File
+
+				try {
+					moved = await runOp<Dir | File>(
+						base.type === "directory"
+							? sdkApi.moveDirectory(base.data, targetParentUuid)
+							: sdkApi.moveFile(base.data, targetParentUuid)
+					)
+				} catch (e) {
+					const originalName = item.data.decryptedMeta?.name
+
+					if (newName !== undefined && originalName !== undefined) {
+						await renameAndPatch(source, originalName)
+					}
+
+					throw e
+				}
 
 				const movedItem = narrowItem(moved)
 
@@ -176,6 +207,12 @@ export function moveItems(items: DriveItem[], targetParentUuid: string | null, o
 			onSettled
 		)
 	)
+
+	if (renames !== undefined && renames.size > 0) {
+		invalidateNames()
+	}
+
+	return outcome
 }
 
 function movedRowChange({ variant, uuid }: DriveListingParams): "replace" | "remove" | undefined {

@@ -2,6 +2,7 @@ import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { moveActivity, performMove } from "@/features/drive/lib/dnd"
+import { resolveMoveConflicts } from "@/features/drive/lib/moveConflicts"
 import { confirmDotFilenOperation, includesRootDotFilen } from "@/features/drive/lib/dotFilenGuard"
 import { runBulkActivity } from "@/lib/activity/activity"
 import { startCopyWithCard } from "@/features/transfers/lib/copyToast"
@@ -123,7 +124,17 @@ export function MoveTargetDialog(props: MoveTargetDialogProps) {
 
 		setPending(true)
 
-		const outcome = await runBulkActivity({ ...moveActivity(items, destination), showRunning: false })
+		// Names the destination already holds are asked about first (the prompt opens over the picker); a skip closes it.
+		const resolved = await resolveMoveConflicts(items, destination.uuid)
+
+		if (resolved.items.length === 0) {
+			setPending(false)
+			onClose()
+
+			return
+		}
+
+		const outcome = await runBulkActivity({ ...moveActivity(resolved.items, destination, resolved.renames), showRunning: false })
 
 		setPending(false)
 

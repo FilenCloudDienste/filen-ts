@@ -1,6 +1,6 @@
 import { type SdkErrorKind } from "@/lib/sdk/errorKinds.gen"
 import type { MediaErrorKind } from "@/lib/media/mediaFailure"
-import type { DOWNLOAD_GONE, DOWNLOAD_NEEDS_RELOAD, DOWNLOAD_STALLED, DOWNLOAD_WORKER_UNAVAILABLE } from "@/lib/sdk/errors"
+import type { DOWNLOAD_GONE, DOWNLOAD_NEEDS_RELOAD, DOWNLOAD_STALLED, DOWNLOAD_WORKER_UNAVAILABLE, NAME_TAKEN } from "@/lib/sdk/errors"
 
 // English source catalog — "errors" namespace, keyed by the SDK's finite `SdkErrorKind` taxonomy
 // (@/lib/sdk/errorKinds.gen, generated from @filen/sdk-rs's ErrorKind enum) so a lookup is
@@ -94,10 +94,13 @@ export const errors = {
 	/** Raised by the app (not the SDK) when a download running in the browser's download manager stopped reporting progress for a long time; shown on the download's row in transfers */
 	DownloadStalled: "The download stopped responding. Please try again.",
 	/** Raised by the app (not the SDK) when the browser's background download helper is missing, did not answer or refused the download; shown on the download's row in transfers */
-	DownloadWorkerUnavailable: "The download couldn't start. Please try again."
+	DownloadWorkerUnavailable: "The download couldn't start. Please try again.",
+	/** Raised by the app from the server's answer when an item can't take a name because another item in that directory already has it (a move, rename or restore); shown wherever the operation reports */
+	NameTaken: "An item with this name already exists in that directory."
 } as const satisfies Partial<
 	Record<
 		| SdkErrorKind
+		| typeof NAME_TAKEN
 		| MediaErrorKind
 		| typeof DOWNLOAD_NEEDS_RELOAD
 		| typeof DOWNLOAD_GONE

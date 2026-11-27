@@ -549,6 +549,61 @@ describe("moveItems", () => {
 		expect(moveDirectory).not.toHaveBeenCalled()
 		expect(moveFile).not.toHaveBeenCalled()
 	})
+
+	it("renames a Keep both item where it is, then moves it under that name", async () => {
+		seedRootUuid()
+		const item = fileItem({ uuid: testUuid("kept"), parent: OTHER_PARENT_UUID })
+		const renamed = mockFile({
+			uuid: testUuid("kept"),
+			meta: {
+				type: "decoded",
+				data: {
+					name: "report (1).pdf",
+					mime: "application/pdf",
+					modified: 1_700_000_000_000n,
+					size: 1_024n,
+					key: "key",
+					version: 2
+				}
+			}
+		})
+		const targetUuid = testUuid("target")
+		renameFile.mockResolvedValueOnce(renamed)
+		moveFile.mockResolvedValueOnce({ ...renamed, parent: targetUuid })
+
+		const result = await moveItems([item], targetUuid, undefined, new Map([[item.data.uuid, "report (1).pdf"]]))
+
+		expect(result.failed).toEqual([])
+		expect(renameFile).toHaveBeenCalledExactlyOnceWith(item.data, "report (1).pdf")
+		expect(moveFile.mock.calls[0]?.[0]).toEqual(narrowItem(renamed).data)
+	})
+
+	it("names a Keep both item back when its move fails after the rename", async () => {
+		seedRootUuid()
+		const item = fileItem({ uuid: testUuid("back"), parent: OTHER_PARENT_UUID })
+		const renamed = mockFile({
+			uuid: testUuid("back"),
+			meta: {
+				type: "decoded",
+				data: {
+					name: "report (1).pdf",
+					mime: "application/pdf",
+					modified: 1_700_000_000_000n,
+					size: 1_024n,
+					key: "key",
+					version: 2
+				}
+			}
+		})
+		renameFile.mockResolvedValueOnce(renamed).mockResolvedValueOnce(mockFile({ uuid: testUuid("back") }))
+		moveFile.mockRejectedValueOnce(new Error("taken"))
+
+		const result = await moveItems([item], testUuid("target"), undefined, new Map([[item.data.uuid, "report (1).pdf"]]))
+
+		expect(result.failed).toHaveLength(1)
+		expect(renameFile).toHaveBeenCalledTimes(2)
+		expect(renameFile.mock.calls[1]?.[1]).toBe("report.pdf")
+	})
 })
 
 describe("trashItems", () => {

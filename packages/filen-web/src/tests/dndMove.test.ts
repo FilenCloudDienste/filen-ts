@@ -54,7 +54,7 @@ describe("performMove", () => {
 
 		const outcome = await performMove([moved, stuck], DOCS)
 
-		expect(moveItems).toHaveBeenCalledExactlyOnceWith([moved, stuck], DOCS.uuid, expect.any(Function))
+		expect(moveItems).toHaveBeenCalledExactlyOnceWith([moved, stuck], DOCS.uuid, expect.any(Function), new Map())
 		expect(toast).toHaveBeenCalledWith("Moving 2 items to Docs", expect.anything())
 		expect(toast.error).toHaveBeenCalledExactlyOnceWith("Moved 1 item to Docs, 1 failed", expect.anything())
 		expect(outcome.failed).toEqual([{ item: stuck, error }])
@@ -67,7 +67,7 @@ describe("performMove", () => {
 
 		await performMove([only], { uuid: null, name: "Cloud Drive" })
 
-		expect(moveItems).toHaveBeenCalledExactlyOnceWith([only], null, expect.any(Function))
+		expect(moveItems).toHaveBeenCalledExactlyOnceWith([only], null, expect.any(Function), new Map())
 		expect(toast.success).toHaveBeenCalledExactlyOnceWith("Moved a.txt to Cloud Drive", expect.anything())
 	})
 

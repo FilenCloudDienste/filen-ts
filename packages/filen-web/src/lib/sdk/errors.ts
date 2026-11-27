@@ -132,6 +132,22 @@ export const DOWNLOAD_STALLED = "DownloadStalled"
 // the request: saveDownload.ts's sendToSw and activeServiceWorker); labelled in the "errors" catalog.
 export const DOWNLOAD_WORKER_UNAVAILABLE = "DownloadWorkerUnavailable"
 
+// The label kind of a server refusal because the name is taken in the target directory (a move, rename or restore);
+// the server says so only by its code, which isNameTakenError reads. Labelled in the "errors" catalog.
+export const NAME_TAKEN = "NameTaken"
+
+const NAME_TAKEN_SERVER_CODES: ReadonlySet<string> = new Set([
+	"file_with_same_name_exists_in_parent",
+	"file_with_same_name_exists_at_destination",
+	"folder_with_same_name_exists_at_destination",
+	"folder_with_name_already_exists_at_destination",
+	"dir_with_name_already_exists_at_destination"
+])
+
+export function isNameTakenError(dto: ErrorDTO): boolean {
+	return dto.serverCode !== undefined && NAME_TAKEN_SERVER_CODES.has(dto.serverCode)
+}
+
 // resolveNormalDirParent's own thrown message (sdk.worker.ts) when a create/move/save target's parent
 // directory no longer exists: the one signal main-thread logic needs out of a worker throw's otherwise-opaque
 // plain Error (previewSave.logic.ts's isUnresolvableParentError). Not an error-kind entry: a plain Error has no

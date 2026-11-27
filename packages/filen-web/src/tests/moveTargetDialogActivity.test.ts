@@ -3,7 +3,7 @@
 // The move picker hands off like a bulk confirm: several items close it at once and run as an activity
 // toast; one item keeps its spinner and toasts only the result.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { createElement } from "react"
 import { QueryClient } from "@tanstack/react-query"
 import type { File, UuidStr } from "@filen/sdk-rs"
@@ -67,7 +67,7 @@ afterEach(() => {
 })
 
 describe("MoveTargetDialog moving", () => {
-	it("closes at once for several items and runs the move as an activity", () => {
+	it("closes at once for several items and runs the move as an activity", async () => {
 		const items = [file("a.txt"), file("b.txt")]
 		moveItems.mockReturnValue(new Promise(() => undefined))
 		const onClose = vi.fn()
@@ -76,7 +76,9 @@ describe("MoveTargetDialog moving", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Move here" }))
 
 		expect(onClose).toHaveBeenCalledTimes(1)
-		expect(moveItems).toHaveBeenCalledExactlyOnceWith(items, DOCS, expect.any(Function))
+		await waitFor(() => {
+			expect(moveItems).toHaveBeenCalledExactlyOnceWith(items, DOCS, expect.any(Function), new Map())
+		})
 		expect(toast).toHaveBeenCalledWith("Moving 2 items to Docs", expect.anything())
 	})
 

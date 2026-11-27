@@ -1,5 +1,5 @@
 import { i18n } from "@/lib/i18n"
-import { asErrorDTO, labelFirst, type ErrorDTO } from "@/lib/sdk/errors"
+import { asErrorDTO, isNameTakenError, labelFirst, NAME_TAKEN, type ErrorDTO } from "@/lib/sdk/errors"
 
 // Main-thread only — this is exactly why it is NOT part of lib/sdk/errors.ts (see that module's
 // header comment: workers must stay i18n-free). `dto.kind` is a live runtime string, not a literal
@@ -8,6 +8,10 @@ import { asErrorDTO, labelFirst, type ErrorDTO } from "@/lib/sdk/errors"
 // is the documented escape hatch for exactly this dynamic-key-under-a-typed-catalog gap — confine
 // it to this one call site, never widen it elsewhere.
 function kindLabel(dto: ErrorDTO): string | undefined {
+	if (isNameTakenError(dto)) {
+		return i18n.t(`errors:${NAME_TAKEN}`)
+	}
+
 	// A server error's reason is what the server said; its kind's text only stands in when it said nothing.
 	if (dto.kind === "Server" && dto.serverMessage !== undefined) {
 		return dto.serverMessage
