@@ -8,7 +8,7 @@ import cache from "@/lib/cache"
  * Share a single owned file or directory with another Filen user. Dispatches
  * to the right SDK call based on the item type. Re-encrypts directory
  * contents under the recipient's public key (the SDK handles the heavy
- * lifting; we pass a `undefined` progress callback for now). Throws on
+ * lifting; mobile shows no progress, so both callbacks are undefined). Throws on
  * error so callers can wrap in `run()` / `runBulk` for UI feedback.
  */
 export async function shareWithFilenUser({ item, contact }: { item: DriveItem; contact: Contact }) {
@@ -19,7 +19,7 @@ export async function shareWithFilenUser({ item, contact }: { item: DriveItem; c
 	const { authedSdkClient } = await auth.getSdkClients()
 
 	if (item.type === "directory") {
-		await authedSdkClient.shareDir(item.data, contact, undefined)
+		await authedSdkClient.shareDir(item.data, contact, undefined, undefined)
 
 		return
 	}

@@ -37,7 +37,7 @@ export async function enablePublicLink({
 					type: "directory",
 					status:
 						(knownAbsent ? undefined : await authedSdkClient.getDirLinkStatus(item.data)) ??
-						(await authedSdkClient.publicLinkDir(item.data, undefined))
+						(await authedSdkClient.publicLinkDir(item.data, undefined, undefined))
 				}
 			: {
 					type: "file",
