@@ -213,6 +213,45 @@ describe("presentation comments", () => {
 		expect(text(parts.get("ppt/authors.xml"))).toContain('name="Cy Doe" initials="CYD"')
 	})
 
+	it("writes a new author without initials when the user's own are empty", async () => {
+		const modern = await driveSession(buildPptx(editDeckOptions()), "pptx")
+		const modernSlide = modern.session.deck.slides[1] as SlideRef
+		const op: CommentOp = {
+			family: "comment",
+			kind: "add",
+			slide: modernSlide,
+			comment: { id: ROOT, author: AUTHOR_NEW, text: "Hi", created: "2026-10-28T08:00:00.000Z" },
+			authorName: "Cy Doe",
+			authorInitials: ""
+		}
+
+		expect((await modern.command(op)).ok).toBe(true)
+		expect(text((await partsAfter((await modern.save()).bytes)).get("ppt/authors.xml"))).toContain(
+			`<p188:author id="${AUTHOR_NEW}" name="Cy Doe" userId="Cy Doe" providerId="None"/>`
+		)
+
+		// A legacy author's initials are required (§19.4.2): an empty one.
+		const legacy = await driveSession(buildPptx(legacyOptions()), "pptx")
+		const legacySlide = legacy.session.deck.slides[0] as SlideRef
+
+		await review(legacy.context, legacySlide)
+		expect(
+			(
+				await legacy.command({
+					family: "comment",
+					kind: "add",
+					slide: legacySlide,
+					comment: { id: "", author: "", text: "Hi", created: "2026-10-28T08:00:00.000Z" },
+					authorName: "Cy Doe",
+					authorInitials: ""
+				})
+			).ok
+		).toBe(true)
+		expect(text((await partsAfter((await legacy.save()).bytes)).get("ppt/commentAuthors.xml"))).toContain(
+			'<p:cmAuthor id="2" name="Cy Doe" initials="" lastIdx="1" clrIdx="2"/>'
+		)
+	})
+
 	it("adds a modern comment to a deck with none: its Comment part, the Author part, the slide's commentRel; it reads back equal", async () => {
 		const original = buildPptx(editDeckOptions())
 		const s = await driveSession(original, "pptx")

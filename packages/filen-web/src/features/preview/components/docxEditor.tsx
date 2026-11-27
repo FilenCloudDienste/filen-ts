@@ -960,7 +960,7 @@ export function DocxEditView({
 	}, [reflow, editor])
 
 	// Comments and tracked changes carry the user's own author name (none until given), comments its initials (the
-	// user's own, else the name's).
+	// user's own, none when empty, else the name's).
 	const authorInitials = settings.authorInitials ?? undefined
 
 	useEffect(() => {

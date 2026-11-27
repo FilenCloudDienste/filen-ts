@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+	AUTHOR_INITIALS_NONE,
 	DEFAULT_OFFICE_AUTOSAVE,
 	MAX_AUTHOR_NAME_LENGTH,
 	OfficeSettingsVersionError,
@@ -129,6 +130,22 @@ describe("office settings", () => {
 		expect(officeSetting(cleared, "authorInitials")).toBeNull()
 		expect(officeSetting(cleared, "regionalFormat")).toBeNull()
 		expect(parseOfficeSettings(serializeOfficeSettings(cleared))).toEqual(cleared)
+	})
+
+	it("stores no initials as an empty register an older reader keeps and reads as from the name", () => {
+		const none = setOfficeSetting(emptyOfficeSettings(), "authorInitials", AUTHOR_INITIALS_NONE, 5)
+		const text = serializeOfficeSettings(none)
+
+		expect(text).toBe('{"v":1,"authorInitials":{"value":"","at":5}}')
+		expect(officeSetting(parseOfficeSettings(text), "authorInitials")).toBe(AUTHOR_INITIALS_NONE)
+		// The rule an older app reads initials by refuses it: it reads the default (from the name) and keeps the register.
+		expect(normalizeAuthorInitials(AUTHOR_INITIALS_NONE)).toBeUndefined()
+		// Whitespace is not "none": refused as before.
+		expect(setOfficeSetting(emptyOfficeSettings(), "authorInitials", " ", 5).registers.size).toBe(0)
+		// Either other choice made later wins over it.
+		expect(officeSetting(setOfficeSetting(none, "authorInitials", "AB", 6), "authorInitials")).toBe("AB")
+		expect(officeSetting(setOfficeSetting(none, "authorInitials", null, 6), "authorInitials")).toBeNull()
+		expect(setOfficeSetting(none, "authorInitials", AUTHOR_INITIALS_NONE, 6)).toBe(none)
 	})
 
 	it("normalises initials and refuses empty, overlong or control-character ones", () => {

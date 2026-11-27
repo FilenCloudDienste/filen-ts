@@ -3,6 +3,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement } from "react"
 import { act, fireEvent, render, screen } from "@testing-library/react"
+import { AUTHOR_INITIALS_NONE } from "@filen/shared"
 import { officeSettingsView } from "@/tests/support/officeSettingsView"
 import type { OfficeSettingsView } from "@/features/office/lib/officeSettings"
 
@@ -46,6 +47,14 @@ beforeEach(() => {
 	hooks.save.mockResolvedValue(undefined)
 })
 
+function choose(option: HTMLElement): void {
+	fireEvent.pointerDown(option, { pointerType: "mouse", button: 0 })
+	fireEvent.mouseDown(option, { button: 0 })
+	fireEvent.pointerUp(option, { pointerType: "mouse", button: 0 })
+	fireEvent.mouseUp(option, { button: 0 })
+	fireEvent.click(option)
+}
+
 async function settle(): Promise<void> {
 	await act(async () => {
 		await new Promise(resolve => setTimeout(resolve, 0))
@@ -70,7 +79,7 @@ describe("the Office settings", () => {
 		const { unmount } = render(createElement(OfficeGeneralRows))
 
 		expect(screen.getByRole("switch", { name: EN_SETTINGS.settingsDocumentsAutosave }).hasAttribute("data-disabled")).toBe(true)
-		expect(screen.getByRole("button", { name: EN_SETTINGS.settingsOfficeAuthorInitials }).hasAttribute("disabled")).toBe(true)
+		expect(screen.getByRole("combobox", { name: EN_SETTINGS.settingsOfficeAuthorInitials }).hasAttribute("disabled")).toBe(true)
 		unmount()
 
 		hooks.online = true
@@ -78,6 +87,36 @@ describe("the Office settings", () => {
 		render(createElement(OfficeGeneralRows))
 
 		expect(screen.getByRole("switch", { name: EN_SETTINGS.settingsDocumentsAutosave }).hasAttribute("data-disabled")).toBe(true)
+	})
+
+	it("offers initials from the name, custom ones or none, none stored as AUTHOR_INITIALS_NONE", async () => {
+		hooks.settings = { authorInitials: "JD" }
+
+		const { unmount } = render(createElement(OfficeGeneralRows))
+		const mode = (): HTMLElement => screen.getByRole("combobox", { name: EN_SETTINGS.settingsOfficeAuthorInitials })
+
+		expect(mode().textContent).toContain(EN_SETTINGS.settingsOfficeAuthorInitialsCustom)
+		expect(screen.getByText("JD")).toBeTruthy()
+		fireEvent.click(mode())
+		choose(await screen.findByRole("option", { name: EN_SETTINGS.settingsOfficeAuthorInitialsNone }))
+		await settle()
+		expect(hooks.save).toHaveBeenLastCalledWith("authorInitials", AUTHOR_INITIALS_NONE)
+
+		fireEvent.click(mode())
+		choose(await screen.findByRole("option", { name: EN_SETTINGS.settingsOfficeAuthorInitialsFromName }))
+		await settle()
+		expect(hooks.save).toHaveBeenLastCalledWith("authorInitials", null)
+		unmount()
+
+		// None: no initials shown; Custom asks for them before anything is written.
+		hooks.save.mockClear()
+		hooks.settings = { authorInitials: AUTHOR_INITIALS_NONE }
+		render(createElement(OfficeGeneralRows))
+		expect(mode().textContent).toContain(EN_SETTINGS.settingsOfficeAuthorInitialsNone)
+		fireEvent.click(mode())
+		choose(await screen.findByRole("option", { name: EN_SETTINGS.settingsOfficeAuthorInitialsCustom }))
+		expect(await screen.findByRole("dialog")).toBeTruthy()
+		expect(hooks.save).not.toHaveBeenCalled()
 	})
 
 	it("keeps the proofing options off while spelling is off", () => {

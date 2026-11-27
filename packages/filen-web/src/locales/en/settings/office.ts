@@ -19,8 +19,12 @@ export const settingsOffice = {
 	settingsOfficeAuthorInitials: "Author initials",
 	/** Settings > Office — author initials row description */
 	settingsOfficeAuthorInitialsDescription: "Shown on your comments in documents and presentations.",
-	/** Settings > Office — author initials row value while none were given: they are made from the author name */
+	/** Settings > Office — author initials choice: initials made from the author name */
 	settingsOfficeAuthorInitialsFromName: "From your name",
+	/** Settings > Office — author initials choice: initials the user typed */
+	settingsOfficeAuthorInitialsCustom: "Custom",
+	/** Settings > Office — author initials choice: comments carry no initials */
+	settingsOfficeAuthorInitialsNone: "None",
 	/** Settings > Office — author initials dialog title */
 	settingsOfficeAuthorInitialsDialogTitle: "Author initials",
 	/** Settings > Office — author initials dialog body; {{max}} is the most characters the initials may have */
@@ -29,8 +33,6 @@ export const settingsOffice = {
 	settingsOfficeAuthorInitialsLabel: "Initials",
 	/** Settings > Office — author initials dialog submit button */
 	settingsOfficeAuthorInitialsSave: "Save",
-	/** Settings > Office — author initials dialog second button: go back to initials made from the author name */
-	settingsOfficeAuthorInitialsUseName: "Use initials from name",
 	/** Settings > Office — row label: save edits automatically */
 	settingsDocumentsAutosave: "Save automatically",
 	/** Settings > Office — autosave row description */

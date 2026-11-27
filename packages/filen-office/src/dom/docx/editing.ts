@@ -133,7 +133,7 @@ export interface DocxEditingHost {
 	proofLocked(): number
 	// The document author name for comments and tracked changes (the app asked the user; never filled in for
 	// them); undefined clears it. `initials`: what comments record for it (w:initials), the user's own; derived
-	// from the name when undefined. Holds for the document from now on, also before it opened.
+	// from the name when undefined, none when empty (w:initials is optional). Holds for the document from now on, also before it opened.
 	setAuthor(name: string | undefined, initials?: string): void
 	// Shows tracked changes another way (DocxOpenOptions.view), laid out again in place: no reopen. False
 	// before the editor opened or when the document already shows that view.
@@ -199,6 +199,11 @@ export interface DocxLaterProof {
 export interface DocxEditingWriter {
 	readonly prepare: (input: DocxSaveInput, options: DocxPrepareOptions) => Promise<DocxPreparedSave>
 	readonly zipper?: DocxZipperFactory
+}
+
+// The w:initials new comments record: the user's own, none when empty, else made from the name.
+function identityInitials(name: string | undefined, chosen: string | undefined): string | undefined {
+	return name === undefined || chosen === "" ? undefined : (chosen ?? authorInitials(name))
 }
 
 // Why a write given up (its signal) ended.
@@ -570,7 +575,7 @@ export function inThreadEditingHost(
 
 			// The name as it is now (setAuthor may have changed it since the host was made).
 			context.identity.author = author
-			context.identity.initials = author === undefined ? undefined : (initials ?? authorInitials(author))
+			context.identity.initials = identityInitials(author, initials)
 
 			if (closed || edits === undefined) return
 
@@ -712,7 +717,7 @@ export function inThreadEditingHost(
 				const identity = current.body.session.context.identity
 
 				identity.author = name
-				identity.initials = name === undefined ? undefined : (chosen ?? authorInitials(name))
+				identity.initials = identityInitials(name, chosen)
 
 				for (const session of current.sessions) session.invalidate()
 			}

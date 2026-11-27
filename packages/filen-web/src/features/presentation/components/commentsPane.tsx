@@ -11,8 +11,8 @@ import { newCommentGuid, slideReview, useSlideReview, useSlideReviewState } from
 // core/presentation/comments.ts) on the generic thread list (office/components/commentThreads.tsx), every change one
 // comment op. The slide's review and the pane's state come from commentsPane.logic.ts. Only modern threads resolve.
 
-// A new comment or reply carries the user's own initials (Settings, Office) when given; the deck derives them
-// from the name otherwise.
+// A new comment or reply carries the user's own initials (Settings, Office) when given, none when empty; the
+// deck derives them from the name otherwise.
 function withInitials(op: DeckOp, initials: string | null): DeckOp {
 	return initials !== null && op.family === "comment" && (op.kind === "add" || op.kind === "reply")
 		? { ...op, authorInitials: initials }

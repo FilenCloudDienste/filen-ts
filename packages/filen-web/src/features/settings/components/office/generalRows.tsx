@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import { MAX_AUTHOR_INITIALS_LENGTH, OFFICE_AUTOSAVE_DELAYS_MS, normalizeAuthorInitials } from "@filen/shared"
+import { AUTHOR_INITIALS_NONE, MAX_AUTHOR_INITIALS_LENGTH, OFFICE_AUTOSAVE_DELAYS_MS, normalizeAuthorInitials } from "@filen/shared"
 import { AuthorNameDialog } from "@/features/office/components/authorNameDialog"
 import { saveAuthorName, useOfficeSettings } from "@/features/office/lib/officeSettings"
 import { PreferenceToggleRow, SettingsSelectRow } from "@/features/settings/components/settingRows"
@@ -9,7 +9,14 @@ import { SettingsRow } from "@/features/settings/components/settingsLayout"
 import { saveSyncedOfficeSetting } from "@/features/settings/components/office/syncedSetting"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 import { Button } from "@/components/ui/button"
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useIsOnline } from "@/lib/useIsOnline"
+
+type InitialsMode = "name" | "custom" | "none"
+
+function initialsMode(initials: string | null): InitialsMode {
+	return initials === null ? "name" : initials === AUTHOR_INITIALS_NONE ? "none" : "custom"
+}
 
 // Office → General: the author comments and tracked changes carry, and autosave. Synced (features/office/lib/
 // officeSettings.ts): written only once the file was read, and only online.
@@ -36,9 +43,29 @@ export function OfficeGeneralRows() {
 		)
 	}
 
-	function submitInitials(initials: string | null): void {
-		saveSyncedOfficeSetting("authorInitials", initials === null ? null : (normalizeAuthorInitials(initials) ?? null))
+	const mode = initialsMode(settings.authorInitials)
+	const modes: readonly { value: InitialsMode; label: string }[] = [
+		{ value: "name", label: t("settingsOfficeAuthorInitialsFromName") },
+		{ value: "custom", label: t("settingsOfficeAuthorInitialsCustom") },
+		{ value: "none", label: t("settingsOfficeAuthorInitialsNone") }
+	]
+
+	function submitInitials(initials: string): void {
+		const normalized = normalizeAuthorInitials(initials)
+
+		if (normalized !== undefined) {
+			saveSyncedOfficeSetting("authorInitials", normalized)
+		}
+
 		setEditing(null)
+	}
+
+	function chooseMode(next: InitialsMode): void {
+		if (next === "custom") {
+			setEditing("initials")
+		} else {
+			saveSyncedOfficeSetting("authorInitials", next === "none" ? AUTHOR_INITIALS_NONE : null)
+		}
 	}
 
 	return (
@@ -70,23 +97,56 @@ export function OfficeGeneralRows() {
 				label={t("settingsOfficeAuthorInitials")}
 				helpId="authorInitials"
 				description={t("settingsOfficeAuthorInitialsDescription")}
+				htmlFor="office-author-initials"
 			>
 				<div className="flex min-w-0 items-center gap-3">
-					<span className="truncate text-sm text-muted-foreground">
-						{settings.authorInitials ?? t("settingsOfficeAuthorInitialsFromName")}
-					</span>
-					<Button
-						type="button"
-						variant="outline"
+					{mode === "custom" ? (
+						<>
+							<span className="truncate text-sm text-muted-foreground">{settings.authorInitials}</span>
+							<Button
+								type="button"
+								variant="outline"
+								disabled={disabled}
+								title={offlineReason}
+								aria-label={t("settingsOfficeAuthorInitials")}
+								onClick={() => {
+									setEditing("initials")
+								}}
+							>
+								{t("settingsDocumentsAuthorNameEdit")}
+							</Button>
+						</>
+					) : null}
+					<Select
+						items={modes}
+						value={mode}
 						disabled={disabled}
-						title={offlineReason}
-						aria-label={t("settingsOfficeAuthorInitials")}
-						onClick={() => {
-							setEditing("initials")
+						onValueChange={next => {
+							if (next !== null) {
+								chooseMode(next)
+							}
 						}}
 					>
-						{t("settingsDocumentsAuthorNameEdit")}
-					</Button>
+						<SelectTrigger
+							id="office-author-initials"
+							className="min-w-36"
+							title={offlineReason}
+						>
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectGroup>
+								{modes.map(option => (
+									<SelectItem
+										key={option.value}
+										value={option.value}
+									>
+										{option.label}
+									</SelectItem>
+								))}
+							</SelectGroup>
+						</SelectContent>
+					</Select>
 				</div>
 			</SettingsRow>
 			<PreferenceToggleRow
@@ -139,20 +199,10 @@ export function OfficeGeneralRows() {
 				title={t("settingsOfficeAuthorInitialsDialogTitle")}
 				body={t("settingsOfficeAuthorInitialsDialogBody", { max: MAX_AUTHOR_INITIALS_LENGTH })}
 				label={t("settingsOfficeAuthorInitialsLabel")}
-				initialValue={settings.authorInitials ?? ""}
+				initialValue={mode === "custom" ? (settings.authorInitials ?? "") : ""}
 				autoComplete="off"
 				maxLength={MAX_AUTHOR_INITIALS_LENGTH}
 				submitLabel={t("settingsOfficeAuthorInitialsSave")}
-				secondaryAction={
-					settings.authorInitials === null
-						? undefined
-						: {
-								label: t("settingsOfficeAuthorInitialsUseName"),
-								onClick: () => {
-									submitInitials(null)
-								}
-							}
-				}
 				validate={value => normalizeAuthorInitials(value) !== undefined}
 				onOpenChange={open => {
 					if (!open) {

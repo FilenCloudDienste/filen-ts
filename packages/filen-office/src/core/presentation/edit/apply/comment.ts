@@ -96,7 +96,8 @@ function authorFor(
 		const wanted = /^\d+$/u.test(model.author) ? Number(model.author) : -1
 		const legacyId = wanted >= 0 && !authors.some(author => author.legacyId === wanted) ? wanted : next
 
-		authors.push({ id: String(legacyId), name, ...(initials === "" ? {} : { initials }), legacyId })
+		// p:cmAuthor requires initials (§19.4.2): none is an empty one.
+		authors.push({ id: String(legacyId), name, initials, legacyId })
 
 		return { id: String(legacyId), legacyId }
 	}

@@ -540,7 +540,7 @@ export type CommentOp =
 			readonly slide: SlideRef
 			readonly comment: CommentModel
 			readonly authorName?: string
-			// A new author's initials, the user's own; derived from the name when absent.
+			// A new author's initials, the user's own; derived from the name when absent, none when empty.
 			readonly authorInitials?: string
 	  }
 	| {
@@ -550,7 +550,7 @@ export type CommentOp =
 			readonly parent: string
 			readonly comment: CommentModel
 			readonly authorName?: string
-			// A new author's initials, the user's own; derived from the name when absent.
+			// A new author's initials, the user's own; derived from the name when absent, none when empty.
 			readonly authorInitials?: string
 	  }
 	| { readonly family: "comment"; readonly kind: "edit"; readonly slide: SlideRef; readonly id: string; readonly text: string }

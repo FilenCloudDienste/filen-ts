@@ -1685,6 +1685,10 @@ describe("docx tracked changes: recording details", () => {
 		expect(editor.body.session.context.identity.initials).toBe("AXL")
 		editing.setAuthor("Ann")
 		expect(editor.body.session.context.identity.initials).toBe("A")
+		// Empty: none (w:initials is optional).
+		editing.setAuthor("Ann", "")
+		expect(editor.body.session.context.identity.initials).toBeUndefined()
+		editing.setAuthor("Ann")
 		editor.execute({ type: "review.track", on: true })
 		editor.setComposition({ from: 2, to: 3 })
 		editor.dispatch(editor.state.tr.insertText("か", 2).setMeta("composition", 1))
@@ -1699,6 +1703,39 @@ describe("docx tracked changes: recording details", () => {
 		expect(xml).toMatch(/<w:ins w:id="\d+" w:author="Ann" [^>]*><w:r><w:t>か<\/w:t><\/w:r><\/w:ins>/)
 		editor.setComposition(undefined)
 		expect(texts(editor.session)).toEqual(["o[+か+]ne"])
+		opened.close()
+	})
+
+	it("saves a comment without w:initials when the user's own are empty", async () => {
+		const measurer: TextMeasurer = {
+			kerningControl: true,
+			measure(_font, _kerning, words, count, widths) {
+				for (let k = 0; k < count; k++) widths[k] = (words[k] ?? "").length * 8
+			},
+			fontExtents: () => ({ ascent: 12, descent: 4 })
+		}
+		const editing = inThreadEditingHost(
+			() => ({
+				fontHost: { addBytes: () => Promise.resolve(true), addLocal: () => Promise.resolve(false), remove: () => undefined },
+				replayFonts: false,
+				fontAssets: { read: () => Promise.resolve(new Uint8Array(4)) },
+				measurer,
+				yield: () => Promise.resolve()
+			}),
+			{ writer: { prepare: prepareDocxSave } }
+		)
+		const opened = editing.host(bytesSource(buildDocx({ body: p("one") })), () => undefined)
+		const editor = await editing.editor
+
+		editing.setAuthor("Ann Lee", "")
+		editor.session.dispatch(editor.session.state.tr.setSelection(TextSelection.create(editor.session.state.doc, 1, 4)))
+		expect(await editor.execute({ type: "comment.add", text: "Note" })).toBe(true)
+
+		const files = unzipSync((await editing.save()).bytes)
+		const comments = new TextDecoder().decode(files["word/comments.xml"])
+
+		expect(comments).toMatch(/<w:comment w:id="\d+" w:author="Ann Lee" w:date="[^"]+">/)
+		expect(comments).not.toContain("w:initials")
 		opened.close()
 	})
 

@@ -16,6 +16,9 @@ export const OFFICE_SETTINGS_VERSION = 1
 // Word's own limits for a user name and for the initials comments carry.
 export const MAX_AUTHOR_NAME_LENGTH = 255
 export const MAX_AUTHOR_INITIALS_LENGTH = 9
+// The initials setting for comments that carry none. Empty, so an app that predates it reads the register as one it
+// cannot read: it keeps it, writes it back, and takes the initials from the name meanwhile.
+export const AUTHOR_INITIALS_NONE = ""
 export const DEFAULT_OFFICE_AUTOSAVE = true
 // The pauses after the last edit an autosave may wait for.
 export const OFFICE_AUTOSAVE_DELAYS_MS = [15_000, 30_000, 60_000, 300_000] as const
@@ -25,7 +28,7 @@ export type OfficeAutosaveDelay = (typeof OFFICE_AUTOSAVE_DELAYS_MS)[number]
 export type OfficePaperSize = "a4" | "letter"
 
 // Each setting as read. Null: not chosen (the author name: never given; the initials: from the name; the
-// languages: the browser's; the paper: by region).
+// languages: the browser's; the paper: by region). The initials are AUTHOR_INITIALS_NONE when comments carry none.
 export interface OfficeSettingsValues {
 	readonly authorName: string | null
 	readonly authorInitials: string | null
@@ -125,7 +128,8 @@ function readBoolean(raw: unknown): boolean | undefined {
 // A register's value when it is one this version reads; undefined otherwise (kept, and read as the default).
 const READERS: { readonly [K in OfficeSettingKey]: (raw: unknown) => OfficeSettingsValues[K] | undefined } = {
 	authorName: raw => (typeof raw === "string" ? normalizeAuthorName(raw) : undefined),
-	authorInitials: raw => (raw === null ? null : typeof raw === "string" ? normalizeAuthorInitials(raw) : undefined),
+	authorInitials: raw =>
+		raw === null || raw === AUTHOR_INITIALS_NONE ? raw : typeof raw === "string" ? normalizeAuthorInitials(raw) : undefined,
 	autosave: readBoolean,
 	autosaveDelayMs: raw => OFFICE_AUTOSAVE_DELAYS_MS.find(delay => delay === raw),
 	spellCheck: readBoolean,
