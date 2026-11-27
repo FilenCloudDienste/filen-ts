@@ -33,7 +33,8 @@ vi.mock("@/lib/storage/adapter", () => ({
 
 		return Promise.resolve()
 	},
-	kvDelete: () => Promise.resolve()
+	kvDelete: () => Promise.resolve(),
+	kvKeys: () => Promise.resolve([])
 }))
 vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
 vi.mock("@/features/shell/lib/sidePanelLayout", () => ({
