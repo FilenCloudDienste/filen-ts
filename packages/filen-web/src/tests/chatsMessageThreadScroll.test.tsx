@@ -327,7 +327,7 @@ describe("MessageThread — loading older pages", () => {
 		expect(el.firstElementChild?.contains(screen.getByLabelText("Loading earlier messages…"))).toBe(true)
 	})
 
-	it("retries on the next scroll after a failed page instead of turning paging off", async () => {
+	it("says so at the top when an older page fails, and loads it again from Retry rather than on every scroll", async () => {
 		const a = chat("a")
 		messagesByChat.set(a.uuid, [message("a", "m1", 100n), message("a", "m2", 200n)])
 		loadOlderChatMessages.mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce([])
@@ -340,12 +340,26 @@ describe("MessageThread — loading older pages", () => {
 			await Promise.resolve()
 		})
 
+		const notice = screen.getByText("Couldn't load older messages")
+
+		// First in the DOM, where it sits on screen.
+		expect(el.firstElementChild?.contains(notice)).toBe(true)
+
 		await act(async () => {
 			fireEvent.scroll(el)
 			await Promise.resolve()
 		})
 
+		expect(loadOlderChatMessages).toHaveBeenCalledTimes(1)
+
+		await act(async () => {
+			fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+			await Promise.resolve()
+		})
+
 		expect(loadOlderChatMessages).toHaveBeenCalledTimes(2)
+		expect(loadOlderChatMessages.mock.calls[1]?.[1]).toBe(100n)
+		expect(screen.queryByText("Couldn't load older messages")).toBeNull()
 	})
 
 	it("does not let an older page still in flight from the previous chat disable the next chat's paging", async () => {

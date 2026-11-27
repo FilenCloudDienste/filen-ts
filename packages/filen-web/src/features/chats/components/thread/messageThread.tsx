@@ -224,6 +224,9 @@ const IN_THREAD: Options = {
 	ignoreEventWhen: event => ignoredUnderOverlays(event) || !inThread(event.target)
 }
 
+// An older page of history, or why there is none: its load failed.
+type OlderPage = readonly ChatMessage[] | "failed"
+
 // Focusing a row the virtualizer has only just been asked to mount can take a frame or two (scroll, then measure).
 const FOCUS_ATTEMPTS = 3
 
@@ -309,6 +312,10 @@ function ThreadList({
 	const activeActionsRef = useRef<MessageActionsHandle | null>(null)
 	const scrollRef = useRef<HTMLDivElement | null>(null)
 	const [loadingOlder, setLoadingOlder] = useState(false)
+	// The older page in flight, which a second caller joins instead of starting another.
+	const olderPageRef = useRef<Promise<OlderPage> | null>(null)
+	// The last older page failed: the notice at the top offers a retry, and scrolling no longer retries on its own.
+	const [olderFailed, setOlderFailed] = useState(false)
 	const hasMoreRef = useRef(true)
 	const lastCursorRef = useRef<bigint | null>(null)
 	// Tells the arrival effect below that the next tail growth is our own send: no badge, no announcement.
@@ -672,37 +679,59 @@ function ThreadList({
 		ON_FOCUSED_MESSAGE
 	)
 
-	async function loadOlder(): Promise<void> {
-		if (loadingOlder || !hasMoreRef.current) {
-			return
+	// One older page before `before`, or the one already loading. An empty page once history has ended.
+	function loadOlderPage(before: bigint): Promise<OlderPage> {
+		if (!hasMoreRef.current) {
+			return Promise.resolve([])
 		}
 
+		if (olderPageRef.current !== null) {
+			return olderPageRef.current
+		}
+
+		lastCursorRef.current = before
+		setLoadingOlder(true)
+		setOlderFailed(false)
+
+		const load = async (): Promise<OlderPage> => {
+			let page: OlderPage
+
+			try {
+				page = await loadOlderChatMessages(chat, before)
+			} catch {
+				page = "failed"
+			}
+
+			olderPageRef.current = null
+			setLoadingOlder(false)
+
+			if (page === "failed") {
+				// Released, so a retry may ask for the same page again.
+				lastCursorRef.current = null
+				setOlderFailed(true)
+			} else if (page.length === 0) {
+				hasMoreRef.current = false
+			}
+
+			return page
+		}
+
+		olderPageRef.current = load()
+
+		return olderPageRef.current
+	}
+
+	// Pages in the history before the oldest loaded message: on scrolling near the top, or from the failure notice's
+	// retry. A scroll never retries a failed page on its own.
+	async function loadOlder(retry: boolean): Promise<void> {
 		const oldest = messages[0]
 
-		if (oldest === undefined || lastCursorRef.current === oldest.sentTimestamp) {
-			// Same oldest cursor as the last attempt → no distinct older history to pull; stop retriggering.
+		// Same oldest cursor as the last attempt → no distinct older history to pull; stop retriggering.
+		if (oldest === undefined || (!retry && (olderFailed || lastCursorRef.current === oldest.sentTimestamp))) {
 			return
 		}
 
-		lastCursorRef.current = oldest.sentTimestamp
-		setLoadingOlder(true)
-
-		let pageLength: number | null
-
-		try {
-			pageLength = (await loadOlderChatMessages(chat, oldest.sentTimestamp)).length
-		} catch {
-			pageLength = null
-		}
-
-		setLoadingOlder(false)
-
-		if (pageLength === null) {
-			// Release the cursor so the next scroll near the top retries instead of paging staying off.
-			lastCursorRef.current = null
-		} else if (pageLength === 0) {
-			hasMoreRef.current = false
-		}
+		await loadOlderPage(oldest.sentTimestamp)
 	}
 
 	// Recomputes bottom-proximity on every scroll (the reducer returns `prev` unchanged for a redundant
@@ -719,7 +748,7 @@ function ThreadList({
 		setAffordance(prev => nextScrollAffordanceState(prev, { kind: "scroll", atBottom }))
 
 		if (isScrollNearTop(el.scrollTop, el.scrollHeight, el.clientHeight, TOP_THRESHOLD)) {
-			void loadOlder()
+			void loadOlder(false)
 		}
 	}
 
@@ -781,6 +810,25 @@ function ThreadList({
 							className="size-4 text-muted-foreground"
 							aria-label={t("chatLoadingOlder")}
 						/>
+					</div>
+				) : olderFailed ? (
+					<div className="order-1 flex shrink-0 items-center justify-center gap-1.5 py-2 text-xs text-muted-foreground">
+						<AlertCircleIcon
+							aria-hidden="true"
+							className="size-3.5 shrink-0 text-destructive"
+						/>
+						<span role="status">{t("chatLoadOlderFailed")}</span>
+						<span aria-hidden="true">·</span>
+						<Button
+							variant="link"
+							size="xs"
+							className="h-auto px-0"
+							onClick={() => {
+								void loadOlder(true)
+							}}
+						>
+							{t("chatLoadOlderRetry")}
+						</Button>
 					</div>
 				) : null}
 				<div

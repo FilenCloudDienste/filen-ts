@@ -62,6 +62,30 @@ export const chats = {
 	chatThreadEmpty: "No messages in this conversation yet.",
 	/** Thread — accessible label on the older-messages loading spinner at the top of the list */
 	chatLoadingOlder: "Loading earlier messages…",
+	/** Thread — inline notice at the top of the list when loading older messages failed; a Retry button follows */
+	chatLoadOlderFailed: "Couldn't load older messages",
+	/** Thread — the button beside the failed older-messages notice that loads them again */
+	chatLoadOlderRetry: "Retry",
+	/** Thread search bar — field placeholder and accessible label */
+	chatThreadSearchLabel: "Search this conversation",
+	/** Thread search bar — position of the current match among the loaded messages' matches */
+	chatThreadSearchPosition: "{{current}} of {{total}}",
+	/** Thread search bar — shown when no loaded message matches */
+	chatThreadSearchNoResults: "No results",
+	/** Thread search bar — moves to the next (older) match */
+	chatThreadSearchNext: "Next match",
+	/** Thread search bar — moves to the previous (newer) match */
+	chatThreadSearchPrevious: "Previous match",
+	/** Thread search bar — closes the search */
+	chatThreadSearchClose: "Close search",
+	/** Thread search bar — loads older messages to continue searching back */
+	chatThreadSearchOlder: "Search older messages",
+	/** Thread search bar — shown once the whole history is loaded and searched */
+	chatThreadSearchAllLoaded: "Searched the whole conversation",
+	/** Thread — accessible label of a reply's quote, which scrolls to the message it replies to */
+	chatReplyJump: "Go to the original message",
+	/** Thread — toast when the message a reply quotes is not in the conversation any more */
+	chatReplyJumpNotFound: "The original message isn't available",
 	/** Thread header — participant count under a group conversation's name (singular) */
 	chatHeaderParticipants_one: "{{count}} participant",
 	/** Thread header — participant count under a group conversation's name (plural) */
@@ -230,6 +254,8 @@ export const chats = {
 	chatsCommandJumpToLatest: "Jump to newest message",
 	/** Keymap — scrolls the thread to the oldest loaded message, or moves focus to it from a focused message */
 	chatsCommandJumpToOldest: "Jump to oldest message",
+	/** Keymap — opens the search bar of the open conversation's thread */
+	chatsCommandSearchThread: "Search in conversation",
 	/** Keymap — inserts a line break in the message being written instead of sending it */
 	chatsCommandNewline: "New line",
 	/** Keymap — loads your last sent message into the message field to edit it */
@@ -242,6 +268,8 @@ export const chats = {
 	chatsKeyHintList: "In the conversation list",
 	/** Keyboard shortcuts — where a shortcut works: with focus in the message list of a conversation */
 	chatsKeyHintThread: "In the message list",
+	/** Keyboard shortcuts — where a shortcut works: with focus anywhere in the open conversation (header, messages or message field) */
+	chatsKeyHintConversation: "In the open conversation",
 	/** Keyboard shortcuts — where a shortcut works: while typing a message */
 	chatsKeyHintComposer: "In the message field",
 	/** Keyboard shortcuts — where a shortcut works: in the message field while it is empty */
