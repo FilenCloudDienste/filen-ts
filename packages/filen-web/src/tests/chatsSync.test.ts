@@ -747,3 +747,157 @@ describe("logout — an aborted pass never flushes (the wipe is not resurrected)
 		expect(kvSetJson).not.toHaveBeenCalled()
 	})
 })
+
+// A send that stays queued stops its chat's pass (order is load-bearing), so the outbox runs the pass again
+// on its own timer: 30 s, 2 min, 10 min, then every 10 min. The messages behind the failed one go out after it.
+describe("a chat's pass stopped at a failed send runs again on a timer", () => {
+	function sent(): string[] {
+		return sendChatMessage.mock.calls.map(call => call[1])
+	}
+
+	async function after(ms: number): Promise<void> {
+		await vi.advanceTimersByTimeAsync(ms)
+	}
+
+	afterEach(() => {
+		sync.cancel()
+		vi.useRealTimers()
+	})
+
+	it("retries the failed head first, then sends the messages queued behind it in order", async () => {
+		vi.useFakeTimers()
+		chatsQueryUpsert(outboxChat("chat-a-a-a"))
+		sendChatMessage.mockRejectedValueOnce(sdkError("Reqwest"))
+		seed("chat-a-a-a", [
+			optimistic("chat-a-a-a", "inf-1-1-1", 100n, "m1"),
+			optimistic("chat-a-a-a", "inf-2-2-2", 200n, "m2"),
+			optimistic("chat-a-a-a", "inf-3-3-3", 300n, "m3")
+		])
+
+		sync.syncNow()
+		await after(0)
+
+		// The head failed and the pass stopped: nothing later went out before it.
+		expect(sent()).toEqual(["m1"])
+		expect(inflightIdsIn("chat-a-a-a")).toEqual(["inf-1-1-1", "inf-2-2-2", "inf-3-3-3"])
+		expect(useChatsInflightStore.getState().inflightErrors["inf-1-1-1"]).toBeDefined()
+
+		await after(29_999)
+		expect(sent()).toEqual(["m1"])
+
+		await after(1)
+		expect(sent()).toEqual(["m1", "m1", "m2", "m3"])
+		expect(queue()["chat-a-a-a"]).toBeUndefined()
+		expect(useChatsInflightStore.getState().inflightErrors["inf-1-1-1"]).toBeUndefined()
+		expect(vi.getTimerCount()).toBe(0)
+	})
+
+	it("backs off 30 s, 2 min, 10 min while the send keeps failing", async () => {
+		vi.useFakeTimers()
+		chatsQueryUpsert(outboxChat("chat-a-a-a"))
+		sendChatMessage.mockRejectedValue(sdkError("Reqwest"))
+		seed("chat-a-a-a", [optimistic("chat-a-a-a", "inf-1-1-1", 1n, "hi")])
+
+		sync.syncNow()
+		await after(0)
+		expect(sent()).toHaveLength(1)
+
+		await after(30_000)
+		expect(sent()).toHaveLength(2)
+
+		await after(119_999)
+		expect(sent()).toHaveLength(2)
+		await after(1)
+		expect(sent()).toHaveLength(3)
+
+		await after(600_000)
+		expect(sent()).toHaveLength(4)
+	})
+
+	it("runs a rejection under the drop bound again too, until the bound drops it", async () => {
+		vi.useFakeTimers()
+		chatsQueryUpsert(outboxChat("chat-a-a-a"))
+		sendChatMessage.mockRejectedValue(sdkError("Server"))
+		seed("chat-a-a-a", [optimistic("chat-a-a-a", "inf-1-1-1", 1n, "hi")])
+
+		sync.syncNow()
+		await after(0)
+		await after(30_000)
+		await after(120_000)
+
+		expect(sent()).toHaveLength(3)
+		expect(queue()["chat-a-a-a"]).toBeUndefined()
+		expect(useChatsInflightStore.getState().inflightErrors["inf-1-1-1"]?.permanentRejections).toBe(3)
+		expect(vi.getTimerCount()).toBe(0)
+	})
+
+	it("waits while offline", async () => {
+		vi.useFakeTimers()
+		chatsQueryUpsert(outboxChat("chat-a-a-a"))
+		sendChatMessage.mockRejectedValueOnce(sdkError("Reqwest"))
+		seed("chat-a-a-a", [optimistic("chat-a-a-a", "inf-1-1-1", 1n, "hi")])
+
+		sync.syncNow()
+		await after(0)
+		onlineManager.setOnline(false)
+		sync.pauseResend()
+		await after(3_600_000)
+
+		expect(sent()).toHaveLength(1)
+	})
+
+	it("is cleared on cancel (logout)", async () => {
+		vi.useFakeTimers()
+		chatsQueryUpsert(outboxChat("chat-a-a-a"))
+		sendChatMessage.mockRejectedValueOnce(sdkError("Reqwest"))
+		seed("chat-a-a-a", [optimistic("chat-a-a-a", "inf-1-1-1", 1n, "hi")])
+
+		sync.syncNow()
+		await after(0)
+		expect(vi.getTimerCount()).toBe(1)
+
+		sync.cancel()
+		expect(vi.getTimerCount()).toBe(0)
+	})
+})
+
+describe("a chat the pass cannot resolve", () => {
+	afterEach(() => {
+		sync.cancel()
+		vi.useRealTimers()
+	})
+
+	it("shows the oldest send as failed (with Retry), without a strike, and runs the pass again", async () => {
+		vi.useFakeTimers()
+		getChat.mockRejectedValueOnce(sdkError("Reqwest"))
+		seed("chat-c-c-c", [optimistic("chat-c-c-c", "inf-2-2-2", 200n, "m2"), optimistic("chat-c-c-c", "inf-1-1-1", 100n, "m1")])
+
+		sync.syncNow()
+		await vi.advanceTimersByTimeAsync(0)
+
+		expect(sendChatMessage).not.toHaveBeenCalled()
+		expect(useChatsInflightStore.getState().inflightErrors["inf-1-1-1"]).toMatchObject({ permanentRejections: 0 })
+		expect(useChatsInflightStore.getState().inflightErrors["inf-2-2-2"]).toBeUndefined()
+		expect(inflightIdsIn("chat-c-c-c")).toEqual(["inf-2-2-2", "inf-1-1-1"])
+
+		await vi.advanceTimersByTimeAsync(30_000)
+
+		expect(sendChatMessage.mock.calls.map(call => call[1])).toEqual(["m1", "m2"])
+		expect(queue()["chat-c-c-c"]).toBeUndefined()
+		expect(useChatsInflightStore.getState().inflightErrors["inf-1-1-1"]).toBeUndefined()
+	})
+
+	it("retries a chat getChat found missing while the list has not loaded", async () => {
+		vi.useFakeTimers()
+		getChat.mockResolvedValueOnce(undefined)
+		seed("chat-c-c-c", [optimistic("chat-c-c-c", "inf-1-1-1", 1n, "hi")])
+
+		sync.syncNow()
+		await vi.advanceTimersByTimeAsync(0)
+		expect(sendChatMessage).not.toHaveBeenCalled()
+
+		await vi.advanceTimersByTimeAsync(30_000)
+		expect(sendChatMessage).toHaveBeenCalledTimes(1)
+		expect(queue()["chat-c-c-c"]).toBeUndefined()
+	})
+})

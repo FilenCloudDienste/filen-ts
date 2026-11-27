@@ -28,6 +28,8 @@ export function ChatsSyncHost(): null {
 		const unsubscribeOnline = onlineManager.subscribe(isOnline => {
 			if (isOnline) {
 				sync.executeNow()
+			} else {
+				sync.pauseResend()
 			}
 		})
 

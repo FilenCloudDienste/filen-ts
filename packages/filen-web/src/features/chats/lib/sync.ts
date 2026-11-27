@@ -14,6 +14,7 @@ import { withoutKey } from "@/lib/utils"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { kvGetJson, kvSetJson, kvDelete } from "@/lib/storage/adapter"
 import { decodeOutboxPayload, type OutboxChannelTransport, type OutboxRole } from "@/lib/storage/outboxChannel"
+import { resendDelay } from "@/lib/storage/outboxResend"
 import { chatsQueryUpdate, chatsQueryGet, chatsQueryFetch } from "@/features/chats/queries/chats"
 import { chatMessagesQueryUpdate, chatMessagesQueryAppend } from "@/features/chats/queries/chatMessages"
 import { compareBySentTimestamp } from "@/features/chats/lib/sort"
@@ -101,6 +102,12 @@ export class Sync {
 	// treats what a broadcast lists as confirmed, and a promoted leader rebuilds from disk plus its own
 	// unconfirmed sends, so a send broadcast before its write landed would die with the leader.
 	private durable: InflightChatMessages = {}
+	// LEADER: the chats whose pass stopped at a send that stays queued (a failed send, or a chat it could not
+	// resolve), and the one timer that runs the pass again for them (scheduleResend), with how many waits of
+	// the backoff it has used. A stopped chat's later messages wait behind its head, so they go out too.
+	private readonly failedChats: Set<string> = new Set<string>()
+	private resendTimer: ReturnType<typeof setTimeout> | null = null
+	private resendStep = 0
 
 	public constructor() {
 		this.initPromise = new Promise(resolve => {
@@ -128,6 +135,7 @@ export class Sync {
 		this.role = "leader"
 		this.abortController = new AbortController()
 		this.durable = {}
+		this.resetResend()
 
 		void this.restoreFromDisk()
 	}
@@ -392,6 +400,7 @@ export class Sync {
 		this.abortController.abort()
 		this.durable = {}
 		this.transport?.close()
+		this.resetResend()
 	}
 
 	// Reports persistence failure as `false` instead of throwing (it never throws). Sync-internal
@@ -620,27 +629,59 @@ export class Sync {
 						return
 					}
 
+					// Sequential per chat, oldest-first — message ORDER is load-bearing for a chat.
+					const sorted = [...messages].sort(compareBySentTimestamp)
+
+					// This pass decides afresh whether the chat stops at a send that stays queued.
+					this.failedChats.delete(chatUuid)
+
 					// Resolve a LIVE chat for the send — NEVER the disk-restored snapshot (resolveSendableChat).
-					const chat = await this.resolveSendableChat(chatUuid)
+					const resolved = await run(async () => this.resolveSendableChat(chatUuid))
 
 					if (isAborted(signal)) {
 						return
 					}
 
-					if (!chat) {
-						// getChat answered that the chat does not exist (a failed read throws past this). With the
-						// list loaded and lacking it too, the chat was deleted while this tab missed its socket
-						// event: nothing else would ever drop its queue, and every pass would read it again.
-						// Before the list loads, keep the queue for a later trigger.
-						if (chatsQueryGet() !== undefined) {
-							this.dropGoneChat(chatUuid)
+					if (!resolved.success) {
+						// A failed read (getChat on a cache miss) sends nothing: the oldest send shows as failed, with
+						// Retry, without counting toward the drop, and the resend timer runs the pass again.
+						const head = sorted.find(m => m.message !== undefined)
+
+						log.warn("chats-sync", "could not resolve the chat to send to; will retry", chatUuid, resolved.error)
+
+						if (head !== undefined) {
+							const previous = useChatsInflightStore.getState().inflightErrors[head.inflightId]
+
+							useChatsInflightStore.getState().setInflightErrors(prev => ({
+								...prev,
+								[head.inflightId]: {
+									error: asErrorDTO(resolved.error),
+									permanentRejections: previous?.permanentRejections ?? 0,
+									message: head
+								}
+							}))
 						}
+
+						this.failedChats.add(chatUuid)
 
 						return
 					}
 
-					// Sequential per chat, oldest-first — message ORDER is load-bearing for a chat.
-					const sorted = [...messages].sort(compareBySentTimestamp)
+					const chat = resolved.data
+
+					if (!chat) {
+						// getChat answered that the chat does not exist (a failed read throws past this). With the
+						// list loaded and lacking it too, the chat was deleted while this tab missed its socket
+						// event: nothing else would ever drop its queue, and every pass would read it again.
+						// Before the list loads, keep the queue for the resend timer.
+						if (chatsQueryGet() !== undefined) {
+							this.dropGoneChat(chatUuid)
+						} else {
+							this.failedChats.add(chatUuid)
+						}
+
+						return
+					}
 
 					let lastCommitted: Chat | undefined
 
@@ -726,7 +767,11 @@ export class Sync {
 								}
 
 								// Keep-for-retry (or transient below the bound): leave the entry queued. Stop
-								// this chat's sequential pass so ordering is preserved — a later trigger retries.
+								// this chat's sequential pass so ordering is preserved: a later message never
+								// lands before this one. The resend timer runs the pass again, which retries
+								// this send first and then the ones queued behind it.
+								this.failedChats.add(chatUuid)
+
 								return
 							} finally {
 								this.setSending(message.inflightId, false)
@@ -737,6 +782,9 @@ export class Sync {
 							// first would hold a committed send on disk across both, and a tab closed in that
 							// window replays it as a peer-visible duplicate.
 							dequeueInflightMessage(chatUuid, message.inflightId)
+
+							// A send landed: the next failure waits the shortest time again.
+							this.resendStep = 0
 
 							await this.flushToDisk(useChatsInflightStore.getState().inflightMessages)
 
@@ -774,6 +822,7 @@ export class Sync {
 				await this.flushToDisk(useChatsInflightStore.getState().inflightMessages)
 				// Followers learn a send committed + drained (pending bubble clears) from this post-pass broadcast.
 				this.broadcastState()
+				this.scheduleResend()
 			}
 		})
 
@@ -784,6 +833,56 @@ export class Sync {
 
 			log.error("chats-sync", "sync pass threw unexpectedly", result.error)
 		}
+	}
+
+	// LEADER: after a pass, runs the pass again for the chats it stopped in, on one timer for the whole outbox:
+	// 30 s, 2 min, 10 min, then every 10 min, from the last attempt. Reset by any send that lands and once no
+	// chat is stopped; paused while offline (the reconnect trigger carries on).
+	private scheduleResend(): void {
+		this.pauseResend()
+
+		const queued = useChatsInflightStore.getState().inflightMessages
+
+		for (const chatUuid of this.failedChats) {
+			if ((queued[chatUuid]?.messages ?? []).length === 0) {
+				this.failedChats.delete(chatUuid)
+			}
+		}
+
+		if (this.failedChats.size === 0) {
+			this.resendStep = 0
+
+			return
+		}
+
+		if (this.role !== "leader" || !onlineManager.isOnline()) {
+			return
+		}
+
+		const delay = resendDelay(this.resendStep)
+
+		this.resendStep++
+		this.resendTimer = setTimeout(() => {
+			this.resendTimer = null
+
+			if (this.role === "leader" && onlineManager.isOnline()) {
+				this.syncNow()
+			}
+		}, delay)
+	}
+
+	// The tab went offline: the schedule waits.
+	public pauseResend(): void {
+		if (this.resendTimer !== null) {
+			clearTimeout(this.resendTimer)
+			this.resendTimer = null
+		}
+	}
+
+	private resetResend(): void {
+		this.pauseResend()
+		this.failedChats.clear()
+		this.resendStep = 0
 	}
 
 	// A chat deleted while its conversationDeleted event was missed: drop what the removal paths
