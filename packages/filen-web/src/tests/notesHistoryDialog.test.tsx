@@ -89,4 +89,20 @@ describe("HistoryDialog with many versions", () => {
 
 		expect(screen.getByText(`content ${String(COUNT - 1)}`)).toBeTruthy()
 	})
+
+	it("restores from the preview page after a confirmation", () => {
+		render(createElement(HistoryDialog, { note, onClose: vi.fn() }))
+
+		const first = screen.getAllByRole("listitem")[0]
+
+		if (first === undefined) {
+			throw new Error("no rows")
+		}
+
+		fireEvent.click(within(first).getByRole("button", { name: "View" }))
+		fireEvent.click(screen.getByRole("button", { name: "Restore" }))
+
+		expect(screen.getByText("Restore this version?")).toBeTruthy()
+		expect(screen.getByText(/stays in the history/)).toBeTruthy()
+	})
 })

@@ -85,6 +85,18 @@ export function HistoryDialog({ note: initialNote, onClose }: HistoryDialogProps
 						<ArrowLeftIcon aria-hidden="true" />
 						{t("noteHistoryBackToList")}
 					</Button>
+					<Button
+						size="sm"
+						className="ml-auto"
+						disabled={pending || !isOnline}
+						title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+						onClick={() => {
+							setConfirmingRestore(history)
+						}}
+					>
+						<RotateCcwIcon aria-hidden="true" />
+						{t("noteHistoryRestoreAction")}
+					</Button>
 				</div>
 				<div className={`min-h-0 flex-1 overflow-hidden rounded-xl ${SURFACE_RING}`}>
 					{history.content !== undefined ? (

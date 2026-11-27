@@ -380,6 +380,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 		title: string
 		body: string
 		confirmLabel: string
+		cancelLabel?: string
 		destructive?: boolean
 		section: ContactSectionKey
 		keys: ActivityKeys
@@ -394,7 +395,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 				title={spec.title}
 				body={spec.body}
 				confirmLabel={spec.confirmLabel}
-				cancelLabel={t("common:cancel")}
+				cancelLabel={spec.cancelLabel ?? t("common:cancel")}
 				destructive={spec.destructive ?? false}
 				onOpenChange={open => {
 					if (!open) {
@@ -446,6 +447,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 					title: t("contactsCancelConfirmTitle"),
 					body: t(singleOrCountKey(count, "contactsCancelConfirmBodySingle", "contactsCancelConfirmBody"), { count }),
 					confirmLabel: t("contactsActionCancelRequest"),
+					cancelLabel: t("contactsCancelKeep"),
 					section: "pending",
 					keys: CONTACTS_CANCEL_REQUEST,
 					items: activeDialog.items,

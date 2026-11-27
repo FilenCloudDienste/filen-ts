@@ -33,6 +33,7 @@ vi.mock("@/features/shell/lib/sidePanelLayout", () => ({
 	subscribeToSidePanelBreakpoint: () => () => undefined,
 	useIsSidePanelNarrow: () => !viewport.wide
 }))
+vi.mock("@/features/contacts/components/addContactDialog", () => ({ AddContactDialog: () => null }))
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => online.current }))
 vi.mock("@/queries/account", () => ({ useAccountQuery: () => ({ data: { id: account.id } }) }))
 vi.mock("@/features/contacts/queries/contacts", () => ({

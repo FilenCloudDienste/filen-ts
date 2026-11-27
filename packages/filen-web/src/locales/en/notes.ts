@@ -377,7 +377,8 @@ export const notes = {
 	/** History dialog — restore confirm dialog title */
 	noteHistoryRestoreDialogTitle: "Restore this version?",
 	/** History dialog — restore confirm dialog body */
-	noteHistoryRestoreDialogBody: "The note's current content will be replaced with this version. This cannot be undone.",
+	noteHistoryRestoreDialogBody:
+		"The note's current content will be replaced with this version. It stays in the history, so you can restore it again.",
 
 	// ── Multi-select + bulk-action bar ──────────────────────────────────────────
 	/** Keymap — description for the Cmd/Ctrl+A action that selects every currently-visible note */

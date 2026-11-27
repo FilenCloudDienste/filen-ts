@@ -64,6 +64,10 @@ export const contacts = {
 	// locales/en/drive.ts.
 	/** Add-contact action label; also the add-contact dialog's title and submit button */
 	contactsActionAdd: "Add contact",
+	/** Toast after a contact request is sent; {{email}} = the address it went to */
+	contactsRequestSentToast: "Request sent to {{email}}",
+	/** Toast action opening the outgoing requests view */
+	contactsRequestSentView: "View",
 	/** Add-contact dialog — body prompting for the other person's Filen email address */
 	contactsAddBody: "Enter the Filen email address of the person you want to add.",
 	/** Add-contact dialog — email field label */
@@ -109,6 +113,8 @@ export const contacts = {
 	// ── Cancel-request confirm ───────────────────────────────────────────────
 	/** Cancel-request confirm dialog — title; the confirm button reuses contactsActionCancelRequest */
 	contactsCancelConfirmTitle: "Cancel request?",
+	/** Cancel-request confirm dialog — dismiss button, keeps the request */
+	contactsCancelKeep: "Keep request",
 	/** Cancel-request confirm dialog — body for a single request */
 	contactsCancelConfirmBodySingle: "Are you sure you want to cancel this contact request?",
 	/** Cancel-request confirm dialog — body for multiple requests; {{count}} = requests being cancelled */

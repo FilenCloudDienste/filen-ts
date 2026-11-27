@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
+import { useNavigate } from "@tanstack/react-router"
 import { UserPlusIcon } from "lucide-react"
 import { isValidEmail } from "@filen/shared"
 import { sendContactRequest } from "@/features/contacts/lib/actions"
@@ -21,6 +22,7 @@ export function AddContactDialog({ variant: variantProp, shortcut }: { variant?:
 	const variant = variantProp ?? "outline"
 	const { t } = useTranslation(["contacts", "common"])
 	const isOnline = useIsOnline()
+	const navigate = useNavigate()
 	const [open, setOpen] = useState(false)
 	const [pending, setPending] = useState(false)
 
@@ -35,7 +37,8 @@ export function AddContactDialog({ variant: variantProp, shortcut }: { variant?:
 
 	async function handleSubmit(email: string): Promise<void> {
 		setPending(true)
-		const outcome = await sendContactRequest(email.trim())
+		const target = email.trim()
+		const outcome = await sendContactRequest(target)
 		setPending(false)
 
 		if (outcome.status === "error") {
@@ -46,6 +49,14 @@ export function AddContactDialog({ variant: variantProp, shortcut }: { variant?:
 		}
 
 		setOpen(false)
+		toast(t("contactsRequestSentToast", { email: target }), {
+			action: {
+				label: t("contactsRequestSentView"),
+				onClick: () => {
+					void navigate({ to: "/contacts/$section", params: { section: "pending" } })
+				}
+			}
+		})
 	}
 
 	return (

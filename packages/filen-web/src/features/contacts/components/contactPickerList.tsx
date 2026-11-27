@@ -1,4 +1,5 @@
 import { type ReactNode } from "react"
+import { AddContactDialog } from "@/features/contacts/components/addContactDialog"
 import { useTranslation } from "react-i18next"
 import { UsersIcon } from "lucide-react"
 import type { UseQueryResult } from "@tanstack/react-query"
@@ -78,7 +79,9 @@ export function ContactPickerList({
 					icon={UsersIcon}
 					title={emptyTitle}
 					description={emptyDescription}
-				/>
+				>
+					<AddContactDialog />
+				</EmptyMessage>
 			)
 		}
 

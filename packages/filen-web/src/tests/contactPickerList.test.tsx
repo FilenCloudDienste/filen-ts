@@ -13,6 +13,9 @@ import type { ContactsQueryData } from "@/features/contacts/queries/contacts"
 vi.mock("@/features/contacts/components/contactRow", () => ({
 	ContactRow: ({ contact }: { contact: Contact }) => createElement("div", { "data-testid": "contact" }, contact.email)
 }))
+vi.mock("@/features/contacts/components/addContactDialog", () => ({
+	AddContactDialog: () => createElement("button", { type: "button" }, "Add contact")
+}))
 vi.mock("@/lib/i18n/errorLabel", () => ({ errorLabel: () => "Network error" }))
 
 import "@/lib/i18n"
@@ -33,6 +36,10 @@ afterAll(() => {
 
 function contact(label: string, email: string, userId: bigint): Contact {
 	return { uuid: testUuid(label), userId, email, nickName: undefined, lastActive: 0n, timestamp: 0n, publicKey: "key" }
+}
+
+function successQuery(data: ContactsQueryData): UseQueryResult<ContactsQueryData> {
+	return { status: "success", error: null, data, isPending: false, isError: false } as unknown as UseQueryResult<ContactsQueryData>
 }
 
 function query(state: { data: ContactsQueryData | undefined; refetch: () => void }): UseQueryResult<ContactsQueryData> {
@@ -86,5 +93,14 @@ describe("ContactPickerList — load error", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Try again" }))
 
 		expect(refetch).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("ContactPickerList — no contacts", () => {
+	it("offers adding a contact", () => {
+		renderPicker(successQuery({ contacts: [], blocked: [] }))
+
+		expect(screen.getByText("No contacts")).toBeTruthy()
+		expect(screen.getByRole("button", { name: "Add contact" })).toBeTruthy()
 	})
 })
