@@ -19,7 +19,7 @@ export function driveKeepBothName({
 }: {
 	name: string
 	isDirectory: boolean
-	taken: ReadonlySet<string>
+	taken: { has: (key: string) => boolean }
 }): string {
 	const normalized = name.normalize("NFC")
 
