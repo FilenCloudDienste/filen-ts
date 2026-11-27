@@ -63,7 +63,9 @@ export function SelectionTransformRoot({
 
 export function SelectionTransform({ host, root, readOnly }: { host: TransformHost; root: HTMLElement | null; readOnly?: boolean }) {
 	const { t } = useTranslation("assistant")
-	const offered = useTransformOffered() && readOnly !== true
+	// Hiding the assistant (Settings > Assistant) also closes an open menu or result, which stops its generation.
+	const onDevice = useTransformOffered()
+	const offered = onDevice && readOnly !== true
 	const [button, setButton] = useState<{ x: number; y: number } | null>(null)
 	const [menu, setMenu] = useState<MenuState | null>(null)
 	const [request, setRequest] = useState<TransformRequest | null>(null)
@@ -175,7 +177,7 @@ export function SelectionTransform({ host, root, readOnly }: { host: TransformHo
 						</button>,
 						document.body
 					)}
-			{menu === null ? null : (
+			{menu === null || !onDevice ? null : (
 				<TransformMenu
 					anchor={menu.anchor}
 					onPick={choice => {
@@ -186,7 +188,7 @@ export function SelectionTransform({ host, root, readOnly }: { host: TransformHo
 					}}
 				/>
 			)}
-			{request === null ? null : (
+			{request === null || !onDevice ? null : (
 				<TransformPopover
 					request={request}
 					anchor={() => root?.getBoundingClientRect() ?? null}

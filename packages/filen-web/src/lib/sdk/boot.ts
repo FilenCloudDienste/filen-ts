@@ -54,6 +54,7 @@ import { loadCollapsedChatSections } from "@/features/chats/lib/sidebarSections"
 import { clearDirectoryTreeState, loadDirectoryTreeOpen } from "@/features/drive/store/useDirectoryTreeStore"
 import { loadDefaultNoteType } from "@/features/notes/lib/preferences"
 import { loadHistoryRetention } from "@/features/assistant/store/conversationHistory"
+import { loadAssistantHidden } from "@/features/assistant/store/assistantHidden"
 
 // Settled when bootSdk() finishes — on success OR failure, and never rejected. Auth-sensitive route
 // guards await this before reading hasClient(): the boot kick runs before the router mounts, but
@@ -210,7 +211,8 @@ function preloadDevicePreferences(): Promise<void> {
 		loadComicPreferences(),
 		loadCollapsedChatSections(),
 		loadDirectoryTreeOpen(),
-		loadHistoryRetention()
+		loadHistoryRetention(),
+		loadAssistantHidden()
 	]).then(() => undefined)
 }
 

@@ -33,6 +33,7 @@ import { DOCX_ACTIONS } from "@/features/preview/lib/docxKeymap"
 import { SHEET_ACTIONS } from "@/features/spreadsheet/lib/keymap"
 import { OFFICE_ACTIONS } from "@/features/office/lib/keymap"
 import { PDF_EDITOR_ACTIONS } from "@/features/pdf/lib/keymap"
+import { useAssistantHidden } from "@/features/assistant/store/assistantHidden"
 
 // The app's complete action set, assembled eagerly from each feature's data-only keymap module, so the
 // shortcuts catalog never depends on which feature components have mounted. The defs are plain objects
@@ -114,7 +115,41 @@ export function currentCatalog(record: KeymapRecord): ShortcutCatalog {
 	return catalog
 }
 
-// Subscribed: the catalog under the live record.
+// The assistant's own keys: no handler is mounted while the user hides it (Settings > Assistant).
+const ASSISTANT_ACTION_IDS: ReadonlySet<string> = new Set(["app.toggleAssistant", "app.assistantTransform"])
+
+// The catalog without the assistant's keys, nor their conflicts; one per catalog.
+export function withoutAssistantActions(catalog: ShortcutCatalog): ShortcutCatalog {
+	const actions = catalog.actions.filter(action => !ASSISTANT_ACTION_IDS.has(action.id))
+	const conflicts = new Map<string, readonly ResolvedAction[]>()
+
+	for (const [id, others] of catalog.conflicts) {
+		const left = others.filter(action => !ASSISTANT_ACTION_IDS.has(action.id))
+
+		if (!ASSISTANT_ACTION_IDS.has(id) && left.length > 0) {
+			conflicts.set(id, left)
+		}
+	}
+
+	return { actions, groups: groupShortcuts(actions), conflicts, byId: new Map(actions.map(action => [action.id, action])) }
+}
+
+const withoutAssistant = new WeakMap<ShortcutCatalog, ShortcutCatalog>()
+
+// Subscribed: the catalog under the live record; the assistant's keys left out while it is hidden.
 export function useShortcutCatalog(): ShortcutCatalog {
-	return currentCatalog(useKeymapRecord())
+	const catalog = currentCatalog(useKeymapRecord())
+
+	if (!useAssistantHidden()) {
+		return catalog
+	}
+
+	let hidden = withoutAssistant.get(catalog)
+
+	if (hidden === undefined) {
+		hidden = withoutAssistantActions(catalog)
+		withoutAssistant.set(catalog, hidden)
+	}
+
+	return hidden
 }

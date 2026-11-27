@@ -277,6 +277,12 @@ const APP_HELP_ROWS = [
 		descriptionKey: "settings:settingsAudioMatchLoudnessDescription"
 	},
 	{
+		id: "hideAssistant",
+		section: "assistant",
+		titleKey: "settings:settingsAssistantHide",
+		descriptionKey: "settings:settingsAssistantHideDescription"
+	},
+	{
 		id: "assistantRetention",
 		section: "assistant",
 		titleKey: "settings:settingsAssistantRetention",

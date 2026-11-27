@@ -2454,7 +2454,7 @@ export function DocxEditView({
 						transform={transformAvailable ? openTransformMenu : undefined}
 					/>
 				)}
-				{transformMenu === null ? null : (
+				{transformMenu === null || !transformOnDevice ? null : (
 					<TransformMenu
 						anchor={{ getBoundingClientRect: () => transformMenu.anchor }}
 						onPick={choice => {
@@ -2465,7 +2465,7 @@ export function DocxEditView({
 						}}
 					/>
 				)}
-				{transformRequest === null ? null : (
+				{transformRequest === null || !transformOnDevice ? null : (
 					<TransformPopover
 						request={transformRequest}
 						anchor={() => wrapper?.getBoundingClientRect() ?? null}

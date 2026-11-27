@@ -12,6 +12,7 @@ import type {
 	AssistantTransformOutcome,
 	AssistantTransformRequest
 } from "@/features/assistant/types"
+import { assistantHidden } from "@/features/assistant/store/assistantHidden"
 
 // Where the runtime's one-generation helpers plug in (loop/register.ts), beside the session: the editors' transform UI,
 // the sheet's formula helper, the slides' notes draft and the PDF form fill reach the model only through these
@@ -20,6 +21,13 @@ let transformer: AssistantTransformer | null = null
 let formulaWriter: AssistantFormulaWriter | null = null
 let notesWriter: AssistantNotesWriter | null = null
 let formFiller: AssistantFormFiller | null = null
+
+// Hidden in Settings > Assistant: no helper loads the model, whatever asks.
+const UNAVAILABLE = { ok: false, error: "model-unavailable" } as const
+
+function slot<T>(helper: T | null): T | null {
+	return assistantHidden() ? null : helper
+}
 
 // Registers `next` into the slot `set` writes; the returned function clears it while it still holds `next`.
 function register<T>(next: T, get: () => T | null, set: (value: T | null) => void): () => void {
@@ -43,7 +51,9 @@ export function registerAssistantTransformer(next: AssistantTransformer): () => 
 }
 
 export function transformAssistantText(request: AssistantTransformRequest): Promise<AssistantTransformOutcome> {
-	return transformer === null ? Promise.resolve({ ok: false, error: "model-unavailable" }) : transformer.run(request)
+	const helper = slot(transformer)
+
+	return helper === null ? Promise.resolve(UNAVAILABLE) : helper.run(request)
 }
 
 export function registerAssistantFormulaWriter(next: AssistantFormulaWriter): () => void {
@@ -57,7 +67,9 @@ export function registerAssistantFormulaWriter(next: AssistantFormulaWriter): ()
 }
 
 export function writeAssistantFormula(request: AssistantFormulaRequest): Promise<AssistantFormulaOutcome> {
-	return formulaWriter === null ? Promise.resolve({ ok: false, error: "model-unavailable" }) : formulaWriter.run(request)
+	const helper = slot(formulaWriter)
+
+	return helper === null ? Promise.resolve(UNAVAILABLE) : helper.run(request)
 }
 
 export function registerAssistantNotesWriter(next: AssistantNotesWriter): () => void {
@@ -71,7 +83,9 @@ export function registerAssistantNotesWriter(next: AssistantNotesWriter): () => 
 }
 
 export function draftAssistantNotes(request: AssistantNotesRequest): Promise<AssistantNotesOutcome> {
-	return notesWriter === null ? Promise.resolve({ ok: false, error: "model-unavailable" }) : notesWriter.run(request)
+	const helper = slot(notesWriter)
+
+	return helper === null ? Promise.resolve(UNAVAILABLE) : helper.run(request)
 }
 
 export function registerAssistantFormFiller(next: AssistantFormFiller): () => void {
@@ -85,7 +99,9 @@ export function registerAssistantFormFiller(next: AssistantFormFiller): () => vo
 }
 
 export function fillAssistantForm(request: AssistantFormFillRequest): Promise<AssistantFormFillOutcome> {
-	return formFiller === null ? Promise.resolve({ ok: false, error: "model-unavailable" }) : formFiller.run(request)
+	const helper = slot(formFiller)
+
+	return helper === null ? Promise.resolve(UNAVAILABLE) : helper.run(request)
 }
 
 // Signing out (shutdownAssistant): whatever helper is running stops and none starts again.

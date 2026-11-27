@@ -17,6 +17,7 @@ import type { PresentationRibbonEditor } from "@/features/presentation/component
 import { refusalKey } from "@/features/presentation/hooks/usePresentationSession"
 import { usePresentationTextBindings } from "@/features/presentation/lib/keymap/text"
 import { NotesDraft, NotesDraftButton } from "@/features/presentation/components/notesDraft"
+import { useTransformOffered } from "@/features/assistant/store/useAssistantOnDevice"
 
 // How long the pane's height stays unchanged before it is stored: a drag of the resize handle (or a run of keyboard
 // steps) is stored once, when it ends.
@@ -363,6 +364,8 @@ export function PresentationNotesPane({
 	}
 }) {
 	const { t } = useTranslation("preview")
+	// Hiding the assistant ends a draft, which stops its generation.
+	const draftOffered = useTransformOffered()
 	// As read during boot.
 	const [layout, setLayout] = useState<NotesLayout>(() => presentationNotesLayout() ?? { height: 120 })
 	// A height not stored yet (its write waits for the resize to settle).
@@ -424,7 +427,7 @@ export function PresentationNotesPane({
 					? {}
 					: {
 							children:
-								draft?.active === true && editor.render !== undefined ? (
+								draft?.active === true && draftOffered && editor.render !== undefined ? (
 									<NotesDraft
 										editor={editor}
 										slide={editor.render.ref}

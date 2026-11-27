@@ -48,6 +48,7 @@ import {
 import { saveRailOrder, useRailOrderQuery } from "@/features/shell/queries/railOrder"
 import { SidebarDrawerTrigger, SidebarRevealButton } from "@/features/shell/components/sidebarDrawer"
 import { AssistantToggle } from "@/features/assistant/components/assistantToggle"
+import { useAssistantHidden } from "@/features/assistant/store/assistantHidden"
 import { RailGroup } from "@/features/shell/components/railGroup"
 import { TransfersRing } from "@/features/shell/components/transfersRing"
 import { railItemClass } from "@/features/shell/lib/railItem"
@@ -615,6 +616,7 @@ function useOverflowsY(element: HTMLElement | null, contentCount: number): boole
 export function IconRail() {
 	const { t } = useTranslation()
 	const pathname = useRouterState({ select: state => state.location.pathname })
+	const assistantHidden = useAssistantHidden()
 	const fullOrder = useRailOrderQuery().data ?? DEFAULT_RAIL_ORDER
 	const order = visibleRailOrder(fullOrder, { desktop: IS_DESKTOP })
 	const { slotProps } = useRailReorder(order, next => {
@@ -708,7 +710,7 @@ export function IconRail() {
 			    only while there are transfers to list. */}
 			<div className="mt-auto flex w-full flex-col items-center gap-1.5">
 				<TransfersRing active={pathname === "/transfers"} />
-				<AssistantToggle itemClass={railItemClass} />
+				{assistantHidden ? null : <AssistantToggle itemClass={railItemClass} />}
 				<AccountMenu />
 			</div>
 		</nav>

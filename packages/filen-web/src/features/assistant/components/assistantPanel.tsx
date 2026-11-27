@@ -11,6 +11,7 @@ import { SidebarResizeHandle } from "@/features/shell/components/sidebarResizeHa
 import { SIDEBAR_WIDTH_MAX, SIDEBAR_WIDTH_MIN } from "@/features/shell/lib/sidebarWidth"
 import { SidebarPanelVisibilityProvider } from "@/features/shell/lib/sidebarPanelVisibility"
 import { useAssistantStore } from "@/features/assistant/store/useAssistantStore"
+import { useAssistantHidden } from "@/features/assistant/store/assistantHidden"
 import { modelAcceptsMessages, trackAssistantPanelShown } from "@/features/assistant/store/assistantSession"
 import { AssistantHeader } from "@/features/assistant/components/assistantHeader"
 import { AssistantSetup } from "@/features/assistant/components/assistantSetup"
@@ -238,6 +239,12 @@ export function PreviewAssistantPane() {
 	const hosted = useAssistantStore(state => state.previewHosted)
 	const panelOpen = useAssistantStore(state => state.panelOpen)
 	const drawerOpen = useAssistantStore(state => state.drawerOpen)
+	// Hidden in Settings > Assistant: no slot, so the preview never hosts a panel.
+	const hidden = useAssistantHidden()
+
+	if (hidden) {
+		return null
+	}
 
 	return (
 		<>

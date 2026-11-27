@@ -1,5 +1,6 @@
 // The user's document-editing settings as stored (end-to-end encrypted, as a file the apps sync next to the
-// user dictionary): the author comments and tracked changes carry, autosave, proofing and regional choices.
+// user dictionary): the author comments and tracked changes carry, autosave, proofing and regional choices, and whether
+// the assistant (which edits text in them) is hidden.
 // Each setting is a last-writer-wins register, so devices that change it offline merge without one undoing
 // the other unseen. An unset setting has no register (the author name: never asked yet).
 //
@@ -42,6 +43,8 @@ export interface OfficeSettingsValues {
 	readonly regionalFormat: string | null
 	// The paper of new documents and workbooks.
 	readonly paperSize: OfficePaperSize | null
+	// Every assistant entry point hidden, and its model never loaded, on every device.
+	readonly hideAssistant: boolean
 }
 
 export type OfficeSettingKey = keyof OfficeSettingsValues
@@ -58,7 +61,8 @@ export const OFFICE_SETTINGS_DEFAULTS: OfficeSettingsValues = {
 	ignoreAddresses: true,
 	flagRepeatedWords: true,
 	regionalFormat: null,
-	paperSize: null
+	paperSize: null,
+	hideAssistant: false
 }
 
 export interface OfficeSetting<T> {
@@ -131,7 +135,8 @@ const READERS: { readonly [K in OfficeSettingKey]: (raw: unknown) => OfficeSetti
 	ignoreAddresses: readBoolean,
 	flagRepeatedWords: readBoolean,
 	regionalFormat: readLanguage,
-	paperSize: raw => (raw === null || raw === "a4" || raw === "letter" ? raw : undefined)
+	paperSize: raw => (raw === null || raw === "a4" || raw === "letter" ? raw : undefined),
+	hideAssistant: readBoolean
 }
 
 // Field order in the stored text: the known fields, then any others by name.
@@ -239,7 +244,8 @@ export function officeSettingsValues(doc: OfficeSettingsDoc): OfficeSettingsValu
 		ignoreAddresses: officeSetting(doc, "ignoreAddresses"),
 		flagRepeatedWords: officeSetting(doc, "flagRepeatedWords"),
 		regionalFormat: officeSetting(doc, "regionalFormat"),
-		paperSize: officeSetting(doc, "paperSize")
+		paperSize: officeSetting(doc, "paperSize"),
+		hideAssistant: officeSetting(doc, "hideAssistant")
 	}
 }
 

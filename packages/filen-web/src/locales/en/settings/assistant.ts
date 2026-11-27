@@ -3,6 +3,11 @@
 export const settingsAssistant = {
 	/** Settings sidebar — Assistant section nav label and that section's page heading (the on-device AI assistant) */
 	settingsSectionAssistant: "Assistant",
+	/** Settings > Assistant — switch label: hides every assistant button, panel and shortcut, on every device of the account */
+	settingsAssistantHide: "Hide Assistant",
+	/** Settings > Assistant — description of the Hide Assistant switch */
+	settingsAssistantHideDescription:
+		"Removes the assistant's buttons, panel and shortcuts, and never loads its model. Synced across your devices.",
 	/** Settings > Assistant — group title above the rows about saved conversations */
 	settingsAssistantGroupConversations: "Conversations",
 	/** Settings > Assistant — row label: how long assistant conversations stay saved on this device */

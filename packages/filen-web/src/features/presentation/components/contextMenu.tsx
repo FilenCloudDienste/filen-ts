@@ -601,6 +601,8 @@ export function SlideCanvasContextMenu({
 	// Where the menu last opened (client px): the assistant's result shows there.
 	const pointRef = useRef({ x: 0, y: 0 })
 	const [shapeTransform, setShapeTransform] = useState<{ readonly request: ShapeTransformRequest; readonly at: DOMRect } | null>(null)
+	// Hiding the assistant closes an open result, which stops its generation.
+	const transformOffered = useTransformOffered()
 	// The menu event a key dispatched, and when the key was pressed (the browser may send its own event for it).
 	const ownRef = useRef<Event | null>(null)
 	const keyedRef = useRef<number | undefined>(undefined)
@@ -730,7 +732,7 @@ export function SlideCanvasContextMenu({
 					/>
 				)}
 			</ContextMenuContent>
-			{shapeTransform === null || ribbon === undefined ? null : (
+			{shapeTransform === null || ribbon === undefined || !transformOffered ? null : (
 				<ShapeTransformPopover
 					request={shapeTransform.request}
 					session={ribbon.session}

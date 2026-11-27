@@ -96,6 +96,7 @@ describe("office settings", () => {
 		expect(officeSettingsValues(emptyOfficeSettings())).toEqual(OFFICE_SETTINGS_DEFAULTS)
 		expect(OFFICE_SETTINGS_DEFAULTS.autosaveDelayMs).toBe(30_000)
 		expect(OFFICE_SETTINGS_DEFAULTS.spellCheck).toBe(true)
+		expect(OFFICE_SETTINGS_DEFAULTS.hideAssistant).toBe(false)
 	})
 
 	it("sets each setting only to a value it takes", () => {
@@ -107,6 +108,7 @@ describe("office settings", () => {
 		doc = setOfficeSetting(doc, "paperSize", "letter", 4)
 		doc = setOfficeSetting(doc, "authorInitials", " J D ", 5)
 		doc = setOfficeSetting(doc, "flagRepeatedWords", false, 6)
+		doc = setOfficeSetting(doc, "hideAssistant", true, 7)
 
 		expect(officeSettingsValues(doc)).toMatchObject({
 			autosaveDelayMs: 60_000,
@@ -114,7 +116,8 @@ describe("office settings", () => {
 			regionalFormat: "en-GB",
 			paperSize: "letter",
 			authorInitials: "JD",
-			flagRepeatedWords: false
+			flagRepeatedWords: false,
+			hideAssistant: true
 		})
 		expect(setOfficeSetting(doc, "autosaveDelayMs", 12_345 as 15_000, 7)).toBe(doc)
 		expect(setOfficeSetting(doc, "proofingLanguage", "not a tag", 7)).toBe(doc)

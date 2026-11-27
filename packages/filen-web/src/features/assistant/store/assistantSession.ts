@@ -1,5 +1,6 @@
 import { useAssistantStore } from "@/features/assistant/store/useAssistantStore"
 import { shutdownAssistantTransformer } from "@/features/assistant/store/assistantTransform"
+import { assistantHidden } from "@/features/assistant/store/assistantHidden"
 import { awaitingConfirmation, pendingProposalIds } from "@/features/assistant/store/transcript"
 import {
 	adoptConversationSlot,
@@ -191,13 +192,18 @@ export function trackAssistantPanelShown(): () => void {
 	}
 }
 
+// The session, unless the assistant is hidden (Settings > Assistant): then nothing downloads, loads or runs the model.
+function shownSession(): AssistantSession | null {
+	return assistantHidden() ? null : session
+}
+
 export function downloadAssistantModel(): void {
-	session?.downloadModel()
+	shownSession()?.downloadModel()
 }
 
 // The signed-in shell, once it shows: the runtime continues a download a reload or crash cut off, if any.
 export function resumeAssistantDownload(): void {
-	session?.resumeInterruptedDownload()
+	shownSession()?.resumeInterruptedDownload()
 }
 
 export function cancelAssistantDownload(): void {
@@ -205,7 +211,7 @@ export function cancelAssistantDownload(): void {
 }
 
 export function loadAssistantModel(): void {
-	session?.loadModel()
+	shownSession()?.loadModel()
 }
 
 export function noteAssistantActivity(): void {
@@ -272,7 +278,7 @@ function startTurn(active: AssistantSession, text: string, start: () => string |
 export function sendAssistantMessage(text: string): boolean {
 	const store = useAssistantStore.getState()
 	const message = text.trim()
-	const active = session
+	const active = shownSession()
 
 	if (message.length === 0 || !canStartTurn(store, active)) {
 		return false
@@ -295,7 +301,7 @@ export function actOnAssistantReply(
 	action: { action: "save-note"; title: string } | { action: "draft-reply" },
 	label: string
 ): boolean {
-	const active = session
+	const active = shownSession()
 
 	if (!canStartTurn(useAssistantStore.getState(), active)) {
 		return false
@@ -305,6 +311,22 @@ export function actOnAssistantReply(
 }
 
 export function cancelAssistantTurn(): void {
+	session?.cancel()
+}
+
+// Hidden in Settings > Assistant: the panel closes and the running turn stops (its cards expire with it). The runtime
+// frees the model itself (loop/register.ts).
+export function closeHiddenAssistant(): void {
+	const { panelOpen, drawerOpen, setPanelOpen, setDrawerOpen } = useAssistantStore.getState()
+
+	if (panelOpen) {
+		setPanelOpen(false)
+	}
+
+	if (drawerOpen) {
+		setDrawerOpen(false)
+	}
+
 	session?.cancel()
 }
 

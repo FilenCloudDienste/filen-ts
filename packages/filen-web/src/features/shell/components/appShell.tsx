@@ -35,6 +35,8 @@ import { useDismissBootSplash } from "@/lib/bootSplash"
 import { AssistantDrawer, AssistantSidePanel } from "@/features/assistant/components/assistantPanel"
 import { useAssistantStore } from "@/features/assistant/store/useAssistantStore"
 import { AssistantNavigationBridge } from "@/features/assistant/tools/navigationBridge"
+import { AssistantHiddenSync } from "@/features/assistant/components/assistantHiddenSync"
+import { useAssistantHidden } from "@/features/assistant/store/assistantHidden"
 import { DesktopHost } from "@/features/desktop/components/desktopHost"
 import { desktopBridge } from "@/lib/desktop"
 
@@ -101,6 +103,8 @@ export function AppShell() {
 	// An open preview shows the panel in its own dialog (PreviewAssistantPane); the shell's is never mounted
 	// beside it.
 	const assistantInPreview = useAssistantStore(state => state.previewHosted)
+	// Hidden in Settings > Assistant: no panel, drawer or navigation tools.
+	const assistantHidden = useAssistantHidden()
 	const [windowBarSlot, setWindowBarSlot] = useState<HTMLDivElement | null>(null)
 	const [sidePanelSlot, setSidePanelSlot] = useState<HTMLDivElement | null>(null)
 
@@ -195,9 +199,11 @@ export function AppShell() {
 			{/* Realtime socket bridge — one subscription for the whole authed session; registers every
 			    domain's socket handlers (see socketHost.tsx). Renders nothing. */}
 			<SocketHost />
+			{/* Follows the synced Hide Assistant setting. Renders nothing. */}
+			<AssistantHiddenSync />
 			{/* The assistant's navigation tools act through the router from here, whether or not the panel is
 			    open. Renders nothing. */}
-			<AssistantNavigationBridge />
+			{assistantHidden ? null : <AssistantNavigationBridge />}
 			{IS_DESKTOP ? <DesktopHost /> : null}
 			<div className="h-[env(titlebar-area-height,0px)] shrink-0 app-region-drag" />
 			{/* Maintenance notice or service announcement from the remote config; nothing when there is neither. */}
@@ -211,7 +217,7 @@ export function AppShell() {
 				panel={sidebar}
 				onOpenChange={setSidebarOpen}
 			/>
-			{assistantInPreview ? null : (
+			{assistantInPreview || assistantHidden ? null : (
 				<AssistantDrawer
 					open={narrow && assistantDrawerOpen}
 					narrow={narrow}
@@ -249,7 +255,7 @@ export function AppShell() {
 						/>
 						{/* The assistant panel mirrors the sidebar slot on the right: the wrapper positions its
 					    leading-edge drag handle in the gap before it. Below the breakpoint it lives in its drawer. */}
-						{narrow || !assistantPanelOpen || assistantInPreview ? null : (
+						{narrow || !assistantPanelOpen || assistantInPreview || assistantHidden ? null : (
 							<div
 								data-shell-pane="assistant"
 								className="relative flex shrink-0"
