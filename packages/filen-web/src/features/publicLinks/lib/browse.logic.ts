@@ -8,7 +8,7 @@ import type {
 	LinkedDirsAndFiles,
 	NonRootLinkedItem
 } from "@filen/sdk-rs"
-import { copyJobGlyph, driveItemName, type CopyJobGlyph } from "@filen/shared"
+import { copyJobGlyph, driveItemName, nameSearchKey, type CopyJobGlyph } from "@filen/shared"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { sortByDriveItem, type DriveSortBy } from "@/features/drive/lib/sort"
 
@@ -187,6 +187,43 @@ export function browseZipItems(entries: readonly BrowseEntry[]): NonRootLinkedIt
 
 export function browseSaveGlyph(entries: readonly BrowseEntry[]): CopyJobGlyph {
 	return copyJobGlyph(entries.length, entries[0]?.kind === "dir")
+}
+
+// The picks a selection acts on: one inside a picked directory goes with that directory, so it is not taken twice (a
+// search's results list a directory and what is below it side by side).
+export function withoutNestedPicks(entries: readonly BrowseEntry[]): readonly BrowseEntry[] {
+	const pickedDirs = new Set<string>()
+
+	for (const entry of entries) {
+		if (entry.kind === "dir") {
+			pickedDirs.add(entryKey(entry))
+		}
+	}
+
+	if (pickedDirs.size === 0) {
+		return entries
+	}
+
+	return entries.filter(entry => entry.trail?.some(dir => pickedDirs.has(dir.inner.uuid)) !== true)
+}
+
+// Whether two picks share a name, compared as the search compares names (case and composition aside). A zip holds its
+// picks at its top under their bare names, so such a selection would lose one of them on extraction. A level's own
+// entries never do; a search's results from different directories can.
+export function picksShareName(entries: readonly BrowseEntry[]): boolean {
+	const names = new Set<string>()
+
+	for (const entry of entries) {
+		const key = nameSearchKey(entryName(entry))
+
+		if (names.has(key)) {
+			return true
+		}
+
+		names.add(key)
+	}
+
+	return false
 }
 
 // The selected files' bytes, or null when a directory is among them: its size is another request per directory.

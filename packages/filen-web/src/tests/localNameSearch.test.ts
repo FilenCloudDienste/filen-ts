@@ -62,6 +62,35 @@ describe("local name search across Unicode compositions", () => {
 		expect(result.hits.map(hit => linkedItemName(hit.item))).toEqual([NFD_NAME])
 	})
 
+	it("a directory link's search folds each name once per held listing", async () => {
+		let reads = 0
+		const dir = dirNamed("counted", "Report")
+		const counted: Dir = {
+			...dir,
+			meta: {
+				type: "decoded",
+				data: {
+					get name() {
+						reads++
+
+						return "Report"
+					}
+				}
+			}
+		}
+		const root = { inner: { uuid: testUuid("parent") } } as LinkedRootDir
+		const link = { linkUuid: testUuid("link"), linkKey: "k", password: { type: "none" } } as DirPublicLink
+		const search = createLinkedSearch(() => Promise.resolve({ dirs: [{ inner: counted, linkedTag: true }], files: [] }))
+
+		await search.open(root, link, () => undefined)
+
+		for (const name of ["rep", "xyz", "port", "rep"]) {
+			search.range({ dirUuid: root.inner.uuid, link, name, sort: "nameAsc", start: 0, end: 0 })
+		}
+
+		expect(reads).toBe(1)
+	})
+
 	it("filterContactsBySearch matches a decomposed nickname with a composed query", () => {
 		const contact = { email: "a@example.com", nickName: NFD_NAME }
 

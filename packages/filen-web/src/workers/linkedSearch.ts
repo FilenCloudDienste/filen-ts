@@ -1,5 +1,5 @@
 import type { AnyLinkedDir, DirPublicLink, File, LinkedDir, LinkedDirsAndFiles } from "@filen/sdk-rs"
-import { matchesNameSearch, nameSearchKey } from "@filen/shared"
+import { nameSearchKey } from "@filen/shared"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { sortByDriveItem, type DriveSortBy } from "@/features/drive/lib/sort"
 import { linkedItemName } from "@/features/publicLinks/lib/browse.logic"
@@ -40,13 +40,18 @@ export interface LinkedSearchRange {
 	hits: LinkedSearchHit[]
 }
 
+// A match as the worker keeps it: `index` is its item's place in the held listing (its directories, then its files).
+interface Match extends LinkedSearchHit {
+	index: number
+}
+
 // A query's matches as last asked for: a longer query narrows them instead of the whole listing, and a window of the
 // same query and sort reads them as they are.
 interface LastQuery {
 	scope: string
 	key: string
 	sort: DriveSortBy
-	hits: LinkedSearchHit[]
+	matches: Match[]
 }
 
 interface Held {
@@ -57,6 +62,8 @@ interface Held {
 	// Each directory's trail from `trailScope`, null outside it; built as queries reach them.
 	trailScope: string
 	trails: Map<string, readonly LinkedDir[] | null>
+	// Each item's name folded for matching (nameSearchKey), by its index, as queries reach it: folded once per listing.
+	folded: (string | undefined)[]
 	last: LastQuery | null
 }
 
@@ -99,10 +106,26 @@ function trailOf(held: Held, scope: string, uuid: string): readonly LinkedDir[] 
 	return trail
 }
 
-function sortHits(hits: LinkedSearchHit[], sort: DriveSortBy): LinkedSearchHit[] {
-	const decorated = hits.map(hit => ({ hit, item: narrowItem(isDir(hit.item) ? hit.item.inner : hit.item) }))
+// A name folded as nameSearchKey folds a query. The key it is matched against has no whitespace at either end, so the
+// trimmed name holds it exactly where the whole name does (matchesNameSearch).
+function foldedName(held: Held, index: number, item: LinkedDir | File): string {
+	const known = held.folded[index]
 
-	return sortByDriveItem(decorated, entry => entry.item, sort).map(entry => entry.hit)
+	if (known !== undefined) {
+		return known
+	}
+
+	const folded = nameSearchKey(linkedItemName(item))
+
+	held.folded[index] = folded
+
+	return folded
+}
+
+function sortMatches(matches: Match[], sort: DriveSortBy): Match[] {
+	const decorated = matches.map(match => ({ match, item: narrowItem(isDir(match.item) ? match.item.inner : match.item) }))
+
+	return sortByDriveItem(decorated, entry => entry.item, sort).map(entry => entry.match)
 }
 
 export function createLinkedSearch(listRecursive: ListLinkedRecursive) {
@@ -144,6 +167,7 @@ export function createLinkedSearch(listRecursive: ListLinkedRecursive) {
 			dirs: new Map(listing.dirs.map(entry => [entry.inner.uuid, entry])),
 			trailScope: dir.inner.uuid,
 			trails: new Map(),
+			folded: new Array<string | undefined>(listing.dirs.length + listing.files.length),
 			last: null
 		}
 	}
@@ -170,36 +194,43 @@ export function createLinkedSearch(listRecursive: ListLinkedRecursive) {
 
 		const scope = request.dirUuid
 		const last = source.last !== null && source.last.scope === scope ? source.last : null
-		let hits: LinkedSearchHit[]
+		let matches: Match[]
 
 		if (last !== null && last.key === key && last.sort === request.sort) {
-			hits = last.hits
+			matches = last.matches
 		} else if (last !== null && key.includes(last.key)) {
 			// A narrower query: its matches are among the last one's, already in their order when the sort stays.
-			const narrowed = last.hits.filter(hit => matchesNameSearch(linkedItemName(hit.item), key))
+			const narrowed = last.matches.filter(match => foldedName(source, match.index, match.item).includes(key))
 
-			hits = last.sort === request.sort ? narrowed : sortHits(narrowed, request.sort)
+			matches = last.sort === request.sort ? narrowed : sortMatches(narrowed, request.sort)
 		} else {
-			const matched: LinkedSearchHit[] = []
-
-			for (const item of [...source.listing.dirs, ...source.listing.files]) {
-				if (!matchesNameSearch(linkedItemName(item), key)) {
-					continue
+			const matched: Match[] = []
+			const { dirs, files } = source.listing
+			const consider = (index: number, item: LinkedDir | File): void => {
+				if (!foldedName(source, index, item).includes(key)) {
+					return
 				}
 
 				const trail = trailOf(source, scope, parentOf(item))
 
 				if (trail !== null) {
-					matched.push({ item, trail })
+					matched.push({ index, item, trail })
 				}
 			}
 
-			hits = sortHits(matched, request.sort)
+			dirs.forEach((dir, index) => {
+				consider(index, dir)
+			})
+			files.forEach((file, index) => {
+				consider(dirs.length + index, file)
+			})
+
+			matches = sortMatches(matched, request.sort)
 		}
 
-		source.last = { scope, key, sort: request.sort, hits }
+		source.last = { scope, key, sort: request.sort, matches }
 
-		return { total: hits.length, hits: hits.slice(request.start, request.end) }
+		return { total: matches.length, hits: matches.slice(request.start, request.end).map(({ item, trail }) => ({ item, trail })) }
 	}
 
 	// `dir`'s own listing from the held one, null when it does not cover `dir`.

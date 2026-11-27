@@ -31,6 +31,8 @@ import {
 	entryName,
 	selectedEntries,
 	selectionBytes,
+	withoutNestedPicks,
+	picksShareName,
 	browseSaveItems,
 	browseSaveGlyph,
 	browseZipItems,
@@ -131,8 +133,13 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 	const sorted = listing.data === undefined ? [] : sortEntries(toBrowseEntries(listing.data), sort)
 	// A query's matches come sorted from the worker.
 	const visible = searching ? (search.status === "results" ? search.entries : []) : sorted
-	const picked = selectedEntries(visible, selection)
+	const selectedPicks = selectedEntries(visible, selection)
+	// What the selection's download, save and size act on: a pick inside a picked directory goes with it.
+	const picked = withoutNestedPicks(selectedPicks)
 	const pickedBytes = selectionBytes(picked)
+	// Picks from different directories of a search sharing a name would overwrite one another at the zip's top. A copy
+	// into the drive keeps both (the SDK names the second "name (1)"), so only the zip is refused.
+	const pickedNamesClash = picksShareName(picked)
 
 	function clearSelection(): void {
 		setSelection(EMPTY_SELECTION)
@@ -239,6 +246,10 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 	// A single entry downloads as its row menu does; more, as one zip named after the level on screen.
 	function handleDownloadSelected(): void {
 		const [only] = picked
+
+		if (pickedNamesClash) {
+			return
+		}
 
 		if (only !== undefined && picked.length === 1) {
 			handleEntryAction(only, "download")
@@ -539,14 +550,17 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 				)}
 			</div>
 
-			{picked.length > 0 ? (
-				<div className="flex shrink-0 justify-center">
+			{selectedPicks.length > 0 ? (
+				<div className="flex shrink-0 flex-col items-center gap-1.5">
+					{link.enableDownload && pickedNamesClash ? (
+						<p className="text-center text-xs text-muted-foreground">{t("selectionNamesClash")}</p>
+					) : null}
 					<SelectionActionBar
-						count={picked.length}
+						count={selectedPicks.length}
 						countLabel={
 							pickedBytes === null
 								? undefined
-								: t("selectedSummary", { count: picked.length, size: formatBytes(Number(pickedBytes)) })
+								: t("selectedSummary", { count: selectedPicks.length, size: formatBytes(Number(pickedBytes)) })
 						}
 						clearKbdAction="drive.clearSelection"
 						onClear={clearSelection}
@@ -555,7 +569,8 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 							<BulkActionButton
 								icon={ACTION_DEFS.download.icon}
 								label={t("download")}
-								disabled={download.status === "running"}
+								disabled={download.status === "running" || pickedNamesClash}
+								disabledReason={pickedNamesClash ? t("selectionNamesClash") : undefined}
 								onClick={handleDownloadSelected}
 							/>
 						) : null}

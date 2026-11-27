@@ -133,6 +133,8 @@ export const publicLinks = {
 	noMatches: "No items match your search",
 	/** Directory view — under the search box while the first search lists every subdirectory of the directory on screen (a progress bar follows) */
 	searchingSubdirectories: "Searching all subdirectories…",
+	/** Directory view, selection bar — why Download is unavailable: search results picked from different subdirectories share a name, which one ZIP cannot hold side by side */
+	selectionNamesClash: "Some selected items share a name. Download them from their own directories.",
 	/** Directory view — row ⋯ and right-click menu entry on a subdirectory: downloads it as one zip */
 	downloadAsZip: "Download as ZIP",
 	/** Directory view — accessible name of the column header's checkbox that selects every item on screen */

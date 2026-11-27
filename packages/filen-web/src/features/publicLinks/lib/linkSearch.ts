@@ -16,6 +16,8 @@ export const LINK_SEARCH_WINDOW = 1_000
 export type LinkSearchState =
 	| { status: "idle" }
 	| { status: "listing"; loaded: number; total: number | null }
+	// A query under way over a held listing, after an error or before any results.
+	| { status: "pending" }
 	| { status: "results"; entries: BrowseEntry[]; total: number }
 	| { status: "error"; error: unknown }
 
@@ -43,7 +45,13 @@ export interface LinkSearchSession {
 	close: () => void
 }
 
-export function createLinkSearchSession(link: DirPublicLink, publish: (state: LinkSearchState) => void): LinkSearchSession {
+export function createLinkSearchSession(link: DirPublicLink, onState: (state: LinkSearchState) => void): LinkSearchSession {
+	// The state last published, which a query under way replaces only where it holds no results to keep.
+	let current: LinkSearchState = IDLE_LINK_SEARCH
+	const publish = (state: LinkSearchState): void => {
+		current = state
+		onState(state)
+	}
 	// Moves on every query and reset: only the newest query's outcome is published.
 	let seq = 0
 	// The directory whose listing the worker holds, as this session last opened it.
@@ -112,6 +120,11 @@ export function createLinkSearchSession(link: DirPublicLink, publish: (state: Li
 			publish(IDLE_LINK_SEARCH)
 
 			return
+		}
+
+		// A query over results keeps them until its own land; an error or nothing yet gives way to it at once.
+		if (current.status === "error" || current.status === "idle") {
+			publish({ status: "pending" })
 		}
 
 		ensureOpen(scope)

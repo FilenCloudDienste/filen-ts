@@ -2614,7 +2614,9 @@ const api = {
 	// The callback the wasm listing wants is a plain progress reporter (download of the encrypted
 	// listing itself); the viewer needs no progress here, so a no-op is passed — the method resolves
 	// with the decrypted dirs+files in one shot.
-	// A directory the search's held listing covers is read from it, with no request.
+	// A directory the search's held listing covers is read from it, with no request: a link's listing is a static
+	// snapshot (no socket reaches it), so that snapshot serves every directory it covers until the page leaves the link
+	// (searchLinkedClose); a reload reads the link afresh.
 	listLinkedDirAnon(dir: AnyLinkedDir, link: DirPublicLink): Promise<LinkedDirsAndFiles> {
 		const held = linkedSearch.children(dir, link)
 

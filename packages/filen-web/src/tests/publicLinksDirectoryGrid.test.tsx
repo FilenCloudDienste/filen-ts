@@ -30,7 +30,15 @@ const { stored, makeLinkedSdkThumbnailAnon, downloadLinkedFileBytesAnon } = vi.h
 })
 
 vi.mock("@/lib/sdk/client", () => ({
-	sdkApi: { makeLinkedSdkThumbnailAnon, downloadLinkedFileBytesAnon, cancelPreviewDownloadIfEarly: vi.fn() }
+	sdkApi: {
+		makeLinkedSdkThumbnailAnon,
+		downloadLinkedFileBytesAnon,
+		cancelPreviewDownloadIfEarly: vi.fn(),
+		// A search's one match: a photo in the subdirectory.
+		searchLinkedOpen: () => Promise.resolve(),
+		searchLinkedRange: () => Promise.resolve({ total: 1, hits: [{ item: DEEP_PHOTO, trail: [SUB] }] }),
+		searchLinkedClose: () => Promise.resolve()
+	}
 }))
 vi.mock("@/features/publicLinks/lib/viewMode", async importOriginal => ({
 	...(await importOriginal<typeof import("@/features/publicLinks/lib/viewMode")>()),
@@ -95,6 +103,7 @@ const PDF = makeFile("f2000000-0000-0000-0000-000000000000", "b-paper.pdf", "app
 const TEXT = makeFile("f3000000-0000-0000-0000-000000000000", "c-notes.txt", "text/plain", false)
 const MORE = makeFile("f4000000-0000-0000-0000-000000000000", "d-more.txt", "text/plain", false)
 const LISTING = { dirs: [SUB], files: [PHOTO, PDF, TEXT, MORE] }
+const DEEP_PHOTO = { ...makeFile("f5000000-0000-0000-0000-000000000000", "e-deep.jpg", "image/jpeg", true), parent: SUB.inner.uuid }
 // Thirty files: ten rows of three tiles, taller than the 800px view.
 const LONG_LISTING = {
 	dirs: [],
@@ -157,6 +166,7 @@ beforeEach(() => {
 	// The service's url cache outlives a test: each starts with the photo's thumbnail not made yet.
 	invalidateThumbnail(PHOTO.uuid, linkThumbnailSource(linkFingerprint(LINK)).deps)
 	invalidateThumbnail(PDF.uuid, linkThumbnailSource(linkFingerprint(LINK)).deps)
+	invalidateThumbnail(DEEP_PHOTO.uuid, linkThumbnailSource(linkFingerprint(LINK)).deps)
 	downloadLinkedFileBytesAnon.mockRejectedValue(new Error("network"))
 	makeLinkedSdkThumbnailAnon.mockResolvedValue({ type: "thumbnail", bytes: new Uint8Array([1, 2, 3]), width: 1, height: 1 })
 })
@@ -314,5 +324,19 @@ describe("DirectoryBrowser — the grid", () => {
 			expect.arrayContaining(["size-6", "shrink-0", "rounded-md", "object-cover"])
 		)
 		expect(makeLinkedSdkThumbnailAnon).toHaveBeenCalledTimes(1)
+	})
+
+	it("thumbnails a search's result from a subdirectory through the public-link client", async () => {
+		stored.mode = "grid"
+		renderBrowser()
+
+		await screen.findByRole("button", { name: "Display" })
+		fireEvent.change(screen.getByRole("searchbox", { name: "Search this directory" }), { target: { value: "deep" } })
+
+		await waitFor(() => {
+			expect(option("e-deep.jpg").querySelector("img")?.getAttribute("src")).toBe("blob:thumb")
+		})
+		expect(makeLinkedSdkThumbnailAnon.mock.calls.some(call => (call[0] as { uuid: string }).uuid === DEEP_PHOTO.uuid)).toBe(true)
+		expect(option("e-deep.jpg").textContent).toContain("Sub")
 	})
 })

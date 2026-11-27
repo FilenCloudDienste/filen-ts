@@ -16,6 +16,9 @@ import {
 	selectionBytes,
 	browseSaveItems,
 	browseSaveGlyph,
+	withoutNestedPicks,
+	picksShareName,
+	toSearchEntries,
 	DEFAULT_PUBLIC_SORT,
 	EMPTY_SELECTION,
 	type BrowseEntry
@@ -267,5 +270,36 @@ describe("browseSaveItems", () => {
 		expect(dir && browseSaveGlyph([dir])).toBe("directory")
 		expect(file && browseSaveGlyph([file])).toBe("file")
 		expect(browseSaveGlyph(entries)).toBe("items")
+	})
+})
+
+describe("acting on a search's picks", () => {
+	const outer = makeDir("d0000000-0000-0000-0000-0000000000c1", "Outer")
+	const inner = makeDir("d0000000-0000-0000-0000-0000000000c2", "Inner")
+	const deep = makeFile("f0000000-0000-0000-0000-0000000000c1", "deep.txt", 1n, 1n)
+	const beside = makeFile("f0000000-0000-0000-0000-0000000000c2", "beside.txt", 1n, 1n)
+	const twin = makeFile("f0000000-0000-0000-0000-0000000000c3", "DEEP.txt".normalize("NFD"), 1n, 1n)
+	const results = toSearchEntries([
+		{ item: outer, trail: [] },
+		{ item: inner, trail: [outer] },
+		{ item: deep, trail: [outer, inner] },
+		{ item: beside, trail: [] },
+		{ item: twin, trail: [] }
+	])
+
+	it("drops every pick inside a picked directory, at any depth", () => {
+		expect(withoutNestedPicks(results).map(entryName)).toEqual(["Outer", "beside.txt", "DEEP.txt".normalize("NFD")])
+		expect(withoutNestedPicks(results.slice(1, 4)).map(entryName)).toEqual(["Inner", "beside.txt"])
+	})
+
+	it("keeps a selection with no directory as it is", () => {
+		const files = results.slice(2)
+
+		expect(withoutNestedPicks(files)).toBe(files)
+	})
+
+	it("finds picks sharing a name whatever their case and composition", () => {
+		expect(picksShareName(results.slice(2))).toBe(true)
+		expect(picksShareName(results.slice(0, 4))).toBe(false)
 	})
 })

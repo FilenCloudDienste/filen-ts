@@ -16,7 +16,10 @@ import "@/lib/i18n"
 
 type Progress = (loaded: number, total: number | null) => void
 
-const { sdk, listingCalls } = vi.hoisted(() => ({
+const { sdk, listingCalls, zip, dirZip, dialog } = vi.hoisted(() => ({
+	dirZip: vi.fn<(args: { dir: unknown }) => Promise<{ status: "done" }>>(),
+	zip: vi.fn<(args: { items: unknown[] }) => Promise<{ status: "done" }>>(),
+	dialog: { current: null as { items: unknown[] } | null },
 	sdk: {
 		searchLinkedOpen: vi.fn<(dir: unknown, link: DirPublicLink, onProgress: Progress) => Promise<void>>(),
 		searchLinkedRange: vi.fn<(request: LinkedSearchRequest) => Promise<LinkedSearchRange>>(),
@@ -28,7 +31,7 @@ const { sdk, listingCalls } = vi.hoisted(() => ({
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: sdk }))
 vi.mock("comlink", async () => ({ ...(await vi.importActual<typeof import("comlink")>("comlink")), proxy: (value: unknown) => value }))
 vi.mock("@/features/publicLinks/queries/publicLink", () => ({
-	useLinkSaveable: () => false,
+	useLinkSaveable: () => true,
 	usePublicDirListing: ({ levelUuid }: { levelUuid: string | null }) => {
 		listingCalls.push(levelUuid)
 
@@ -41,11 +44,19 @@ vi.mock("@/features/publicLinks/queries/publicLink", () => ({
 	usePublicViewModeQuery: () => ({ data: "list", refetch: () => Promise.resolve() })
 }))
 vi.mock("@/features/publicLinks/lib/download", () => ({
-	startAnonDirZipDownload: vi.fn(),
+	startAnonDirZipDownload: dirZip,
 	startAnonFileDownload: vi.fn(),
-	startAnonItemsZipDownload: vi.fn()
+	startAnonItemsZipDownload: zip
 }))
-vi.mock("@/features/publicLinks/components/saveToDrive", () => ({ SaveToDriveButton: () => null, SaveToDriveDialog: () => null }))
+vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
+vi.mock("@/features/publicLinks/components/saveToDrive", () => ({
+	SaveToDriveButton: () => null,
+	SaveToDriveDialog: (props: { items: unknown[] }) => {
+		dialog.current = props
+
+		return null
+	}
+}))
 // The hero: its file's name and a next step.
 vi.mock("@/features/publicLinks/components/fileHero", () => ({
 	FileHero: ({
@@ -151,7 +162,17 @@ beforeEach(() => {
 	sdk.searchLinkedOpen.mockResolvedValue(undefined)
 	sdk.searchLinkedRange.mockResolvedValue(RESULTS)
 	sdk.searchLinkedClose.mockResolvedValue(undefined)
+	zip.mockResolvedValue({ status: "done" })
+	dirZip.mockResolvedValue({ status: "done" })
+	dialog.current = null
 })
+
+function bar(name: string): HTMLElement {
+	return within(screen.getByRole("toolbar", { name: "Selection actions" })).getByRole("button", { name })
+}
+
+// A twin of beach.jpg in another directory, as a search lists it beside the first.
+const TWIN = makeFile("twin", "Beach.JPG", "image/jpeg", PHOTOS.inner.uuid)
 
 afterEach(() => {
 	cleanup()
@@ -331,5 +352,101 @@ describe("DirectoryBrowser — the search", () => {
 		view.unmount()
 
 		expect(sdk.searchLinkedClose).toHaveBeenCalledTimes(1)
+	})
+
+	it("acts on a picked directory once, without the picked items below it", async () => {
+		render(createElement(DirectoryBrowser, { info: INFO, link: LINK }))
+		type("b")
+		await settle()
+		fireEvent.click(option("Trip"), { detail: 1 })
+		fireEvent.click(option("beach.jpg"), { detail: 1, ctrlKey: true })
+
+		expect(screen.getByText("2 selected")).toBeDefined()
+
+		fireEvent.click(bar("Download"))
+		fireEvent.click(bar("Save to Cloud Drive"))
+
+		expect(zip).toHaveBeenCalledTimes(0)
+		expect(dirZip).toHaveBeenCalledWith(expect.objectContaining({ dir: { dir: TRIP, link: LINK } }))
+		// One pick left: the directory downloads as its row menu would, never with its own file beside it.
+		expect(dialog.current?.items).toEqual([{ dir: TRIP, link: LINK }])
+	})
+
+	it("zips a directory and a file outside it together", async () => {
+		render(createElement(DirectoryBrowser, { info: INFO, link: LINK }))
+		type("b")
+		await settle()
+		fireEvent.click(option("Trip"), { detail: 1 })
+		fireEvent.click(option("beach-2.jpg"), { detail: 1, ctrlKey: true })
+		fireEvent.click(option("beach.jpg"), { detail: 1, ctrlKey: true })
+		fireEvent.click(bar("Download"))
+
+		expect(zip).toHaveBeenCalledWith(expect.objectContaining({ items: [TRIP, BEACH2] }))
+	})
+
+	it("refuses the zip of picks sharing a name, saying why, and saves them to the drive, which keeps both", async () => {
+		sdk.searchLinkedRange.mockResolvedValueOnce({
+			total: 2,
+			hits: [
+				{ item: BEACH, trail: [PHOTOS, TRIP] },
+				{ item: TWIN, trail: [PHOTOS] }
+			]
+		})
+		render(createElement(DirectoryBrowser, { info: INFO, link: LINK }))
+		type("beach")
+		await settle()
+		fireEvent.click(option("beach.jpg"), { detail: 1 })
+		fireEvent.click(option("Beach.JPG"), { detail: 1, ctrlKey: true })
+
+		const reason = "Some selected items share a name. Download them from their own directories."
+
+		expect(screen.getByText(reason, { selector: "p" })).toBeDefined()
+		expect(bar("Download").getAttribute("aria-disabled") === "true" || bar("Download").hasAttribute("disabled")).toBe(true)
+
+		fireEvent.click(bar("Download"))
+		fireEvent.click(bar("Save to Cloud Drive"))
+
+		expect(zip).not.toHaveBeenCalled()
+		expect(dialog.current?.items).toHaveLength(2)
+	})
+
+	it("shows a new query under way in place of a failed one's error", async () => {
+		sdk.searchLinkedRange.mockRejectedValueOnce(new Error("boom"))
+		render(createElement(DirectoryBrowser, { info: INFO, link: LINK }))
+		type("b")
+		await settle()
+
+		expect(screen.getByRole("button", { name: "Try again" })).toBeDefined()
+
+		let land: (range: LinkedSearchRange) => void = () => undefined
+
+		sdk.searchLinkedRange.mockImplementationOnce(
+			() =>
+				new Promise(resolve => {
+					land = resolve
+				})
+		)
+		type("be")
+		await settle()
+
+		expect(screen.queryByRole("button", { name: "Try again" })).toBeNull()
+
+		await act(async () => {
+			land(RESULTS)
+			await Promise.resolve()
+		})
+
+		expect(rowNames()).toEqual(["Trip", "beach-2.jpg", "beach.jpg"])
+	})
+
+	it("asks a deep result file's own directory for the files beside it, whatever its kind", async () => {
+		render(createElement(DirectoryBrowser, { info: INFO, link: LINK }))
+		type("b")
+		await settle()
+		listingCalls.length = 0
+		fireEvent.doubleClick(option("beach.jpg"))
+
+		expect(screen.getByText("hero beach.jpg")).toBeDefined()
+		expect(listingCalls).toContain(TRIP.inner.uuid)
 	})
 })

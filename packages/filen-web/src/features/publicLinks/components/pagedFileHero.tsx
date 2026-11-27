@@ -6,6 +6,7 @@ import type { DriveItem } from "@/features/drive/lib/item"
 import { FileHero } from "@/features/publicLinks/components/fileHero"
 import { entryKey, toBrowseEntries } from "@/features/publicLinks/lib/browse.logic"
 import { usePublicDirListing } from "@/features/publicLinks/queries/publicLink"
+import { linkDirReferences } from "@/features/publicLinks/lib/linkReferences"
 import { browsePagerList, stepEntry, treeEntries, type BrowsePagerList, type FileEntry } from "@/features/publicLinks/lib/browsePager.logic"
 import type { ReferenceSourceFactory } from "@/features/preview/lib/referenceResolver"
 import { useSlideshow } from "@/features/preview/hooks/useSlideshow"
@@ -97,10 +98,11 @@ export function PagedFileHero({
 	const endedAtRef = useRef(Number.NEGATIVE_INFINITY)
 	// The file on screen as of the last commit, for a list that lands later.
 	const shownRef = useRef(uuid)
-	// A video from below the level (a slideshow's subdirectories, a search's results) finds its subtitles in its own
-	// directory's listing, asked once it is shown (the worker reads it from a search's held listing); the video plays
-	// meanwhile, and its subtitles come with the listing.
-	const deepDir = slideKindOf(entry.item) === "video" ? (treeDirs?.get(entry.file.parent) ?? entry.trail?.at(-1) ?? null) : null
+	// A file from below the level finds the files beside it (a video's subtitles) and its references in its own
+	// directory: a search's result, any kind, by its trail; a slideshow's subdirectories' video by the tree's directories.
+	// Its listing is asked once it is shown (the worker reads it from a search's held listing); the file shows meanwhile.
+	const deepDir =
+		entry.trail?.at(-1) ?? (treeDirs !== null && slideKindOf(entry.item) === "video" ? (treeDirs.get(entry.file.parent) ?? null) : null)
 	const deepListing = usePublicDirListing({
 		levelUuid: deepDir === null ? null : entry.file.parent,
 		dir: deepDir,
@@ -112,6 +114,7 @@ export function PagedFileHero({
 			: deepListing.data === undefined
 				? NO_SIBLINGS
 				: toBrowseEntries(deepListing.data).map(item => item.item)
+	const shownReferences = deepDir === null ? references : linkDirReferences(deepDir, link, deepListing.data)
 
 	useEffect(() => {
 		shownRef.current = uuid
@@ -312,7 +315,7 @@ export function PagedFileHero({
 			saveItem={saveItem}
 			archiveFile={entry.file}
 			siblings={shownSiblings}
-			references={references}
+			references={shownReferences}
 			pager={
 				pager.entries.length < 2
 					? undefined

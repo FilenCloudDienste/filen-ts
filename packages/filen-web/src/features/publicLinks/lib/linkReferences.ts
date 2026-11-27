@@ -1,4 +1,4 @@
-import type { DirPublicLink, LinkedDir } from "@filen/sdk-rs"
+import type { DirPublicLink, LinkedDir, LinkedDirsAndFiles } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
 import type { ByteOrigin } from "@/lib/sdk/byteOrigin"
@@ -24,7 +24,22 @@ export function linkReferences(level: readonly BrowseEntry[], link: DirPublicLin
 	return () =>
 		originResolver<LinkedDir>(
 			() => Promise.resolve(linkListing(level)),
-			async dir => linkListing(toBrowseEntries(await runOp(sdkApi.listLinkedDirAnon(dir, link)))),
+			dir => listedDir(dir, link),
 			"anon"
 		)
+}
+
+// The same from a directory below the level: its listing as already read (`listed`), else read once referenced (a
+// search's held listing serves it).
+export function linkDirReferences(dir: LinkedDir, link: DirPublicLink, listed: LinkedDirsAndFiles | undefined): ReferenceSourceFactory {
+	return () =>
+		originResolver<LinkedDir>(
+			() => (listed === undefined ? listedDir(dir, link) : Promise.resolve(linkListing(toBrowseEntries(listed)))),
+			child => listedDir(child, link),
+			"anon"
+		)
+}
+
+async function listedDir(dir: LinkedDir, link: DirPublicLink): Promise<ReferenceListing<LinkedDir, ByteOrigin>> {
+	return linkListing(toBrowseEntries(await runOp(sdkApi.listLinkedDirAnon(dir, link))))
 }
