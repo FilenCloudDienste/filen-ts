@@ -98,13 +98,12 @@ import { clearVideoPlaybackStates } from "@/features/preview/lib/videoContinuity
 import { clearPreviewCache } from "@/features/preview/lib/previewCache"
 import { usePreviewAccessMode, usePreviewCacheScope } from "@/features/preview/lib/accessMode"
 import { useSlideshow } from "@/features/preview/hooks/useSlideshow"
+import { useSlideshowSubfolders, type ShownSlot } from "@/features/preview/hooks/useSlideshowSubfolders"
 import { SlideshowSlot } from "@/features/preview/components/slideshowSlot"
 import { SlideshowBar } from "@/features/preview/components/slideshowBar"
 import { hasTwoSlides } from "@/features/preview/lib/slideshow.logic"
-import { setSlideshowPrefs, useSlideshowPrefs } from "@/features/preview/lib/slideshowPrefs"
 import { fetchSlideshowTree, type SlideshowSource } from "@/features/preview/lib/slideshowTree"
-import { errorLabel } from "@/lib/i18n/errorLabel"
-import { reconcilePreviewSources, subscribePreviewReconcile } from "@/features/preview/lib/previewReconcile"
+import { reconcilePreviewSources, subscribePreviewReconcile, type PreviewReconcileEvent } from "@/features/preview/lib/previewReconcile"
 import { usePreviewRemoteChanges, type PreviewEdits } from "@/features/preview/hooks/usePreviewRemoteChanges"
 import { usePreviewItemMenu } from "@/features/preview/hooks/usePreviewItemMenu"
 import { usePreviewDismissal } from "@/features/preview/hooks/usePreviewDismissal"
@@ -499,50 +498,17 @@ export function PreviewOverlay({
 		cacheScope,
 		access
 	})
-	const slideshowPrefs = useSlideshowPrefs()
 	// Offered over at least two slides of the list; never in the trash, where Delete deletes for good.
 	const slideshowOffered = variant !== "trash" && hasTwoSlides(items)
-	// The list the overlay was opened with while a slideshow's subdirectories' list stands in for it.
-	const [openingItems, setOpeningItems] = useState<DriveItem[] | null>(null)
-	const [treeLoading, setTreeLoading] = useState(false)
-	const treeAbortRef = useRef<AbortController | null>(null)
-	// The file on screen when the slideshow started, and whether it runs as of the last commit.
-	const startedFromRef = useRef<string | undefined>(undefined)
-	const wasRunningRef = useRef(false)
-	const subfoldersAvailable = slideshowSource !== undefined && onItemsReplaced !== undefined
-
-	const holdsOpening = openingItems !== null
-
-	useEffect(
-		() => () => {
-			treeAbortRef.current?.abort()
-		},
-		[]
-	)
-
-	// The opening list follows the files removed, moved or renamed meanwhile, as the host's list does.
-	useEffect(() => {
-		if (!holdsOpening) {
-			return
-		}
-
-		return subscribePreviewReconcile(event => {
-			setOpeningItems(held => {
-				if (held === null) {
-					return held
-				}
-
-				const next = reconcilePreviewSources({ items: held, index: 0 }, event)
-
-				return next === null ? [] : next.items
-			})
-		})
-	}, [holdsOpening])
 
 	// Swaps the pager's list, kept on the file on screen when the new list has it, else on `fallbackUuid`'s file when it
-	// has that, else on its first item; never away from a slot that cannot be left. False when it did not swap.
-	function replaceItems(next: DriveItem[], fallbackUuid?: string, on: ShownSlot = shownSlot): boolean {
-		const { shown, locked } = on
+	// has that, else on its first item; never away from a slot that cannot be left.
+	function replaceItems(next: DriveItem[], { shown, locked }: ShownSlot, fallbackUuid: string | undefined): boolean {
+		// Every file of the opening list is gone: the slideshow's list stays.
+		if (next.length === 0) {
+			return true
+		}
+
 		const indexOf = (uuid: string | undefined): number => (uuid === undefined ? -1 : next.findIndex(item => item.data.uuid === uuid))
 		const own = indexOf(shown)
 		const at = own === -1 ? indexOf(fallbackUuid) : own
@@ -556,112 +522,47 @@ export function PreviewOverlay({
 		return true
 	}
 
-	// The slot on screen, as of this render and as of the last commit (for a tree that lands after the show moved on).
-	const shownSlot: ShownSlot = { shown: rawDriveItem?.data.uuid, locked: dirty || saving }
-	const shownSlotRef = useLatestRef(shownSlot)
+	// "Include subdirectories": the subdirectories' list stands in for the one the overlay was opened with.
+	const subfolders = useSlideshowSubfolders({
+		slideshow,
+		offered: slideshowOffered,
+		source: onItemsReplaced === undefined ? undefined : slideshowSource,
+		list: items,
+		shown: { shown: rawDriveItem?.data.uuid, locked: dirty || saving },
+		load: fetchSlideshowTree,
+		listOf: tree => (hasTwoSlides(tree) ? tree : null),
+		replace: replaceItems,
+		logScope: "preview",
+		onRunningChange: () => {
+			const popup = popupRef.current
 
-	function loadSubfolders(): void {
-		if (slideshowSource === undefined || openingItems !== null || treeAbortRef.current !== null) {
-			return
-		}
-
-		const controller = new AbortController()
-		const opening = items
-
-		treeAbortRef.current = controller
-		setTreeLoading(true)
-
-		void fetchSlideshowTree(slideshowSource, controller.signal).then(
-			tree => {
-				if (controller.signal.aborted) {
-					return
-				}
-
-				treeAbortRef.current = null
-				setTreeLoading(false)
-
-				// Fewer than two slides would end the slideshow: the list stays.
-				if (hasTwoSlides(tree) && replaceItems(tree, undefined, shownSlotRef.current)) {
-					setOpeningItems(opening)
-				}
-			},
-			(error: unknown) => {
-				if (controller.signal.aborted) {
-					return
-				}
-
-				treeAbortRef.current = null
-				setTreeLoading(false)
-				log.warn("preview", "the slideshow's subdirectories could not be listed", error)
-				toast.error(errorLabel(error))
+			// The header (▶) or the bar (✕) that held focus is gone: focus stays in the dialog, for its keys.
+			if (popup !== null && !popup.contains(document.activeElement)) {
+				popup.focus()
 			}
-		)
-	}
-
-	// Back to the list the overlay was opened with (at `fallbackUuid`'s file when the one on screen is not in it).
-	function dropSubfolders(fallbackUuid?: string): void {
-		treeAbortRef.current?.abort()
-		treeAbortRef.current = null
-		setTreeLoading(false)
-
-		if (openingItems === null) {
-			return
-		}
-
-		// Every file of the opening list is gone: the slideshow's list stays.
-		if (openingItems.length === 0 || replaceItems(openingItems, fallbackUuid)) {
-			setOpeningItems(null)
-		}
-	}
-
-	function handleSubfoldersChange(on: boolean): void {
-		setSlideshowPrefs({ subfolders: on })
-
-		if (on) {
-			loadSubfolders()
-		} else {
-			dropSubfolders()
-		}
-	}
-
-	// Inside the click or key gesture (full screen is entered there).
-	function startSlideshow(): void {
-		if (!slideshowOffered || slideshow.running) {
-			return
-		}
-
-		startedFromRef.current = rawDriveItem?.data.uuid
-		slideshow.start()
-
-		if (slideshowPrefs.subfolders && subfoldersAvailable) {
-			loadSubfolders()
-		}
-	}
-
-	// A start or an end, by whatever path (the bar, Escape, full screen left, too few slides left).
-	const onRunningChange = useEffectEvent((running: boolean) => {
-		const popup = popupRef.current
-
-		// The header (▶) or the bar (✕) that held focus is gone: focus stays in the dialog, for its keys.
-		if (popup !== null && !popup.contains(document.activeElement)) {
-			popup.focus()
-		}
-
-		// The subdirectories' list is the slideshow's alone: a load under way never lands, and the opening list comes
-		// back (the stored preference stays).
-		if (!running) {
-			dropSubfolders(startedFromRef.current)
 		}
 	})
+	const startSlideshow = subfolders.start
+	const holdsOpening = subfolders.swapped !== null
 
+	const followOpening = useEffectEvent((event: PreviewReconcileEvent) => {
+		subfolders.updateOpening(held => {
+			const next = reconcilePreviewSources({ items: held, index: 0 }, event)
+
+			return next === null ? [] : next.items
+		})
+	})
+
+	// The opening list follows the files removed, moved or renamed meanwhile, as the host's list does.
 	useEffect(() => {
-		if (wasRunningRef.current === slideshow.running) {
+		if (!holdsOpening) {
 			return
 		}
 
-		wasRunningRef.current = slideshow.running
-		onRunningChange(slideshow.running)
-	}, [slideshow.running])
+		return subscribePreviewReconcile(event => {
+			followOpening(event)
+		})
+	}, [holdsOpening])
 
 	// Neither does a new edit mode while one is open, being entered, or saving, nor under a slideshow.
 	const editStartBlocked = anyEditing || enteringEdit || saving || dialogOpen || slideshow.running
@@ -1260,23 +1161,7 @@ export function PreviewOverlay({
 		}
 
 		// S starts a slideshow; Space pauses one only while it runs, and is otherwise left to what has focus.
-		if (action === "preview.slideshow" || action === "preview.slideshowPause") {
-			if (action === "preview.slideshow" ? !slideshowOffered || slideshow.running : !slideshow.running) {
-				return
-			}
-
-			event.preventDefault()
-
-			if (event.repeat) {
-				return
-			}
-
-			if (action === "preview.slideshow") {
-				startSlideshow()
-			} else {
-				slideshow.togglePause()
-			}
-
+		if (subfolders.runKey(action, event)) {
 			return
 		}
 
@@ -1754,8 +1639,8 @@ export function PreviewOverlay({
 							{slideshow.running ? (
 								<SlideshowBar
 									slideshow={slideshow}
-									subfolders={{ available: subfoldersAvailable, loading: treeLoading }}
-									onSubfoldersChange={handleSubfoldersChange}
+									subfolders={{ available: subfolders.available, loading: subfolders.loading }}
+									onSubfoldersChange={subfolders.setSubfolders}
 								/>
 							) : null}
 						</div>
@@ -1821,12 +1706,6 @@ export function PreviewOverlay({
 			</DialogPrimitive.Portal>
 		</DialogPrimitive.Root>
 	)
-}
-
-interface ShownSlot {
-	shown: string | undefined
-	// Unsaved edits or a save under way: never swapped away from.
-	locked: boolean
 }
 
 // Middle-ish ellipsis for a long filename: the head truncates with a CSS ellipsis while the tail
