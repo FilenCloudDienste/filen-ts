@@ -443,8 +443,8 @@ function rebuild(show: Show, items: readonly DriveItem[], index: number, shuffle
 		}
 
 		// One by one: a spread of tens of thousands of arguments overflows the stack.
-		for (const index of at.values()) {
-			kept.push(index)
+		for (const added of at.values()) {
+			kept.push(added)
 		}
 
 		order = { order: kept, position: position < kept.length ? position : 0 }
