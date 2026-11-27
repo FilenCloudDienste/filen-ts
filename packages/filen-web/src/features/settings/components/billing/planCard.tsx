@@ -79,17 +79,13 @@ function PlanCard({ card, current, highlighted, purchase, buyDisabledReason, loc
 				</div>
 				<div className="flex flex-col gap-1">
 					<p className="flex flex-wrap items-baseline gap-x-1.5">
-						<span className="font-heading text-4xl font-semibold tracking-tight tabular-nums">
-							{formatBillingCost(price)}
-						</span>
+						<span className="font-heading text-4xl font-semibold tracking-tight tabular-nums">{formatBillingCost(price)}</span>
 						<span className="text-sm text-muted-foreground">{t(PRICE_SUFFIX_KEYS[plan.term])}</span>
 					</p>
 					{discountPercent === undefined ? null : (
 						<div className="flex flex-wrap items-center gap-2">
 							<s className="text-sm text-muted-foreground tabular-nums">
-								<span className="sr-only">
-									{t("settingsBillingRegularPrice", { price: formatBillingCost(plan.cost) })}
-								</span>
+								<span className="sr-only">{t("settingsBillingRegularPrice", { price: formatBillingCost(plan.cost) })}</span>
 								<span aria-hidden="true">{formatBillingCost(plan.cost)}</span>
 							</s>
 							<Badge variant="destructive">{t("settingsBillingDiscount", { percent: discountPercent })}</Badge>
