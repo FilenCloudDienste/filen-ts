@@ -14,14 +14,12 @@ export const settingsBilling = {
 	settingsBillingTabStarter: "Starter",
 	/** Plans view — tab listing one-time (lifetime) plans */
 	settingsBillingTabLifetime: "Lifetime",
-	/** Plan card and Billing subscriptions — short suffix right after a price, read as "per month", e.g. "€3.99 /month"; annual plans show their monthly equivalent with it */
+	/** Plan card and Billing subscriptions — short suffix right after a price, read as "per month", e.g. "€3.99 /month" */
 	settingsBillingPricePerMonth: "/month",
-	/** Billing subscriptions — short suffix right after the price of an annual subscription, read as "per year", e.g. "€39.99 /year" */
+	/** Plan card and Billing subscriptions — short suffix right after the price of an annual plan, read as "per year", e.g. "€39.99 /year" */
 	settingsBillingPricePerYear: "/year",
 	/** Plan card and Billing subscriptions — short word right after the price of a lifetime plan, paid once and never renewed, e.g. "€399 one-time" */
 	settingsBillingPriceOnce: "one-time",
-	/** Plan card — line under the monthly equivalent of an annual plan; {{price}} is the formatted amount charged once a year */
-	settingsBillingBilledYearly: "{{price}} billed yearly",
 	/** Plan card badge and Annually tab hint — how much less a year costs than paying monthly; {{percent}} is a whole number */
 	settingsBillingSavePercent: "Save {{percent}}%",
 	/** Annually tab hint — the largest saving among annual plans when they differ; {{percent}} is a whole number */

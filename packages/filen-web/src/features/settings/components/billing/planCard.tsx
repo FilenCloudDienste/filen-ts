@@ -55,10 +55,6 @@ function StorageFigure({ children }: { children?: ReactNode }) {
 function PlanCard({ card, current, highlighted, purchase, buyDisabledReason, locked, onBuy, onChangeMethod }: PlanCardProps) {
 	const { t } = useTranslation("settings")
 	const { plan, price, discountPercent, limited, methods, annualSavingsPercent } = card
-	// Annual plans lead with what a month costs; the yearly charge follows in small print.
-	const annual = plan.term === "annually"
-	const shownPrice = annual ? price / 12 : price
-	const shownRegular = annual ? plan.cost / 12 : plan.cost
 	const popular = plan.popular
 
 	return (
@@ -84,43 +80,34 @@ function PlanCard({ card, current, highlighted, purchase, buyDisabledReason, loc
 				<div className="flex flex-col gap-1">
 					<p className="flex flex-wrap items-baseline gap-x-1.5">
 						<span className="font-heading text-4xl font-semibold tracking-tight tabular-nums">
-							{formatBillingCost(shownPrice)}
+							{formatBillingCost(price)}
 						</span>
-						<span className="text-sm text-muted-foreground">
-							{t(annual ? PRICE_SUFFIX_KEYS.monthly : PRICE_SUFFIX_KEYS[plan.term])}
-						</span>
+						<span className="text-sm text-muted-foreground">{t(PRICE_SUFFIX_KEYS[plan.term])}</span>
 					</p>
 					{discountPercent === undefined ? null : (
 						<div className="flex flex-wrap items-center gap-2">
 							<s className="text-sm text-muted-foreground tabular-nums">
 								<span className="sr-only">
-									{t("settingsBillingRegularPrice", { price: formatBillingCost(shownRegular) })}
+									{t("settingsBillingRegularPrice", { price: formatBillingCost(plan.cost) })}
 								</span>
-								<span aria-hidden="true">{formatBillingCost(shownRegular)}</span>
+								<span aria-hidden="true">{formatBillingCost(plan.cost)}</span>
 							</s>
 							<Badge variant="destructive">{t("settingsBillingDiscount", { percent: discountPercent })}</Badge>
 						</div>
 					)}
-					{discountPercent !== undefined && !annual ? (
+					{discountPercent === undefined ? null : (
 						<p className="text-xs text-muted-foreground tabular-nums">
-							{t("settingsBillingIntroFirstMonth", { intro: formatBillingCost(price), cost: formatBillingCost(plan.cost) })}
+							{t(plan.term === "annually" ? "settingsBillingIntroFirstYear" : "settingsBillingIntroFirstMonth", {
+								intro: formatBillingCost(price),
+								cost: formatBillingCost(plan.cost)
+							})}
 						</p>
-					) : null}
-					{annual ? (
-						<div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground tabular-nums">
-							<span>
-								{discountPercent === undefined
-									? t("settingsBillingBilledYearly", { price: formatBillingCost(price) })
-									: t("settingsBillingIntroFirstYear", {
-											intro: formatBillingCost(price),
-											cost: formatBillingCost(plan.cost)
-										})}
-							</span>
-							{annualSavingsPercent === undefined ? null : (
-								<Badge variant="secondary">{t("settingsBillingSavePercent", { percent: annualSavingsPercent })}</Badge>
-							)}
+					)}
+					{annualSavingsPercent === undefined ? null : (
+						<div>
+							<Badge variant="secondary">{t("settingsBillingSavePercent", { percent: annualSavingsPercent })}</Badge>
 						</div>
-					) : null}
+					)}
 				</div>
 				<p className="flex flex-wrap items-baseline gap-x-1.5 text-sm text-muted-foreground">
 					<Trans

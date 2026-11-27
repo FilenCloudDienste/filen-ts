@@ -190,7 +190,21 @@ describe("PlansView", () => {
 
 		expect(screen.getByText("−40%")).toBeDefined()
 		expect(screen.getByText(/for the first year, then .*100.* per year/)).toBeDefined()
-		expect(screen.queryByText(/billed yearly/)).toBeNull()
+		// The yearly charge leads, struck against the regular yearly price.
+		expect(document.querySelector("[aria-current], [data-slot='card']")?.textContent).toContain(EN.settingsBillingPricePerYear)
+	})
+
+	it("shows an annual plan at its yearly price with no sale terms once the sale is off", () => {
+		renderPlans(info(), 30)
+
+		const card = screen.getByRole("heading", { level: 2, name: "Pro II" }).closest("[aria-current]")
+
+		expect(card?.textContent).toContain("€20.00")
+		expect(card?.textContent).toContain(EN.settingsBillingPricePerYear)
+		expect(card?.textContent).not.toContain(EN.settingsBillingPricePerMonth)
+		expect(card?.textContent).toContain("Save 17%")
+		expect(screen.queryByText(/Regular price/)).toBeNull()
+		expect(screen.queryByText(/for the first/)).toBeNull()
 	})
 
 	it("shows the renewal terms for recurring plans only", () => {
