@@ -118,7 +118,7 @@ describe("sendContactRequest", () => {
 		expect(testQueryClient.getQueryData(CONTACT_REQUESTS_QUERY_KEY)).toEqual({ incoming: [], outgoing: [mockOutgoing()] })
 	})
 
-	it("returns an error outcome without patching when the send succeeds but the outgoing refetch rejects", async () => {
+	it("still reports success when the send succeeds but the outgoing refetch rejects", async () => {
 		seedRequests({ outgoing: [mockOutgoing()] })
 		sendContactRequest.mockResolvedValueOnce(testUuid("new-request"))
 		const dto = sdkDto("Timeout")
@@ -127,9 +127,11 @@ describe("sendContactRequest", () => {
 
 		const outcome = await sendContactRequestAction("new@filen.io")
 
-		expect(outcome).toEqual({ status: "error", dto })
+		expect(outcome).toEqual({ status: "success" })
 		expect(testQueryClient.getQueryData(CONTACT_REQUESTS_QUERY_KEY)).toEqual({ incoming: [], outgoing: [mockOutgoing()] })
-		expect(invalidateSpy).toHaveBeenCalledExactlyOnceWith({ queryKey: CONTACT_REQUESTS_QUERY_KEY })
+		await vi.waitFor(() => {
+			expect(invalidateSpy).toHaveBeenCalledExactlyOnceWith({ queryKey: CONTACT_REQUESTS_QUERY_KEY })
+		})
 	})
 })
 

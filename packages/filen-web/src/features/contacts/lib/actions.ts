@@ -22,10 +22,13 @@ export async function sendContactRequest(email: string): Promise<VoidActionOutco
 		// The op's own return (the new request's uuid) is discarded — a fresh listOutgoingContactRequests
 		// is the source of truth for the patch, same as the mobile client.
 		await runOp(sdkApi.sendContactRequest(email))
-		await rereadOutgoingRequests()
 	} catch (e) {
 		return { status: "error", dto: asErrorDTO(e) }
 	}
+
+	// Not awaited and outside the try: the send succeeded, and a failed read-back marks the requests
+	// stale itself, so it must not report the send as failed.
+	rereadOutgoingRequests().catch(() => undefined)
 
 	return { status: "success" }
 }
