@@ -66,7 +66,7 @@ import { useNowMinute } from "@/lib/useNowMinute"
 import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { ON_FOCUSED_ROW, rowNoteUuid } from "@/features/notes/lib/rowKeys"
 import { hasCommandModifier } from "@/lib/rowKeys"
-import { isNoteInflight, useInflightNoteUuids } from "@/features/notes/store/useNotesInflight"
+import { isNoteInflight, useFailedNoteUuids, useInflightNoteUuids } from "@/features/notes/store/useNotesInflight"
 import { runNoteDirectAction } from "@/features/notes/lib/noteDirectAction"
 import { availableNoteAction, type NoteActionId } from "@/features/notes/components/noteMenu.logic"
 import { canBulkDeleteNotes } from "@/features/notes/components/notesBulkActionBar.logic"
@@ -302,6 +302,7 @@ export function NotesSidebar() {
 	const blocked = useBlockedUsers(true)
 	// One subscription for every row's pin and favorite toggles, which wait for a note's queued edits as its menu does.
 	const inflightUuids = useInflightNoteUuids()
+	const failedUuids = useFailedNoteUuids()
 
 	const [search, setSearch] = useState("")
 	// Collapse state is in-memory only — a tag uuid present here is expanded.
@@ -939,6 +940,7 @@ export function NotesSidebar() {
 						now={now}
 						isOnline={isOnline}
 						inflightUuids={inflightUuids}
+						failedUuids={failedUuids}
 						defaultNoteType={defaultNoteType}
 						searchHits={searchHits}
 						selectableIndexByRowKey={selectableIndexByRowKey}
@@ -984,6 +986,8 @@ interface NotesSidebarListProps {
 	now: number
 	isOnline: boolean
 	inflightUuids: ReadonlySet<string>
+	// Notes whose queued edit failed and waits for a retry.
+	failedUuids: ReadonlySet<string>
 	defaultNoteType: NoteType
 	// The active search's body matches: a matching row shows its snippet.
 	searchHits: NoteSearchHits | undefined
@@ -1013,6 +1017,7 @@ function NotesSidebarList({
 	now,
 	isOnline,
 	inflightUuids,
+	failedUuids,
 	defaultNoteType,
 	searchHits,
 	selectableIndexByRowKey,
@@ -1224,6 +1229,7 @@ function NotesSidebarList({
 								now={now}
 								isOnline={isOnline}
 								inflight={inflightUuids.has(row.note.uuid)}
+								saveFailed={failedUuids.has(row.note.uuid)}
 								defaultNoteType={defaultNoteType}
 								snippet={searchHits?.body.get(row.note.uuid)?.snippet}
 								onAction={onNoteAction}

@@ -21,6 +21,7 @@ import { touchLongPress, touchTap } from "@/tests/support/touch"
 import { TagGroupRow } from "@/features/notes/components/notesSidebar"
 import { mockNote, mockNoteParticipant, mockNoteTag } from "@/tests/fixtures/notes"
 import { testUuid } from "@/tests/support/uuid"
+import { notes as EN_NOTES } from "@/locales/en/notes"
 import { formatClockTime, formatShortWeekday } from "@/lib/formatDate"
 
 const NOW = 1_700_000_040_000
@@ -31,7 +32,10 @@ function renderNoteRow(
 	multiSelected: boolean,
 	note: Note = mockNote(),
 	handlers: Partial<
-		Pick<NoteRowProps, "onPointerSelect" | "onLongPress" | "now" | "isOnline" | "inflight" | "nested" | "defaultNoteType">
+		Pick<
+			NoteRowProps,
+			"onPointerSelect" | "onLongPress" | "now" | "isOnline" | "inflight" | "saveFailed" | "nested" | "defaultNoteType"
+		>
 	> = {}
 ) {
 	return render(
@@ -44,6 +48,7 @@ function renderNoteRow(
 			now: NOW,
 			isOnline: true,
 			inflight: false,
+			saveFailed: false,
 			defaultNoteType: "text",
 			onAction: () => undefined,
 			onDuplicated: () => undefined,
@@ -152,6 +157,7 @@ describe("note row — calm layout", () => {
 				now: NOW + 2 * DAY_MS,
 				isOnline: true,
 				inflight: false,
+				saveFailed: false,
 				defaultNoteType: "text",
 				onAction: () => undefined,
 				onDuplicated: () => undefined,
@@ -328,5 +334,27 @@ describe("note row — touch", () => {
 		expect(onLongPress).toHaveBeenCalledOnce()
 		expect(onPointerSelect).not.toHaveBeenCalled()
 		expect(screen.queryByRole("menu")).toBeNull()
+	})
+})
+
+describe("NoteRow sync state", () => {
+	it("shows the editor header's syncing spinner while the note's edit is queued", () => {
+		renderNoteRow(false, false, mockNote(), { inflight: true })
+
+		expect(screen.getByLabelText(EN_NOTES.noteSyncing)).toBeDefined()
+	})
+
+	it("shows the not-saved warning instead once the queued edit failed", () => {
+		renderNoteRow(false, false, mockNote(), { inflight: true, saveFailed: true })
+
+		expect(screen.getByText(EN_NOTES.noteSaveFailedRetrying)).toBeDefined()
+		expect(screen.queryByLabelText(EN_NOTES.noteSyncing)).toBeNull()
+	})
+
+	it("shows neither while nothing is queued", () => {
+		renderNoteRow(false, false, mockNote())
+
+		expect(screen.queryByLabelText(EN_NOTES.noteSyncing)).toBeNull()
+		expect(screen.queryByText(EN_NOTES.noteSaveFailedRetrying)).toBeNull()
 	})
 })

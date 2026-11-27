@@ -1,7 +1,7 @@
 import { useId, type MouseEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "@tanstack/react-router"
-import { PinIcon, HeartIcon, UsersIcon, type LucideIcon } from "lucide-react"
+import { PinIcon, HeartIcon, UsersIcon, TriangleAlertIcon, type LucideIcon } from "lucide-react"
 import type { Note, NoteTag, NoteType } from "@filen/sdk-rs"
 import { cn } from "@filen/shared"
 import { noteRowIcon } from "@/features/notes/lib/icon.logic"
@@ -23,6 +23,7 @@ import { runNoteDirectAction } from "@/features/notes/lib/noteDirectAction"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { RowMenuTrigger } from "@/components/rowMenuTrigger"
 import { LazyTooltip, RowTooltipContent } from "@/components/lazyTooltip"
 import { Tooltip, TooltipTrigger } from "@/components/ui/tooltip"
@@ -48,6 +49,8 @@ export interface NoteRowProps {
 	// Whether this note's edits are still queued: its menu's actions wait for them, and so do the pin and favorite
 	// toggles. Read once by the sidebar for every row (useInflightNoteUuids).
 	inflight: boolean
+	// Its queued edit failed and waits for a retry (the editor header's "Not saved" state).
+	saveFailed: boolean
 	// The user's default note type (Appearance → Notes): its notes carry no type mark.
 	defaultNoteType: NoteType
 	// The text around the active search's hits in this note's body (searchIndex.ts), shown instead of the preview.
@@ -159,6 +162,7 @@ export function NoteRow({
 	now,
 	isOnline,
 	inflight,
+	saveFailed,
 	defaultNoteType,
 	snippet,
 	onAction,
@@ -249,6 +253,21 @@ export function NoteRow({
 											<span className="sr-only">{sharedLabel}</span>
 										</span>
 									</LazyTooltip>
+								) : null}
+								{/* The editor header's sync state, at the end of the title line. */}
+								{saveFailed ? (
+									<span className="ml-auto flex shrink-0 text-amber-500">
+										<TriangleAlertIcon
+											aria-hidden
+											className="size-3.5"
+										/>
+										<span className="sr-only">{t("noteSaveFailedRetrying")}</span>
+									</span>
+								) : inflight ? (
+									<Spinner
+										className="ml-auto size-3 shrink-0 text-muted-foreground"
+										aria-label={t("noteSyncing")}
+									/>
 								) : null}
 							</span>
 							<span className="truncate text-xs text-muted-foreground">

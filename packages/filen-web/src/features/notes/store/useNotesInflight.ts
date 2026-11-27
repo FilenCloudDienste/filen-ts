@@ -117,6 +117,21 @@ function inflightNoteUuidsKey(state: NotesInflightStore): string {
 		.join(",")
 }
 
+// Every note whose queued edit failed and waits for a retry (useNoteSaveFailed's answer) for a whole list: one
+// subscription, re-rendering only when a note joins or leaves the set.
+export function useFailedNoteUuids(): ReadonlySet<string> {
+	const key = useNotesInflightStore(failedNoteUuidsKey)
+
+	return new Set(key.length > 0 ? key.split(",") : [])
+}
+
+function failedNoteUuidsKey(state: NotesInflightStore): string {
+	return Object.keys(state.failedNotes)
+		.filter(uuid => state.failedNotes[uuid] === true && isInflightIn(state, uuid))
+		.sort()
+		.join(",")
+}
+
 // The same answer read once, for a keyboard shortcut deciding at keypress time.
 export function isNoteInflight(uuid: string): boolean {
 	return isInflightIn(useNotesInflightStore.getState(), uuid)
