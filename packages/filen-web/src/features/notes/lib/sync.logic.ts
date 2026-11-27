@@ -51,6 +51,15 @@ export const inflightContentSchema = type({
 // (Sync.enqueueAnswer).
 export type RemoteEnqueue = Omit<InflightEntry, "orphan"> & { answer?: true }
 
+// The leader's failed pushes, told to every tab: the notes waiting to be sent again, and the notes whose
+// edits it just gave up on (each tab says so).
+export const noteFailedStateSchema = type({
+	failed: "string[]",
+	gaveUp: "string[]"
+})
+
+export type NoteFailedState = typeof noteFailedStateSchema.infer
+
 // Rebuild a follower's displayed store + its still-outstanding unacked set from the leader's
 // authoritative broadcast. An unacked note is CONFIRMED (dropped from unacked) once the leader's state
 // carries an entry for it at a timestamp >= ours — proof the leader received our forwarded edit; the

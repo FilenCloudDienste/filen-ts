@@ -141,6 +141,12 @@ export const notes = {
 	// ── Editor (live editing) ────────────────────────────────────────────────────
 	/** Editor header — accessible label on the sync spinner shown while the note's edit is in flight */
 	noteSyncing: "Saving…",
+	/** Editor header — status in place of the sync spinner while the note's last save failed and waits to be sent again */
+	noteSaveFailedRetrying: "Not saved — retrying",
+	/** Editor header — button next to noteSaveFailedRetrying that sends the failed save again right away */
+	noteSaveRetryNow: "Retry now",
+	/** Sync outbox — error toast when a note's save kept being rejected and was given up; the editor still shows the text */
+	noteSaveGaveUp: '"{{name}}" couldn\'t be saved, and saving was stopped. Copy your latest changes before leaving the note.',
 	/** Editor header — chip on a shared note this user may read but not edit */
 	noteViewOnly: "View only",
 	/** Export / copy content — the note's content exists but its ciphertext couldn't be decrypted */

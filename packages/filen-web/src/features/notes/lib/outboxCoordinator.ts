@@ -6,7 +6,7 @@ import {
 	bindOutboxLeadership
 } from "@/lib/storage/outboxChannel"
 import { sync } from "@/features/notes/lib/sync"
-import { inflightContentSchema, inflightEntrySchema, type RemoteEnqueue } from "@/features/notes/lib/sync.logic"
+import { inflightContentSchema, inflightEntrySchema, type NoteFailedState, type RemoteEnqueue } from "@/features/notes/lib/sync.logic"
 import { setOutboxHydrated, type InflightContent } from "@/features/notes/store/useNotesInflight"
 import { rememberNotePush, setNotePushBroadcast } from "@/features/notes/lib/pushEchoes"
 import { setNoteAnswerBroadcast, useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdit"
@@ -82,7 +82,7 @@ export async function startOutbox(): Promise<void> {
 	}, HYDRATION_BACKSTOP_MS)
 
 	await bindOutboxLeadership(OUTBOX_CHANNEL, sync, channel => {
-		const transport = makeOutboxChannelTransport<RemoteEnqueue, InflightContent>(channel)
+		const transport = makeOutboxChannelTransport<RemoteEnqueue, InflightContent, NoteFailedState>(channel)
 
 		sync.attachTransport(transport)
 		setNotePushBroadcast(transport.broadcastPushed)

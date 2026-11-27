@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
-import { StickyNoteIcon, MoreHorizontalIcon, EyeIcon } from "lucide-react"
+import { StickyNoteIcon, MoreHorizontalIcon, EyeIcon, TriangleAlertIcon } from "lucide-react"
 import type { Note } from "@filen/sdk-rs"
 import { noteIcon } from "@/features/notes/lib/icon.logic"
 import { isNoteUndecryptable, hasNoteWriteAccess } from "@/features/notes/lib/sort"
@@ -14,7 +14,7 @@ import { NoteDropdownMenuContent } from "@/features/notes/components/noteMenu"
 import { useNoteDialogHost } from "@/features/notes/hooks/useNoteDialogHost"
 import { NoteHeaderSlotContext } from "@/features/notes/lib/noteHeaderSlot"
 import { useNoteTags } from "@/features/notes/queries/noteTags"
-import { useNoteInflight } from "@/features/notes/store/useNotesInflight"
+import { useNoteInflight, useNoteSaveFailed } from "@/features/notes/store/useNotesInflight"
 import { useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdit"
 import { sync } from "@/features/notes/lib/sync"
 import { useHideCompletedChecklistQuery } from "@/features/notes/queries/preferences"
@@ -73,6 +73,8 @@ export function NoteEditorPane({ note, loading }: NoteEditorPaneProps) {
 	// header sync spinner + menu suppression, mirroring mobile's header (screens/noteEditor.tsx) and
 	// note-menu (components/note/menu.tsx) inflight gating.
 	const isInflight = useNoteInflight(note?.uuid ?? "")
+	// The queued edit failed to push and waits for the outbox's next attempt: the spinner gives way to a warning.
+	const saveFailed = useNoteSaveFailed(note?.uuid ?? "")
 	// The "hide completed items" menu toggle and the checklist filter itself are both checklist-only and
 	// editor-origin only: an undecryptable checklist never reaches the editor (its content can't be
 	// parsed anyway), and every other note type simply never sees the prop.
@@ -169,8 +171,29 @@ export function NoteEditorPane({ note, loading }: NoteEditorPaneProps) {
 						{t("noteViewOnly")}
 					</span>
 				) : null}
-				{/* Subtle in-flight indicator next to the title (mobile parity) — the note is mid-sync. */}
-				{isInflight ? (
+				{/* Subtle in-flight indicator next to the title (mobile parity) — the note is mid-sync; a failed
+				    push shows its state instead, with a way to send it again now. */}
+				{saveFailed ? (
+					<span
+						role="status"
+						className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground"
+					>
+						<TriangleAlertIcon
+							aria-hidden="true"
+							className="size-3.5 shrink-0 text-amber-500"
+						/>
+						{t("noteSaveFailedRetrying")}
+						<Button
+							variant="ghost"
+							size="xs"
+							onClick={() => {
+								sync.executeNow()
+							}}
+						>
+							{t("noteSaveRetryNow")}
+						</Button>
+					</span>
+				) : isInflight ? (
 					<Spinner
 						className="size-4 shrink-0 text-muted-foreground"
 						aria-label={t("noteSyncing")}

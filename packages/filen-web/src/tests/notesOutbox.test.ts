@@ -38,7 +38,7 @@ const { kvStore, kvGetJson, kvSetJson, kvDelete } = vi.hoisted(() => {
 vi.mock("@/lib/storage/adapter", () => ({ kvGetJson, kvSetJson, kvDelete }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
-const { toast } = vi.hoisted(() => ({ toast: vi.fn() }))
+const { toast } = vi.hoisted(() => ({ toast: Object.assign(vi.fn(), { error: vi.fn() }) }))
 
 vi.mock("sonner", () => ({ toast }))
 vi.mock("@/lib/i18n", () => ({ i18n: { t: (key: string) => key } }))
@@ -52,7 +52,7 @@ import {
 	type InflightContent
 } from "@/features/notes/store/useNotesInflight"
 import { hashNoteContent } from "@filen/shared"
-import { reconcileFollower, type RemoteEnqueue } from "@/features/notes/lib/sync.logic"
+import { reconcileFollower, type NoteFailedState, type RemoteEnqueue } from "@/features/notes/lib/sync.logic"
 import { isOwnNotePush } from "@/features/notes/lib/pushEchoes"
 import type { PushDetail } from "@/lib/storage/outboxChannel"
 import { forgetTabEditors, seedTabEditor, takeTabEditorEcho, tabEditorChanged } from "@/features/notes/lib/tabEditors"
@@ -74,6 +74,7 @@ function mockTransport() {
 		sendDrop: vi.fn<(id: string) => void>(),
 		broadcastPushed: vi.fn<(id: string, hash: string, detail?: PushDetail) => void>(),
 		broadcastAnswered: vi.fn<(id: string) => void>(),
+		broadcastFailed: vi.fn<(failed: NoteFailedState) => void>(),
 		close: vi.fn<() => void>()
 	}
 }
@@ -129,8 +130,9 @@ beforeEach(() => {
 	getNoteContent.mockReset()
 	listNotes.mockReset()
 	toast.mockClear()
+	toast.error.mockClear()
 	setStore({})
-	useNotesInflightStore.setState({ outboxHydrated: false })
+	useNotesInflightStore.setState({ outboxHydrated: false, failedNotes: {} })
 	onlineManager.setOnline(true)
 })
 
@@ -267,6 +269,65 @@ describe("follower enqueue — optimistic local apply + forward, no disk", () =>
 		s.startAsFollower()
 
 		expect(transport.requestState).toHaveBeenCalledTimes(1)
+	})
+})
+
+// The header's "Not saved — retrying" state follows the leader's failed pushes in every tab, and an edit the
+// leader gave up on is told in every tab (the leader may be hidden).
+describe("failed pushes reach every tab", () => {
+	it("the leader tells its failed pushes once they change, and again to a follower asking for state", async () => {
+		const s = newSync()
+		const transport = mockTransport()
+
+		s.attachTransport(transport)
+		s.start()
+		await flushAsync()
+
+		setNoteContent.mockRejectedValue(new Error("fetch failed"))
+		setStore({ a: [{ timestamp: 1, content: "typed", note: makeNote("a") }] })
+		s.executeNow()
+		await flushAsync()
+
+		expect(useNotesInflightStore.getState().failedNotes).toEqual({ a: true })
+		expect(transport.broadcastFailed).toHaveBeenLastCalledWith({ failed: ["a"], gaveUp: [] })
+
+		transport.broadcastFailed.mockClear()
+		s.broadcastState()
+
+		expect(transport.broadcastFailed).toHaveBeenCalledExactlyOnceWith({ failed: ["a"], gaveUp: [] })
+
+		setNoteContent.mockResolvedValue(makeNote("a"))
+		s.executeNow()
+		await flushAsync()
+
+		expect(useNotesInflightStore.getState().failedNotes).toEqual({})
+		expect(transport.broadcastFailed).toHaveBeenLastCalledWith({ failed: [], gaveUp: [] })
+	})
+
+	it("a follower shows the leader's failed pushes and tells of an edit given up on", () => {
+		const s = newSync()
+
+		s.attachTransport(mockTransport())
+		s.startAsFollower()
+		s.applyLeaderState({ a: [{ timestamp: 1, content: "typed", note: makeNote("a") }] })
+		s.applyLeaderFailed({ failed: ["a"], gaveUp: [] })
+
+		expect(useNotesInflightStore.getState().failedNotes).toEqual({ a: true })
+		expect(toast.error).not.toHaveBeenCalled()
+
+		s.applyLeaderFailed({ failed: [], gaveUp: ["a"] })
+
+		expect(useNotesInflightStore.getState().failedNotes).toEqual({})
+		expect(toast.error).toHaveBeenCalledExactlyOnceWith("notes:noteSaveGaveUp")
+	})
+
+	it("a follower ignores a malformed payload", () => {
+		const s = newSync()
+
+		s.startAsFollower()
+		s.applyLeaderFailed({ failed: "a" })
+
+		expect(useNotesInflightStore.getState().failedNotes).toEqual({})
 	})
 })
 

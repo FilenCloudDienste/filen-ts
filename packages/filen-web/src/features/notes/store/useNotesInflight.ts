@@ -43,6 +43,8 @@ export interface NotesInflightStore {
 	// Per note, how often the editor on screen was told to seed again (from an outbox entry it may now
 	// show), part of its remount key: the content cache may hold nothing to advance.
 	editorReseeds: Record<string, number>
+	// The notes whose last push failed and waits to be sent again, as the leader last told (sync.ts).
+	failedNotes: Record<string, true>
 }
 
 export const useNotesInflightStore = create<NotesInflightStore>(set => ({
@@ -54,8 +56,27 @@ export const useNotesInflightStore = create<NotesInflightStore>(set => ({
 	},
 	outboxHydrated: false,
 	editingSessions: {},
-	editorReseeds: {}
+	editorReseeds: {},
+	failedNotes: {}
 }))
+
+// Whether the note's queued edit failed to push and waits for a retry: the header's "Not saved" state.
+export function useNoteSaveFailed(uuid: string): boolean {
+	return useNotesInflightStore(state => state.failedNotes[uuid] === true && isInflightIn(state, uuid))
+}
+
+// The outbox's own marker (sync.ts). Keeps the store's object when the set is unchanged.
+export function setFailedNotes(uuids: readonly string[]): void {
+	useNotesInflightStore.setState(state => {
+		const current = Object.keys(state.failedNotes)
+
+		if (current.length === uuids.length && uuids.every(uuid => state.failedNotes[uuid] === true)) {
+			return state
+		}
+
+		return { failedNotes: Object.fromEntries(uuids.map(uuid => [uuid, true as const])) }
+	})
+}
 
 // THE "is the user editing this note right now" test, the one that keeps the content query (and so the
 // editor's remount key) still — a pending outbox entry OR a live editor session. The queue alone answers a

@@ -43,7 +43,7 @@ vi.mock("@/lib/storage/adapter", () => ({ kvGetJson, kvSetJson, kvDelete }))
 // through it, so it must be a genuine client, shared by every importer via this one mocked object.
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
-const { toast } = vi.hoisted(() => ({ toast: vi.fn() }))
+const { toast } = vi.hoisted(() => ({ toast: Object.assign(vi.fn(), { error: vi.fn() }) }))
 
 vi.mock("sonner", () => ({ toast }))
 
@@ -57,7 +57,7 @@ import { useNotesInflightStore, type InflightContent } from "@/features/notes/st
 import { Semaphore, hashNoteContent } from "@filen/shared"
 import { inflightContentSchema, noteKindForPreview } from "@/features/notes/lib/sync.logic"
 import { deriveSessionBaseHash } from "@/features/notes/hooks/useNoteEditor.logic"
-import { heldNotes, holdNoteForRemoteEdit, releaseAllNoteHolds } from "@/features/notes/lib/remoteEditHolds"
+import { holdNoteForRemoteEdit, releaseAllNoteHolds } from "@/features/notes/lib/remoteEditHolds"
 import { isOwnNotePush } from "@/features/notes/lib/pushEchoes"
 import { forgetTabEditors, seedTabEditor, tabEditorBaseHash, tabEditorChanged, tabEditorDirty } from "@/features/notes/lib/tabEditors"
 
@@ -156,8 +156,9 @@ beforeEach(() => {
 	getNoteContent.mockReset()
 	listNotes.mockReset()
 	toast.mockClear()
+	toast.error.mockClear()
 	setStore({})
-	useNotesInflightStore.setState({ outboxHydrated: false })
+	useNotesInflightStore.setState({ outboxHydrated: false, failedNotes: {} })
 	testQueryClient.clear()
 	onlineManager.setOnline(true)
 })
@@ -303,6 +304,8 @@ describe("push loop — bounded drop at 3 non-retryable SDK rejections + reset o
 		s.executeNow()
 		await settled()
 		expect(queued("a")).toBe(false)
+		expect(toast.error).toHaveBeenCalledExactlyOnceWith("notes:noteSaveGaveUp")
+		s.cancel()
 	})
 
 	it("resets the strike count after a successful push", async () => {
@@ -330,6 +333,7 @@ describe("push loop — bounded drop at 3 non-retryable SDK rejections + reset o
 		s.executeNow()
 		await settled()
 		expect(queued("a")).toBe(true)
+		s.cancel()
 	})
 })
 
@@ -403,15 +407,43 @@ describe("push loop — remote-edit dialog and a cloud already holding the conte
 		expect(setNoteContent).toHaveBeenCalledWith(expect.objectContaining({ uuid: "b" }), "other", expect.any(String))
 		expect(queued("a")).toBe(true)
 
+		// Releasing the hold runs the pass on its own: no keystroke or other trigger needed.
 		releaseAllNoteHolds()
-		await until(async () => {
-			expect((await heldNotes()).has("a")).toBe(false)
+		await until(() => {
+			expect(queued("a")).toBe(false)
 		})
-		s.executeNow()
 		await settled()
 
 		expect(setNoteContent).toHaveBeenCalledWith(note, "mine", expect.any(String))
-		expect(queued("a")).toBe(false)
+		s.cancel()
+	})
+
+	it("pushes a held note once a hold taken in another tab goes away (dismissed, or its tab closed)", async () => {
+		const s = await startedSync()
+		const note = makeNote("a")
+		let releaseOther = (): void => undefined
+		const otherTabHold = new Promise<void>(resolve => {
+			releaseOther = resolve
+		})
+
+		// Another tab's dialog: the shared lock alone, not this tab's own hold.
+		void navigator.locks.request("filen-web-notes-remote-edit:a", { mode: "shared" }, () => otherTabHold)
+		setStore({ a: [{ timestamp: 1, content: "mine", note }] })
+		setNoteContent.mockImplementation(n => Promise.resolve(n))
+
+		s.executeNow()
+		await settled()
+
+		expect(setNoteContent).not.toHaveBeenCalled()
+
+		releaseOther()
+		await until(() => {
+			expect(queued("a")).toBe(false)
+		})
+		await settled()
+
+		expect(setNoteContent).toHaveBeenCalledExactlyOnceWith(note, "mine", expect.any(String))
+		s.cancel()
 	})
 
 	it("sends nothing when the peek finds the content already in the cloud, and drains the entry", async () => {
@@ -970,7 +1002,7 @@ describe("push loop — failed pushes are sent again on a slow timer", () => {
 		s.cancel()
 	})
 
-	it("sends nothing again for a push the server rejected: its rejection count decides", async () => {
+	it("sends a rejected push again on the timer until its rejection count gives up, then says so", async () => {
 		vi.useFakeTimers()
 
 		const s = new Sync()
@@ -982,7 +1014,43 @@ describe("push loop — failed pushes are sent again on a slow timer", () => {
 		await vi.advanceTimersByTimeAsync(3000)
 
 		expect(queued("a")).toBe(true)
+		expect(useNotesInflightStore.getState().failedNotes).toEqual({ a: true })
+		expect(vi.getTimerCount()).toBe(1)
+
+		expect(await after(30_000)).toBe(2)
+		expect(queued("a")).toBe(true)
+		expect(toast.error).not.toHaveBeenCalled()
+
+		// The third rejection drops the edit: never silently.
+		expect(await after(120_000)).toBe(3)
+		expect(queued("a")).toBe(false)
+		expect(toast.error).toHaveBeenCalledExactlyOnceWith("notes:noteSaveGaveUp")
+		expect(useNotesInflightStore.getState().failedNotes).toEqual({})
 		expect(vi.getTimerCount()).toBe(0)
+		s.cancel()
+	})
+
+	it("marks the note failed while it waits, and clears it once the push lands", async () => {
+		const s = await failingNote()
+
+		expect(useNotesInflightStore.getState().failedNotes).toEqual({ a: true })
+
+		setNoteContent.mockResolvedValueOnce(makeNote("a"))
+
+		expect(await after(30_000)).toBe(2)
+		expect(queued("a")).toBe(false)
+		expect(useNotesInflightStore.getState().failedNotes).toEqual({})
+		s.cancel()
+	})
+
+	it("retries at once on executeNow (the header's Retry now)", async () => {
+		const s = await failingNote()
+
+		setNoteContent.mockResolvedValueOnce(makeNote("a"))
+		s.executeNow()
+
+		expect(await after(0)).toBe(2)
+		expect(useNotesInflightStore.getState().failedNotes).toEqual({})
 		s.cancel()
 	})
 

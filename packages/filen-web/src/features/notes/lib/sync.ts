@@ -17,7 +17,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { cancelCached } from "@/queries/patch"
 import { i18n } from "@/lib/i18n"
 import { forgetNotePushes, rememberNotePush } from "@/features/notes/lib/pushEchoes"
-import { heldNotes, releaseAllNoteHolds } from "@/features/notes/lib/remoteEditHolds"
+import { heldNotes, releaseAllNoteHolds, whenNoteHoldReleased } from "@/features/notes/lib/remoteEditHolds"
 import { forgetTabEditors, tabEditorAdopts, tabEditorHasPush, tabEditorLanded, tabEditorPushed } from "@/features/notes/lib/tabEditors"
 import { followContent, writeContentKeepingRemountKey } from "@/features/notes/lib/remoteContent"
 import { followShowableDrafts } from "@/features/notes/lib/showableDrafts"
@@ -26,13 +26,15 @@ import { withoutKey } from "@/lib/utils"
 import { toast } from "sonner"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { kvGetJson, kvSetJson, kvDelete } from "@/lib/storage/adapter"
-import { type OutboxChannelTransport, type OutboxRole, type PushDetail } from "@/lib/storage/outboxChannel"
+import { decodeOutboxPayload, type OutboxChannelTransport, type OutboxRole, type PushDetail } from "@/lib/storage/outboxChannel"
+import { resendDelay } from "@/lib/storage/outboxResend"
 import { noteContentQueryKey, readNoteContent } from "@/features/notes/queries/noteContent"
 import { fetchNotes, notesQueryFind, notesQueryUpdate } from "@/features/notes/queries/notes"
 import {
 	useNotesInflightStore,
 	TAB_ID,
 	setOutboxHydrated,
+	setFailedNotes,
 	clearEditingSessions,
 	type InflightContent,
 	type InflightEntry
@@ -40,14 +42,13 @@ import {
 import {
 	INFLIGHT_NOTE_CONTENT_KV_KEY,
 	inflightContentSchema,
+	noteFailedStateSchema,
 	notePreviewFor,
 	reconcileFollower,
 	remoteEnqueueToPatch,
+	type NoteFailedState,
 	type RemoteEnqueue
 } from "@/features/notes/lib/sync.logic"
-
-// Waits before re-sending pushes that failed, then every 10 minutes (Sync.scheduleResend).
-const RESEND_BACKOFF_MS = [30_000, 120_000, 600_000]
 
 // A failed push is re-sent on its own only while online. Not gated on this tab being visible: the leader is
 // whichever tab took the lock first, so the user is often typing in a visible follower while it is hidden.
@@ -68,6 +69,13 @@ async function tabIsLive(tabId: string): Promise<boolean> {
 function noteName(note: Note): string {
 	return note.title !== undefined && note.title.length > 0 ? note.title : i18n.t("notes:noteUntitled")
 }
+// Every tab tells the user of an edit the outbox gave up on: the leader may be a hidden tab.
+function toastGaveUp(noteUuid: string, fallback?: Note): void {
+	const note = notesQueryFind(noteUuid) ?? fallback
+
+	toast.error(i18n.t("notes:noteSaveGaveUp", { name: note === undefined ? i18n.t("notes:noteUntitled") : noteName(note) }))
+}
+
 const SYNC_DEBOUNCE_MS = 3000
 
 // The sidebar row reads the pushed preview and edited time (its text, sort position and date group), and
@@ -99,7 +107,7 @@ function patchRowAfterPush(pushed: Note): void {
 // seam is the shared one chats rides too — only the payload shapes differ; the wiring over a real
 // BroadcastChannel lives in outboxCoordinator.ts and tests mock it. Without an attached transport (unit
 // tests) every call below is a guarded no-op; the real one skips full-state broadcasts until a peer tab exists.
-export type NotesOutboxTransport = OutboxChannelTransport<RemoteEnqueue, InflightContent>
+export type NotesOutboxTransport = OutboxChannelTransport<RemoteEnqueue, InflightContent, NoteFailedState>
 
 // Read the abort flag through a function boundary so an early `if (signal.aborted) return` guard does
 // not narrow later `signal.aborted` reads to a literal `false` (the signal is aborted externally by
@@ -137,9 +145,11 @@ export class Sync {
 	// transient error never loses the first edit, while a genuine permission rejection still
 	// un-wedges the content query after N attempts.
 	private readonly nonRetryableRejections: Map<string, number> = new Map<string, number>()
-	// LEADER: the notes whose last push failed on the network (or an equally transient error), and the one
-	// timer that sends them again (scheduleResend), with how many waits of the backoff it has used.
+	// LEADER: the notes whose last push failed (on the network, or a rejection still under the drop bound), and
+	// the one timer that sends them again (scheduleResend), with how many waits of the backoff it has used.
 	private readonly failedNotes: Set<string> = new Set<string>()
+	// LEADER: the notes held by the remote-edit dialog that a pass skipped, each with a wait for its release.
+	private readonly holdWaits = new Map<string, AbortController>()
 	private resendTimer: ReturnType<typeof setTimeout> | null = null
 	private resendStep = 0
 	// Per note, the hash of the content this tab last pushed. For an answer to the remote-edit dialog
@@ -239,6 +249,13 @@ export class Sync {
 		this.pauseResend()
 		this.failedNotes.clear()
 		this.resendStep = 0
+		setFailedNotes([])
+
+		for (const wait of this.holdWaits.values()) {
+			wait.abort()
+		}
+
+		this.holdWaits.clear()
 	}
 
 	// Drop a note's consecutive-rejection strike count. For the editor's use when it clears a
@@ -263,6 +280,10 @@ export class Sync {
 		}
 
 		useNotesInflightStore.getState().setInflightContent(prev => withoutKey(prev, noteUuid))
+
+		if (this.role === "leader" && this.failedNotes.delete(noteUuid)) {
+			this.publishFailed()
+		}
 	}
 
 	// LEADER: a follower dropped the note's queued edits (a history restore, a reload of theirs there).
@@ -661,6 +682,43 @@ export class Sync {
 		this.watchOrigins()
 
 		this.transport?.broadcastState(useNotesInflightStore.getState().inflightContent)
+
+		// A follower that just asked for state learns the failed pushes too; nothing to tell while none failed.
+		if (this.failedNotes.size > 0) {
+			this.transport?.broadcastFailed?.({ failed: [...this.failedNotes], gaveUp: [] })
+		}
+	}
+
+	// FOLLOWER: the leader's failed pushes, shown in this tab's header too, and the edits it gave up on, told here.
+	public applyLeaderFailed(payload: unknown): void {
+		if (this.role !== "follower") {
+			return
+		}
+
+		const state = decodeOutboxPayload(payload, noteFailedStateSchema, "failed pushes")
+
+		if (state === null) {
+			return
+		}
+
+		setFailedNotes(state.failed)
+
+		for (const noteUuid of state.gaveUp) {
+			toastGaveUp(noteUuid)
+		}
+	}
+
+	// LEADER: the failed pushes into this tab's store, and to the other tabs when they changed or `gaveUp` has
+	// news.
+	private publishFailed(gaveUp: string[] = []): void {
+		const failed = [...this.failedNotes]
+		const before = useNotesInflightStore.getState().failedNotes
+
+		setFailedNotes(failed)
+
+		if (gaveUp.length > 0 || before !== useNotesInflightStore.getState().failedNotes) {
+			this.transport?.broadcastFailed?.({ failed, gaveUp })
+		}
 	}
 
 	// Follower start: adopt the follower role and ask the leader for its current state so a note another
@@ -699,6 +757,8 @@ export class Sync {
 				this.executeNow()
 			}
 
+			// The mirror of the dead leader's failed pushes: this leader has tried none of them yet.
+			this.publishFailed()
 			this.broadcastState()
 		})
 	}
@@ -950,6 +1010,15 @@ export class Sync {
 			// Notes whose remote-edit dialog is open in some tab keep their entries until it is answered.
 			const held = await heldNotes()
 
+			for (const noteUuid of held) {
+				if ((inflightContent[noteUuid] ?? []).length > 0) {
+					this.resumeWhenReleased(noteUuid)
+				}
+			}
+
+			// Given up on in this pass, told to the other tabs once it ends.
+			const gaveUp: string[] = []
+
 			const results = await Promise.allSettled(
 				Object.entries(inflightContent).map(async ([noteUuid, contents]) => {
 					if (isAborted(signal)) {
@@ -1060,12 +1129,11 @@ export class Sync {
 							throw e
 						}
 
-						// Rejected, not failed: only the count above sends it again.
-						this.failedNotes.delete(noteUuid)
-
 						const rejections = (this.nonRetryableRejections.get(noteUuid) ?? 0) + 1
 
 						if (rejections < MAX_NON_RETRYABLE_REJECTIONS) {
+							// Sent again on the resend timer, like a failed push, until the count gives up on it.
+							this.failedNotes.add(noteUuid)
 							this.nonRetryableRejections.set(noteUuid, rejections)
 
 							log.warn("notes-sync", "non-retryable SDK rejection on setNoteContent; will retry", noteUuid, rejections, e)
@@ -1075,10 +1143,17 @@ export class Sync {
 
 						this.nonRetryableRejections.delete(noteUuid)
 						this.answeredNotes.delete(noteUuid)
+						this.failedNotes.delete(noteUuid)
 
 						useNotesInflightStore.getState().setInflightContent(prev => withoutKey(prev, noteUuid))
 
 						log.error("notes-sync", "dropping inflight content after max non-retryable rejections; edit lost", noteUuid, e)
+
+						// Never silent: the edit is queued nowhere any more. A logout stays silent.
+						if (!isAborted(signal)) {
+							gaveUp.push(noteUuid)
+							toastGaveUp(noteUuid, liveNote)
+						}
 
 						return
 					}
@@ -1172,7 +1247,7 @@ export class Sync {
 				await this.flushToDisk(useNotesInflightStore.getState().inflightContent)
 				// Followers learn a note drained (spinner clears) only from this post-push broadcast.
 				this.broadcastState()
-				this.scheduleResend()
+				this.scheduleResend(gaveUp)
 			}
 		})
 
@@ -1187,9 +1262,9 @@ export class Sync {
 
 	// LEADER: after a pass, sends the notes whose push failed again on one timer for the whole outbox:
 	// 30 s, 2 min, 10 min, then every 10 min, from the last attempt. Reset by any push that lands and once
-	// nothing has failed; paused while offline (the reconnect trigger carries on). Never
-	// for a rejected push: its rejection count decides.
-	private scheduleResend(): void {
+	// nothing has failed; paused while offline (the reconnect trigger carries on). A rejected push is sent
+	// again too, until its rejection count gives up on it. Publishes the failed set either way.
+	private scheduleResend(gaveUp: string[] = []): void {
 		this.pauseResend()
 
 		const queued = useNotesInflightStore.getState().inflightContent
@@ -1199,6 +1274,8 @@ export class Sync {
 				this.failedNotes.delete(noteUuid)
 			}
 		}
+
+		this.publishFailed(gaveUp)
 
 		if (this.failedNotes.size === 0) {
 			this.resendStep = 0
@@ -1210,7 +1287,7 @@ export class Sync {
 			return
 		}
 
-		const delay = RESEND_BACKOFF_MS[Math.min(this.resendStep, RESEND_BACKOFF_MS.length - 1)] ?? 600_000
+		const delay = resendDelay(this.resendStep)
 
 		this.resendStep++
 		this.resendTimer = setTimeout(() => {
@@ -1220,6 +1297,28 @@ export class Sync {
 				this.executeNow()
 			}
 		}, delay)
+	}
+
+	// LEADER: a note held by the remote-edit dialog (in any tab) is pushed once every hold on it is gone: the
+	// dialog answered or dismissed, or its tab closed.
+	private resumeWhenReleased(noteUuid: string): void {
+		if (this.holdWaits.has(noteUuid)) {
+			return
+		}
+
+		const wait = new AbortController()
+
+		this.holdWaits.set(noteUuid, wait)
+
+		void whenNoteHoldReleased(noteUuid, wait.signal).then(released => {
+			if (this.holdWaits.get(noteUuid) === wait) {
+				this.holdWaits.delete(noteUuid)
+			}
+
+			if (released && this.role === "leader" && !isAborted(this.abortController.signal)) {
+				this.executeNow()
+			}
+		})
 	}
 
 	// The tab went offline: the schedule waits.

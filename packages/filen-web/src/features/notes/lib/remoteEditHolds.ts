@@ -35,16 +35,29 @@ export function releaseAllNoteHolds(): void {
 	releases.clear()
 }
 
-// This tab's holds first: a lock just requested may not be listed by the query yet.
+// This tab's holds first: a lock just requested may not be listed by the query yet. Only the shared holds: an
+// exclusive request is a wait for their release (whenNoteHoldReleased), never a hold.
 export async function heldNotes(): Promise<Set<string>> {
 	const held = new Set(releases.keys())
 	const snapshot = await navigator.locks.query()
 
 	for (const lock of [...(snapshot.held ?? []), ...(snapshot.pending ?? [])]) {
-		if (lock.name?.startsWith(LOCK_PREFIX) === true) {
+		if (lock.mode === "shared" && lock.name?.startsWith(LOCK_PREFIX) === true) {
 			held.add(lock.name.slice(LOCK_PREFIX.length))
 		}
 	}
 
 	return held
+}
+
+// Resolves true once no tab holds the note any more (an exclusive request is granted only after every shared
+// hold is gone, a closed tab's included), false when `signal` withdraws the wait first.
+export async function whenNoteHoldReleased(uuid: string, signal: AbortSignal): Promise<boolean> {
+	try {
+		await navigator.locks.request(`${LOCK_PREFIX}${uuid}`, { signal }, () => undefined)
+
+		return true
+	} catch {
+		return false
+	}
 }
