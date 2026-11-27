@@ -1,4 +1,4 @@
-import { useEffect, useState, type RefObject } from "react"
+import { use, useEffect, useState, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { CornerUpLeftIcon, ClockIcon, AlertCircleIcon, BanIcon } from "lucide-react"
@@ -23,6 +23,7 @@ import { useChatSendState } from "@/features/chats/store/useChatsInflight"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { UserAvatar } from "@/components/userAvatar"
+import { ThreadJumpContext } from "@/features/chats/components/thread/threadJump"
 import { useTouchLongPress } from "@/lib/useTouchLongPress"
 
 // Compact reply reference above a reply's line: the quoted sender + a one-line snippet of the referenced
@@ -34,6 +35,8 @@ import { useTouchLongPress } from "@/lib/useTouchLongPress"
 // tombstone/preview withhold. The arrow and geometry stay (the reader still needs to know this is a
 // reply); the name and the snippet both go. No reveal affordance here — this is a denormalized snapshot,
 // and the referenced message itself is revealable in place if still in the thread.
+//
+// Inside a thread it is a button that moves to the quoted message and briefly highlights it (ThreadJumpContext).
 function ReplyReference({
 	replyTo,
 	blocked,
@@ -45,12 +48,10 @@ function ReplyReference({
 }) {
 	const { t } = useTranslation("chats")
 	const senderBlocked = isSenderBlocked(replyTo, blocked)
-
-	return (
-		<div
-			data-slot="reply-reference"
-			className="flex max-w-full min-w-0 items-center gap-1 pb-0.5 text-xs leading-4 text-muted-foreground"
-		>
+	const jump = use(ThreadJumpContext)
+	const className = "flex max-w-full min-w-0 items-center gap-1 pb-0.5 text-xs leading-4 text-muted-foreground"
+	const content = (
+		<>
 			<CornerUpLeftIcon
 				aria-hidden="true"
 				className="size-3 shrink-0"
@@ -69,7 +70,35 @@ function ReplyReference({
 					) : null}
 				</>
 			)}
-		</div>
+		</>
+	)
+
+	if (jump === null) {
+		return (
+			<div
+				data-slot="reply-reference"
+				className={className}
+			>
+				{content}
+			</div>
+		)
+	}
+
+	return (
+		<button
+			type="button"
+			data-slot="reply-reference"
+			title={t("chatReplyJump")}
+			// Not a Tab stop: the thread's is the focused message, whose own keys reach its actions.
+			tabIndex={-1}
+			onClick={() => {
+				jump(replyTo.uuid)
+			}}
+			className={cn(className, "cursor-pointer rounded-sm text-left hover:text-foreground")}
+		>
+			<span className="sr-only">{t("chatReplyJump")}</span>
+			{content}
+		</button>
 	)
 }
 
@@ -89,6 +118,11 @@ export interface MessageRowProps {
 	actionsRef: RefObject<MessageActionsHandle | null> | null
 	// The composer is replying to this message (derived once by the thread from the composer store).
 	replying: boolean
+	// The thread search's needle, set on a matching message only; `searchCurrent` marks the match the search is on.
+	searchNeedle?: string | undefined
+	searchCurrent?: boolean
+	// Briefly set after a jump to this message (a reply quote's click).
+	flash?: boolean
 }
 
 // The hover highlight, also held while the row's context menu (its own data-popup-open) or its action bar's ⋯ menu (a
@@ -121,7 +155,10 @@ export function MessageRow({
 	blocked,
 	active,
 	actionsRef,
-	replying
+	replying,
+	searchNeedle,
+	searchCurrent,
+	flash
 }: MessageRowProps) {
 	const { t } = useTranslation(["chats", "common"])
 	const undecryptable = message.message === undefined
@@ -248,7 +285,9 @@ export function MessageRow({
 								className={cn(
 									"group relative px-4 py-px focus-ring-row outline-none focus-visible:ring-inset",
 									failed ? FAILED_ROW_HIGHLIGHT : addressing !== null ? ADDRESSED_ROW_HIGHLIGHT : ROW_HIGHLIGHT,
-									replying && (failed ? "bg-destructive/10" : addressing !== null ? "bg-chat-own/14" : "bg-muted")
+									replying && (failed ? "bg-destructive/10" : addressing !== null ? "bg-chat-own/14" : "bg-muted"),
+									searchCurrent === true && "ring-2 ring-primary/60 ring-inset",
+									flash === true && "bg-primary/10 transition-colors duration-700"
 								)}
 							>
 								{message.replyTo !== undefined ? (
@@ -307,6 +346,7 @@ export function MessageRow({
 												<MessageContent
 													participants={chat.participants}
 													segments={segments}
+													highlight={searchNeedle}
 												/>
 											)}
 											{!undecryptable && message.edited ? (

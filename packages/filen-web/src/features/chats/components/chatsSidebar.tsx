@@ -25,7 +25,7 @@ import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
 import { aggregateChatSelectionFlags, selectableChatsForSelectAll } from "@/features/chats/lib/selectionFlags"
 import { chatHasUnread } from "@/features/chats/lib/unread.logic"
 import { chatMessagesQueryGet } from "@/features/chats/queries/chatMessages"
-import { adjacentChatUuid, adjacentUnreadChatUuid, chatCommandTargets } from "@/features/chats/lib/keyboard.logic"
+import { adjacentChatUuid, adjacentUnreadChatUuid, chatCommandTargets, inChatPane } from "@/features/chats/lib/keyboard.logic"
 import { runMarkChatRead, runMarkChatsRead, runSetChatMuted, runSetChatsMuted } from "@/features/chats/lib/directActions"
 import { useChatsSelectionStore } from "@/features/chats/store/useChatsSelectionStore"
 import { useChatsListSelection } from "@/features/chats/hooks/useChatsListSelection"
@@ -38,7 +38,7 @@ import { useIsSidebarPanelVisible } from "@/features/shell/lib/sidebarPanelVisib
 import { ResizableSidebarPanel } from "@/features/shell/components/sidebarPanel"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
+import { ignoredUnderOverlays, OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import type { ListPointerSelection } from "@/lib/useListPointerSelection"
 import { Button } from "@/components/ui/button"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
@@ -257,13 +257,14 @@ export function ChatsSidebar() {
 	)
 
 	// The box lives in this panel, so the key is off while the panel is out of sight and the browser's find keeps it.
+	// With focus in the open conversation the same key searches that conversation (chats.threadSearch) instead.
 	useAction(
 		"chats.search",
 		event => {
 			event.preventDefault()
 			headerRef.current?.querySelector("input")?.focus()
 		},
-		{ ...OUTSIDE_OVERLAYS, enabled: panelVisible }
+		{ ignoreEventWhen: event => ignoredUnderOverlays(event) || inChatPane(event.target), enabled: panelVisible }
 	)
 
 	useAction(

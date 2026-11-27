@@ -2,7 +2,7 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement } from "react"
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
 import type { Chat, ChatMessage } from "@filen/sdk-rs"
 import { EMPTY_BLOCKED_USERS } from "@filen/shared"
@@ -50,14 +50,51 @@ vi.mock("@/features/chats/components/thread/composer", () => ({
 	Composer: ({ onSent }: { onSent: () => void }) => createElement("button", { type: "button", onClick: onSent }, "Send")
 }))
 vi.mock("@/features/chats/components/thread/typingIndicator", () => ({ TypingIndicator: () => null }))
-vi.mock("@/features/chats/components/thread/messageRow", () => ({
-	MessageRow: ({ message, active }: { message: ChatMessage; active: boolean }) =>
-		createElement(
-			"button",
-			{ type: "button", "data-testid": "message", "data-message-focus": "", tabIndex: active ? 0 : -1 },
-			message.message
-		)
-}))
+vi.mock("@/features/chats/components/thread/messageRow", async () => {
+	const { use } = await import("react")
+	const { ThreadJumpContext } = await import("@/features/chats/components/thread/threadJump")
+
+	// A reply carries its quote's jump, as the real row's quote does.
+	function ReplyQuote({ uuid }: { uuid: string }) {
+		const jump = use(ThreadJumpContext)
+
+		return createElement("button", { type: "button", onClick: () => jump?.(uuid) }, "Go to the original message")
+	}
+
+	return {
+		MessageRow: ({
+			message,
+			active,
+			searchNeedle,
+			searchCurrent,
+			flash
+		}: {
+			message: ChatMessage
+			active: boolean
+			searchNeedle?: string
+			searchCurrent?: boolean
+			flash?: boolean
+		}) =>
+			createElement(
+				"div",
+				null,
+				message.replyTo !== undefined ? createElement(ReplyQuote, { uuid: message.replyTo.uuid }) : null,
+				createElement(
+					"button",
+					{
+						type: "button",
+						"data-testid": "message",
+						"data-message-focus": "",
+						"data-search-match": searchNeedle,
+						"data-search-current": searchCurrent === true ? "" : undefined,
+						"data-flash": flash === true ? "" : undefined,
+						tabIndex: active ? 0 : -1
+					},
+					message.message
+				)
+			)
+	}
+})
 vi.mock("@/features/chats/components/chatMenu", () => ({ ChatDropdownMenuContent: () => null }))
 vi.mock("@/features/chats/components/chatInfoPanel", () => ({ ChatInfoHost: () => null, ChatInfoToggle: () => null }))
 vi.mock("@/features/chats/hooks/useChatDialogHost", () => ({
@@ -587,5 +624,189 @@ describe("MessageThread — keyboard", () => {
 
 		expect(el.scrollTop).toBe(0)
 		expect(document.activeElement).toBe(el)
+	})
+})
+
+function textMessage(label: string, text: string, sentTimestamp: bigint): ChatMessage {
+	return { ...message("a", label, sentTimestamp), message: text }
+}
+
+function pressModF(target: Element): boolean {
+	return fireEvent.keyDown(target, { key: "f", code: "KeyF", ctrlKey: true })
+}
+
+function currentMatchText(): string | null {
+	return document.querySelector("[data-search-current]")?.textContent ?? null
+}
+
+// Search inside the open conversation, over the messages already loaded: Mod+F with focus in the conversation opens
+// it, Enter and Shift+Enter walk the matches, Escape closes it. Older history loads only on request.
+describe("MessageThread — search in the conversation", () => {
+	function openSearch(): HTMLInputElement {
+		expect(pressModF(scrollContainer())).toBe(false)
+
+		return screen.getByRole<HTMLInputElement>("textbox", { name: "Search this conversation" })
+	}
+
+	it("opens from Mod+F in the thread, counts the loaded matches and walks them newest first", () => {
+		const a = chat("a")
+		messagesByChat.set(a.uuid, [
+			textMessage("m1", "lunch at noon", 100n),
+			textMessage("m2", "ok", 200n),
+			textMessage("m3", "LUNCH again", 300n)
+		])
+
+		render(createElement(MessageThread, { chat: a }))
+
+		const input = openSearch()
+
+		expect(document.activeElement).toBe(input)
+
+		fireEvent.change(input, { target: { value: "lunch" } })
+
+		expect(screen.getByText("1 of 2")).toBeTruthy()
+		expect(currentMatchText()).toBe("LUNCH again")
+		expect(document.querySelectorAll("[data-search-match='lunch']")).toHaveLength(2)
+
+		fireEvent.keyDown(input, { key: "Enter" })
+
+		expect(screen.getByText("2 of 2")).toBeTruthy()
+		expect(currentMatchText()).toBe("lunch at noon")
+
+		fireEvent.keyDown(input, { key: "Enter", shiftKey: true })
+
+		expect(screen.getByText("1 of 2")).toBeTruthy()
+
+		fireEvent.change(input, { target: { value: "dinner" } })
+
+		expect(screen.getByText("No results")).toBeTruthy()
+		expect(loadOlderChatMessages).not.toHaveBeenCalled()
+	})
+
+	it("closes on Escape, focusing the match it was on", () => {
+		const a = chat("a")
+		messagesByChat.set(a.uuid, [textMessage("m1", "lunch", 100n), textMessage("m2", "ok", 200n)])
+
+		render(createElement(MessageThread, { chat: a }))
+
+		const input = openSearch()
+
+		fireEvent.change(input, { target: { value: "lunch" } })
+		fireEvent.keyDown(input, { key: "Escape" })
+
+		expect(screen.queryByRole("search")).toBeNull()
+		expect(document.querySelector("[data-search-match]")).toBeNull()
+		expect(document.activeElement?.textContent).toBe("lunch")
+	})
+
+	it("leaves Mod+F outside the conversation to the list's search", () => {
+		const a = chat("a")
+		messagesByChat.set(a.uuid, [textMessage("m1", "lunch", 100n)])
+
+		render(createElement(MessageThread, { chat: a }))
+
+		pressModF(document.body)
+
+		expect(screen.queryByRole("search")).toBeNull()
+	})
+
+	it("searches older history only when asked, moving to the newest match found there", async () => {
+		const a = chat("a")
+		messagesByChat.set(a.uuid, [textMessage("m2", "ok", 200n), textMessage("m3", "lunch today", 300n)])
+
+		const older = textMessage("m1", "lunch yesterday", 100n)
+
+		loadOlderChatMessages.mockImplementationOnce(() => {
+			messagesByChat.set(a.uuid, [older, ...(messagesByChat.get(a.uuid) ?? [])])
+
+			return Promise.resolve([older])
+		})
+
+		const { rerender } = render(createElement(MessageThread, { chat: a }))
+		const input = openSearch()
+
+		fireEvent.change(input, { target: { value: "lunch" } })
+
+		expect(screen.getByText("1 of 1")).toBeTruthy()
+
+		await act(async () => {
+			fireEvent.click(screen.getByRole("button", { name: "Search older messages" }))
+			await Promise.resolve()
+		})
+
+		rerender(createElement(MessageThread, { chat: { ...a } }))
+
+		expect(loadOlderChatMessages).toHaveBeenCalledTimes(1)
+		expect(loadOlderChatMessages.mock.calls[0]?.[1]).toBe(200n)
+		expect(screen.getByText("2 of 2")).toBeTruthy()
+		expect(currentMatchText()).toBe("lunch yesterday")
+	})
+})
+
+describe("MessageThread — reply quotes", () => {
+	function reply(label: string, to: ChatMessage, sentTimestamp: bigint): ChatMessage {
+		return {
+			...textMessage(label, `re ${String(to.message)}`, sentTimestamp),
+			replyTo: { uuid: to.uuid, senderId: 9, senderEmail: "peer@filen.io", senderNickName: "Peer", message: to.message ?? "" }
+		}
+	}
+
+	it("moves to a loaded quoted message, focusing and highlighting it", () => {
+		const a = chat("a")
+		const quoted = textMessage("m1", "the question", 100n)
+		messagesByChat.set(a.uuid, [quoted, reply("m2", quoted, 200n)])
+
+		render(createElement(MessageThread, { chat: a }))
+
+		fireEvent.click(screen.getByRole("button", { name: "Go to the original message" }))
+
+		const target = screen.getByText("the question")
+
+		expect(document.activeElement).toBe(target)
+		expect(target.hasAttribute("data-flash")).toBe(true)
+		expect(loadOlderChatMessages).not.toHaveBeenCalled()
+	})
+
+	it("pages older history in toward a quoted message that is not loaded yet", async () => {
+		const a = chat("a")
+		const quoted = textMessage("m1", "the question", 100n)
+		messagesByChat.set(a.uuid, [reply("m2", quoted, 200n)])
+
+		loadOlderChatMessages.mockImplementationOnce(() => {
+			messagesByChat.set(a.uuid, [quoted, ...(messagesByChat.get(a.uuid) ?? [])])
+
+			return Promise.resolve([quoted])
+		})
+
+		const { rerender } = render(createElement(MessageThread, { chat: a }))
+
+		await act(async () => {
+			fireEvent.click(screen.getByRole("button", { name: "Go to the original message" }))
+			await Promise.resolve()
+		})
+
+		rerender(createElement(MessageThread, { chat: { ...a } }))
+
+		await waitFor(() => {
+			expect(screen.getByText("the question").hasAttribute("data-flash")).toBe(true)
+		})
+	})
+
+	it("says so when history ends without the quoted message", async () => {
+		const a = chat("a")
+		const quoted = textMessage("gone", "deleted", 50n)
+		messagesByChat.set(a.uuid, [reply("m2", quoted, 200n)])
+		loadOlderChatMessages.mockResolvedValueOnce([])
+
+		render(createElement(MessageThread, { chat: a }))
+
+		await act(async () => {
+			fireEvent.click(screen.getByRole("button", { name: "Go to the original message" }))
+			await Promise.resolve()
+		})
+
+		await waitFor(() => {
+			expect(toastError).toHaveBeenCalledWith("The original message isn't available")
+		})
 	})
 })

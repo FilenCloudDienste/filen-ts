@@ -38,6 +38,12 @@ export function adjacentUnreadChatUuid<T extends { uuid: string }>(
 // reveal button).
 export const MESSAGE_FOCUS_SELECTOR = "[data-message-focus]"
 
+// The open conversation's pane (messageThread.tsx): its header, thread and message field. Mod+F searches the
+// conversation with focus in it and the conversation list anywhere else.
+export function inChatPane(target: EventTarget | null): boolean {
+	return target instanceof Element && target.closest("[data-chat-pane]") !== null
+}
+
 // The thread's message rows are bottom-up (index 0 is the newest), with time headers and the unread divider between
 // them. The index of the next message row from `from` in `step` direction (1: older, -1: newer), or -1 past the end.
 export function adjacentMessageIndex(rows: readonly { kind: string }[], from: number, step: 1 | -1): number {

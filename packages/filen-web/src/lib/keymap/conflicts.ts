@@ -215,7 +215,10 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	// The editors' own find and inline code act in the code and Markdown editors, which never take focus in the chat
 	// page; the chat search ignores editable content and the composer matches Mod+E in its own field.
 	["chats.search", "editor.find"],
+	["chats.threadSearch", "editor.find"],
 	["chats.composer.inlineCode", "editor.code"],
+	// Focus decides which search Mod+F opens: the open conversation's with focus in it, the list's anywhere else.
+	["chats.search", "chats.threadSearch"],
 	// E edits the focused message in the thread; it opens an image in the editor only inside the preview dialog.
 	["chats.message.edit", "preview.editImage"],
 	// A shared link's inline preview is read-only and never mounts the preview overlay, where alone preview.save binds.
@@ -489,6 +492,7 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	["chats.previousChat", "archive.parent"],
 	["chats.rename", "preview.rename"],
 	["chats.search", "sheet.find"],
+	["chats.threadSearch", "sheet.find"],
 	["desktop.back", "archive.back"],
 	["desktop.back", "docx.shrinkFontPoint"],
 	["desktop.back", "preview.imageRotateLeft"],

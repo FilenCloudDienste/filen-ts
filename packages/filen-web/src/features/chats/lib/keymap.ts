@@ -43,6 +43,15 @@ export const CHATS_ACTIONS: readonly ActionDef[] = [
 		descriptionKey: "chats:chatsCommandJumpToOldest",
 		hintKey: "chats:chatsKeyHintThread"
 	},
+	// Mod+F is the list's search with focus outside the open conversation, this one with focus in it (header, thread or
+	// message field).
+	{
+		id: "chats.threadSearch",
+		defaultCombo: "mod+f",
+		scope: "chats",
+		descriptionKey: "chats:chatsCommandSearchThread",
+		hintKey: "chats:chatsKeyHintConversation"
+	},
 	{
 		id: "chats.composer.send",
 		defaultCombo: "enter",

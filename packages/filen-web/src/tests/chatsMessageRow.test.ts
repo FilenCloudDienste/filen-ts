@@ -24,6 +24,7 @@ import { MessageRow } from "@/features/chats/components/thread/messageRow"
 import { formatClockTime } from "@/features/chats/lib/time"
 import { mockChat, mockChatMessage } from "@/tests/fixtures/sdk"
 import { registerAllActions } from "@/lib/keymap/actions"
+import { ThreadJumpContext } from "@/features/chats/components/thread/threadJump"
 
 // The action bar's tooltips show each action's keys.
 registerAllActions()
@@ -281,6 +282,61 @@ describe("MessageRow layout", () => {
 
 		expect(container.querySelector(".rounded-\\[18px\\]")).toBeNull()
 		expect(container.querySelector("svg.fill-current")).toBeNull()
+	})
+})
+
+describe("MessageRow in-thread search and reply quotes", () => {
+	const quoted = mockChatMessage({ senderEmail: "b@example.com", message: "question", chat: chat.uuid })
+	const replying = mockChatMessage({
+		senderEmail: "a@example.com",
+		message: "Lunch? lunch!",
+		chat: chat.uuid,
+		replyTo: { uuid: quoted.uuid, senderId: 2, senderEmail: "b@example.com", senderNickName: undefined, message: "question" }
+	})
+
+	function renderReply(jump: ((uuid: string) => void) | null, extra: { searchNeedle?: string; searchCurrent?: boolean } = {}) {
+		useMessageActions.mockReturnValue({ descriptors, runAction })
+
+		return render(
+			createElement(
+				ThreadJumpContext,
+				{ value: jump },
+				createElement(MessageRow, {
+					chat,
+					message: replying,
+					runStart: true,
+					currentUserId: 1n,
+					ownAvatarUrl: undefined,
+					blocked: deriveBlockedUsers([]),
+					active: false,
+					actionsRef: null,
+					replying: false,
+					...extra
+				})
+			)
+		)
+	}
+
+	it("makes the quote a button that jumps to the quoted message", () => {
+		const jump = vi.fn()
+
+		renderReply(jump)
+		fireEvent.click(screen.getByRole("button", { name: /Go to the original message/ }))
+
+		expect(jump).toHaveBeenCalledWith(quoted.uuid)
+	})
+
+	it("keeps the quote static outside a thread", () => {
+		renderReply(null)
+
+		expect(screen.queryByRole("button", { name: /Go to the original message/ })).toBeNull()
+	})
+
+	it("marks every occurrence of the search on a match, and rings the current one", () => {
+		const { container } = renderReply(null, { searchNeedle: "lunch", searchCurrent: true })
+
+		expect(Array.from(container.querySelectorAll("mark")).map(mark => mark.textContent)).toEqual(["Lunch", "lunch"])
+		expect(container.querySelector("[data-message-focus]")?.className).toContain("ring-2")
 	})
 })
 

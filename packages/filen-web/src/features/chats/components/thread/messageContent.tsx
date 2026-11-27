@@ -1,4 +1,4 @@
-import { Fragment } from "react"
+import { Fragment, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import type { ChatParticipant } from "@filen/sdk-rs"
 import { cn, contactDisplayName, isEmojiOnly, parseFilenPublicLink, type MessageSegment } from "@filen/shared"
@@ -6,6 +6,36 @@ import { hardenLinkHref } from "@/features/chats/lib/regexed.logic"
 import { emojiForShortcode, customEmojiImageForShortcode, parseShortcodeToken } from "@/features/chats/lib/emoji"
 import { TrustedExternalLink } from "@/features/chats/components/thread/trustedExternalLink"
 import { ExternalAnchor } from "@/features/chats/components/thread/externalAnchor"
+import { highlightRanges } from "@/features/chats/components/thread/threadSearch.logic"
+
+// A text run with the thread search's matches marked.
+function Highlighted({ text, needle }: { text: string; needle: string | undefined }) {
+	const ranges = needle === undefined ? [] : highlightRanges(text, needle)
+
+	if (ranges.length === 0) {
+		return text
+	}
+
+	const parts: ReactNode[] = []
+	let last = 0
+
+	for (const range of ranges) {
+		parts.push(text.slice(last, range.start))
+		parts.push(
+			<mark
+				key={range.start}
+				className="rounded-[2px] bg-yellow-200 text-inherit dark:bg-yellow-500/40"
+			>
+				{text.slice(range.start, range.end)}
+			</mark>
+		)
+		last = range.end
+	}
+
+	parts.push(text.slice(last))
+
+	return parts
+}
 
 // Renders one message body from the pure segment list. Every branch emits a React text node or element —
 // never parsed HTML, never dangerouslySetInnerHTML — so injection is structurally impossible.
@@ -22,8 +52,17 @@ import { ExternalAnchor } from "@/features/chats/components/thread/externalAncho
 // "jumbo" — larger glyphs/images and no surrounding text sizing — mirroring mobile's emojiSize
 // heuristic (@filen/shared's isEmojiOnly).
 // `segments` is segmentMessage(text), tokenized once by MessageRow, which also derives the embeds from it.
-// Text colour inherits from the row.
-export function MessageContent({ participants, segments }: { participants: readonly ChatParticipant[]; segments: MessageSegment[] }) {
+// Text colour inherits from the row. `highlight` is the thread search's needle on a matching message, marked in its
+// text and code.
+export function MessageContent({
+	participants,
+	segments,
+	highlight
+}: {
+	participants: readonly ChatParticipant[]
+	segments: MessageSegment[]
+	highlight?: string | undefined
+}) {
 	const { t } = useTranslation("chats")
 	const jumbo = isEmojiOnly(segments)
 
@@ -38,7 +77,14 @@ export function MessageContent({ participants, segments }: { participants: reado
 			{segments.map((segment, index) => {
 				switch (segment.kind) {
 					case "text":
-						return <Fragment key={index}>{segment.value}</Fragment>
+						return (
+							<Fragment key={index}>
+								<Highlighted
+									text={segment.value}
+									needle={highlight}
+								/>
+							</Fragment>
+						)
 
 					case "linebreak":
 						return <br key={index} />
@@ -49,7 +95,10 @@ export function MessageContent({ participants, segments }: { participants: reado
 								key={index}
 								className="my-1 block rounded-lg bg-chat-other px-2 py-1 font-mono text-xs whitespace-pre-wrap"
 							>
-								{segment.code}
+								<Highlighted
+									text={segment.code}
+									needle={highlight}
+								/>
 							</code>
 						)
 

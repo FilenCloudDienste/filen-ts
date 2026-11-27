@@ -4,6 +4,7 @@ import {
 	useId,
 	useImperativeHandle,
 	useLayoutEffect,
+	useMemo,
 	useRef,
 	useState,
 	type FocusEvent,
@@ -59,7 +60,16 @@ import {
 } from "@/features/chats/components/thread/useMessageActions"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import type { MessageActionId } from "@/features/chats/components/thread/messageMenu.logic"
-import { adjacentMessageIndex, edgeMessageIndex, MESSAGE_FOCUS_SELECTOR } from "@/features/chats/lib/keyboard.logic"
+import { adjacentMessageIndex, edgeMessageIndex, inChatPane, MESSAGE_FOCUS_SELECTOR } from "@/features/chats/lib/keyboard.logic"
+import {
+	newestMatchInPage,
+	oldestTimestamp,
+	stepThreadMatch,
+	threadSearchMatches,
+	threadSearchNeedle
+} from "@/features/chats/components/thread/threadSearch.logic"
+import { ThreadSearchBar } from "@/features/chats/components/thread/threadSearchBar"
+import { ThreadJumpContext } from "@/features/chats/components/thread/threadJump"
 import { ignoredUnderOverlays, useAction } from "@/lib/keymap/useAction"
 import { ChatDropdownMenuContent } from "@/features/chats/components/chatMenu"
 import { useChatDialogHost } from "@/features/chats/hooks/useChatDialogHost"
@@ -174,7 +184,10 @@ function ThreadRowContent({
 	blocked,
 	active,
 	actionsRef,
-	replying
+	replying,
+	searchNeedle,
+	searchCurrent,
+	flash
 }: {
 	row: ThreadRow
 	chat: Chat
@@ -184,6 +197,9 @@ function ThreadRowContent({
 	active: boolean
 	actionsRef: RefObject<MessageActionsHandle | null> | null
 	replying: boolean
+	searchNeedle: string | undefined
+	searchCurrent: boolean
+	flash: boolean
 }) {
 	if (row.kind === "time") {
 		return <TimeHeader timestamp={row.timestamp} />
@@ -204,6 +220,9 @@ function ThreadRowContent({
 			active={active}
 			actionsRef={actionsRef}
 			replying={replying}
+			searchNeedle={searchNeedle}
+			searchCurrent={searchCurrent}
+			flash={flash}
 		/>
 	)
 }
@@ -223,6 +242,19 @@ function inThread(target: EventTarget | null): boolean {
 const IN_THREAD: Options = {
 	ignoreEventWhen: event => ignoredUnderOverlays(event) || !inThread(event.target)
 }
+
+// The conversation's search key acts anywhere in its pane, its fields included (the message field, the search box).
+const IN_CHAT_PANE: Options = {
+	ignoreEventWhen: event => ignoredUnderOverlays(event) || !inChatPane(event.target),
+	enableOnFormTags: ["option", "input", "textarea"]
+}
+
+// "Search older messages" and a reply quote's jump page older history in until they find what they look for, at most
+// this many pages per press.
+const SEARCH_OLDER_PAGES = 5
+const JUMP_PAGES = 10
+// How long a message a reply quote jumped to stays highlighted.
+const FLASH_MS = 1600
 
 // An older page of history, or why there is none: its load failed.
 type OlderPage = readonly ChatMessage[] | "failed"
@@ -333,6 +365,25 @@ function ThreadList({
 	// focus to the body, and with it the keyboard's scroll target. Left set when focus moves out of the
 	// thread, which costs one mounted row until focus next lands inside.
 	const focusedRowRef = useRef<{ key: string; index: number } | null>(null)
+	// The rows of the last commit, for work that finishes after a page of history has rendered in.
+	const rowsRef = useRef(rows)
+	// In-thread search over the loaded messages (threadSearch.logic.ts).
+	const [searchOpen, setSearchOpen] = useState(false)
+	const [searchQuery, setSearchQuery] = useState("")
+	// The match the search is on; null follows the newest one.
+	const [searchCurrentUuid, setSearchCurrentUuid] = useState<string | null>(null)
+	const [searchingOlder, setSearchingOlder] = useState(false)
+	const [historyLoaded, setHistoryLoaded] = useState(false)
+	const searchInputRef = useRef<HTMLInputElement | null>(null)
+	const revealed = useRevealedBlockedMessages(state => state.revealed)
+	// The message a reply quote just jumped to.
+	const [flashUuid, setFlashUuid] = useState<string | null>(null)
+	const needle = searchOpen ? threadSearchNeedle(searchQuery) : ""
+	// Memoized by hand, like getItemKey below: the virtualizer re-renders this component on every scroll.
+	const matches = useMemo(() => threadSearchMatches(messages, needle, blocked, revealed), [messages, needle, blocked, revealed])
+	const matchSet = useMemo(() => new Set(matches), [matches])
+	const currentMatch = searchCurrentUuid === null ? (matches[0] ?? null) : matchSet.has(searchCurrentUuid) ? searchCurrentUuid : null
+	const matchPosition = currentMatch === null ? 0 : matches.indexOf(currentMatch) + 1
 
 	// Memoized by hand (useVirtualizer opts this component out of the React Compiler): the virtualizer
 	// re-lays every row when its key function changes, so it must change with the rows and nothing else.
@@ -376,6 +427,37 @@ function ThreadList({
 		// under the reader's eye in place when rows are inserted or removed below it.
 		anchorTo: affordance.atBottom ? "start" : "end"
 	})
+
+	useLayoutEffect(() => {
+		rowsRef.current = rows
+	})
+
+	// Brings the search's current match into view; focus stays in the search box.
+	useEffect(() => {
+		if (currentMatch === null) {
+			return
+		}
+
+		const index = rowsRef.current.findIndex(row => row.key === currentMatch)
+
+		if (index !== -1) {
+			virtualizer.scrollToIndex(index, { align: "center" })
+		}
+	}, [currentMatch, virtualizer])
+
+	useEffect(() => {
+		if (flashUuid === null) {
+			return
+		}
+
+		const timer = setTimeout(() => {
+			setFlashUuid(null)
+		}, FLASH_MS)
+
+		return () => {
+			clearTimeout(timer)
+		}
+	}, [flashUuid])
 
 	useImperativeHandle(
 		ref,
@@ -452,7 +534,7 @@ function ThreadList({
 
 	// Focuses the message at `index`, scrolling it in first when the virtualizer has not mounted it.
 	function focusMessageAt(index: number): void {
-		const key = rows[index]?.key
+		const key = rowsRef.current[index]?.key
 
 		if (key === undefined) {
 			return
@@ -711,6 +793,7 @@ function ThreadList({
 				setOlderFailed(true)
 			} else if (page.length === 0) {
 				hasMoreRef.current = false
+				setHistoryLoaded(true)
 			}
 
 			return page
@@ -733,6 +816,143 @@ function ThreadList({
 
 		await loadOlderPage(oldest.sentTimestamp)
 	}
+
+	// Pages older history in until `found` accepts a page, history ends or `maxPages` pages have loaded.
+	async function pageOlderUntil(
+		found: (page: readonly ChatMessage[]) => boolean,
+		maxPages: number
+	): Promise<"found" | "notFound" | "failed"> {
+		let cursor = messages[0]?.sentTimestamp
+
+		for (let pages = 0; pages < maxPages && cursor !== undefined; pages++) {
+			const page = await loadOlderPage(cursor)
+
+			if (page === "failed") {
+				return "failed"
+			}
+
+			if (found(page)) {
+				return "found"
+			}
+
+			cursor = oldestTimestamp(page)
+		}
+
+		return "notFound"
+	}
+
+	// Focuses a loaded message and highlights it briefly. False when it is not loaded.
+	function revealMessage(uuid: string): boolean {
+		const index = rowsRef.current.findIndex(row => row.key === uuid)
+
+		if (index === -1) {
+			return false
+		}
+
+		focusMessageAt(index)
+		setFlashUuid(uuid)
+
+		return true
+	}
+
+	// A reply quote's click: the quoted message, paging older history in toward it when it is not loaded yet. A page
+	// that fails shows the notice at the top instead.
+	async function jumpToMessage(uuid: string): Promise<void> {
+		if (revealMessage(uuid)) {
+			return
+		}
+
+		const outcome = await pageOlderUntil(page => page.some(entry => entry.uuid === uuid), JUMP_PAGES)
+
+		if (outcome === "failed") {
+			return
+		}
+
+		if (outcome === "notFound") {
+			toast.error(t("chatReplyJumpNotFound"))
+
+			return
+		}
+
+		// The page renders in on a later frame.
+		const attempt = (left: number): void => {
+			if (!revealMessage(uuid) && left > 1) {
+				requestAnimationFrame(() => {
+					attempt(left - 1)
+				})
+			}
+		}
+
+		requestAnimationFrame(() => {
+			attempt(FOCUS_ATTEMPTS * 2)
+		})
+	}
+
+	// Stable for the rows' context, so a quote never re-renders with the thread; runs the latest jumpToMessage.
+	const jumpRef = useRef(jumpToMessage)
+
+	useLayoutEffect(() => {
+		jumpRef.current = jumpToMessage
+	})
+
+	const [jump] = useState(() => (uuid: string) => {
+		void jumpRef.current(uuid)
+	})
+
+	function closeSearch(): void {
+		setSearchOpen(false)
+		setSearchQuery("")
+		setSearchCurrentUuid(null)
+
+		// Focus lands on the match the search was on, else back on the thread.
+		const index = currentMatch === null ? -1 : rows.findIndex(row => row.key === currentMatch)
+
+		if (index !== -1) {
+			focusMessageAt(index)
+		} else {
+			scrollRef.current?.focus({ preventScroll: true })
+		}
+	}
+
+	// Pages older history in until a page holds a match, and moves the search to the newest one there.
+	async function searchOlder(): Promise<void> {
+		if (searchingOlder || needle.length === 0) {
+			return
+		}
+
+		setSearchingOlder(true)
+
+		const hit: { message?: ChatMessage | undefined } = {}
+
+		await pageOlderUntil(page => {
+			hit.message = newestMatchInPage(page, needle, blocked)
+
+			return hit.message !== undefined
+		}, SEARCH_OLDER_PAGES)
+
+		setSearchingOlder(false)
+
+		if (hit.message !== undefined) {
+			setSearchCurrentUuid(hit.message.uuid)
+		}
+	}
+
+	useAction(
+		"chats.threadSearch",
+		event => {
+			event.preventDefault()
+
+			if (searchOpen) {
+				searchInputRef.current?.focus()
+				searchInputRef.current?.select()
+
+				return
+			}
+
+			setSearchOpen(true)
+		},
+		IN_CHAT_PANE
+	)
 
 	// Recomputes bottom-proximity on every scroll (the reducer returns `prev` unchanged for a redundant
 	// event, so a scroll that changes nothing costs no render), and pages in older history near the top.
@@ -862,6 +1082,9 @@ function ThreadList({
 										active={row.key === activeKey}
 										actionsRef={row.key === activeKey ? activeActionsRef : null}
 										replying={row.kind === "message" && row.message.uuid === replyingUuid}
+										searchNeedle={matchSet.has(row.key) ? needle : undefined}
+										searchCurrent={row.key === currentMatch}
+										flash={row.key === flashUuid}
 									/>
 								</div>
 							)
@@ -876,7 +1099,31 @@ function ThreadList({
 	const showScrollToBottomFab = !affordance.atBottom && affordance.unseenCount > 0
 
 	return (
-		<>
+		<ThreadJumpContext value={jump}>
+			{searchOpen ? (
+				<ThreadSearchBar
+					inputRef={searchInputRef}
+					query={searchQuery}
+					onQueryChange={query => {
+						setSearchQuery(query)
+						setSearchCurrentUuid(null)
+					}}
+					position={matchPosition}
+					total={matches.length}
+					onNext={() => {
+						setSearchCurrentUuid(stepThreadMatch(matches, currentMatch, 1))
+					}}
+					onPrevious={() => {
+						setSearchCurrentUuid(stepThreadMatch(matches, currentMatch, -1))
+					}}
+					onClose={closeSearch}
+					canSearchOlder={!historyLoaded}
+					searchingOlder={searchingOlder}
+					onSearchOlder={() => {
+						void searchOlder()
+					}}
+				/>
+			) : null}
 			<div className="relative flex min-h-0 flex-1 flex-col">
 				{renderList()}
 				{showScrollToBottomFab ? (
@@ -907,7 +1154,7 @@ function ThreadList({
 					</span>
 				) : null}
 			</div>
-		</>
+		</ThreadJumpContext>
 	)
 }
 
@@ -991,7 +1238,10 @@ export function MessageThread({ chat }: { chat: Chat }) {
 	const group = isGroupChat(participantCount)
 
 	return (
-		<div className="flex min-h-0 flex-1 flex-col">
+		<div
+			data-chat-pane=""
+			className="flex min-h-0 flex-1 flex-col"
+		>
 			<header className="flex h-12 shrink-0 items-center gap-2.5 pr-3 pl-4 app-region-chrome">
 				<UserAvatar
 					src={headerAvatarUrl}
