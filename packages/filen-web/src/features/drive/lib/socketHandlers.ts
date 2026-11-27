@@ -36,6 +36,7 @@ import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { markClipboardEventsMissed } from "@/features/drive/store/useDriveClipboardStore"
 import { hasActiveDriveJobs, useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import {
+	emitPreviewFavoriteChanged,
 	emitPreviewFileMetaChanged,
 	emitPreviewFileRevised,
 	emitPreviewFolderMetaChanged,
@@ -522,6 +523,8 @@ export function handleDriveEvent(event: DriveSocketEvent): void {
 
 				// How a favorite set anywhere else reaches the photos grid.
 				patchPhotosFavorite(item)
+				// And an open preview's header star.
+				emitPreviewFavoriteChanged(item.data.uuid, item.data.favorited)
 			}
 
 			break

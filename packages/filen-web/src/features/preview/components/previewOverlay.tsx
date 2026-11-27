@@ -11,7 +11,8 @@ import {
 	SaveIcon,
 	MoreHorizontalIcon,
 	PencilIcon,
-	PlayIcon
+	PlayIcon,
+	StarIcon
 } from "lucide-react"
 import { toast } from "sonner"
 import { driveItemMime, isLinkedEmbedItem, type DriveItem } from "@/features/drive/lib/item"
@@ -233,6 +234,13 @@ export function PreviewOverlay({
 	const videoCommandsRef = useRef<VideoEditorCommands | null>(null)
 	const cacheScope = usePreviewCacheScope()
 	const access = usePreviewAccessMode()
+
+	// The header menu's entries for the item, as the menu itself offers them.
+	function offeredMenuActions(item: DriveItem) {
+		const hidden = previewMenuHiddenActionIds(hiddenMenuActionIds, previewDownloadable(downloadable, variant))
+
+		return driveSelectionActions([item], variant, { isOnline }).filter(descriptor => !hidden.has(descriptor.id))
+	}
 
 	// The open editor's unsaved edits: encoded, for a deck (never held here as bytes, it may be gigabytes) a save its
 	// session streams to an upload, or an edited image's export.
@@ -1174,9 +1182,7 @@ export function PreviewOverlay({
 			return
 		}
 
-		const descriptors = driveSelectionActions([driveItem], variant, { isOnline })
-		const hidden = previewMenuHiddenActionIds(hiddenMenuActionIds, previewDownloadable(downloadable, variant))
-		const offered = descriptors.filter(descriptor => !hidden.has(descriptor.id))
+		const offered = offeredMenuActions(driveItem)
 
 		// Favorite runs in place, as the menu's own entry, where the menu offers it enabled.
 		if (action === "preview.favorite") {
@@ -1212,6 +1218,11 @@ export function PreviewOverlay({
 				void startDownloads([driveItem])
 			}
 		: null
+	// The header's star, where the menu offers Favorite/Unfavorite. Its state is the slot's own override, so a toggle
+	// shows at once.
+	const favoriteEntry = isLinkedEmbedItem(driveItem)
+		? undefined
+		: offeredMenuActions(driveItem).find(descriptor => descriptor.id === "favorite")
 	// The newer version the remote-change dialog asks about, for its comparison.
 	const remoteTheirs = remote.prompt?.kind === "revised" ? remote.prompt.theirs : undefined
 
@@ -1397,6 +1408,21 @@ export function PreviewOverlay({
 											onClick={startSlideshow}
 										>
 											<PlayIcon />
+										</TooltipIconButton>
+									) : null}
+									{favoriteEntry !== undefined ? (
+										<TooltipIconButton
+											label={t(
+												driveItem.data.favorited ? "drive:driveActionUnfavorite" : "drive:driveActionFavorite"
+											)}
+											pressed={driveItem.data.favorited}
+											disabled={favoriteEntry.enabled === false || saving}
+											shortcut={<Kbd action="preview.favorite" />}
+											onClick={() => {
+												void toggleItemFavorite(driveItem, variant, handleMenuFavoriteToggled)
+											}}
+										>
+											<StarIcon className={cn(driveItem.data.favorited && "fill-current")} />
 										</TooltipIconButton>
 									) : null}
 									{download !== null ? (

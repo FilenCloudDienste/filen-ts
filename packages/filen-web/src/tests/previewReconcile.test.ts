@@ -165,6 +165,16 @@ describe("reconcilePreviewSources — unchanged state", () => {
 		expect(reconcilePreviewSources(state, { type: "resync" })).toBe(state)
 	})
 
+	it("patches a favorite set elsewhere into its slot only, and holds the state when nothing changes", () => {
+		const state = { items: [fileAt("a"), fileAt("b")], index: 0 }
+		const next = reconcilePreviewSources(state, { type: "favorited", uuid: testUuid("b"), favorited: true })
+
+		expect(next?.items[1]?.data.favorited).toBe(true)
+		expect(next?.items[0]).toBe(state.items[0])
+		expect(reconcilePreviewSources(state, { type: "favorited", uuid: testUuid("a"), favorited: false })).toBe(state)
+		expect(reconcilePreviewSources(state, { type: "favorited", uuid: testUuid("elsewhere"), favorited: true })).toBe(state)
+	})
+
 	it("replaces only the renamed slot", () => {
 		const state = { items: [fileAt("a"), fileAt("b")], index: 0 }
 		const meta: FileMeta = {

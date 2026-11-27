@@ -1,5 +1,5 @@
 import type { DirMeta, FileMeta } from "@filen/sdk-rs"
-import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
+import { narrowItem, withFavorited, type DriveItem } from "@/features/drive/lib/item"
 import { stepPreviewIndex } from "@/features/drive/lib/preview.logic"
 import { type PreviewRevision } from "@/features/preview/lib/remoteChange.logic"
 import { usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
@@ -31,6 +31,7 @@ export type PreviewReconcileEvent =
 	| { type: "resync" }
 	| { type: "fileMeta"; uuid: string; meta: FileMeta }
 	| { type: "folderMeta"; uuid: string; meta: DirMeta }
+	| { type: "favorited"; uuid: string; favorited: boolean }
 
 export interface PreviewPagerState {
 	items: DriveItem[]
@@ -75,6 +76,11 @@ export function emitPreviewFileMetaChanged(uuid: string, meta: FileMeta): void {
 
 export function emitPreviewFolderMetaChanged(uuid: string, meta: DirMeta): void {
 	emit({ type: "folderMeta", uuid, meta })
+}
+
+// A favorite set or cleared anywhere: the pager's slot and the header's star follow it.
+export function emitPreviewFavoriteChanged(uuid: string, favorited: boolean): void {
+	emit({ type: "favorited", uuid, favorited })
 }
 
 // Drops the item carrying `uuid` and keeps the same item visible: an earlier slot's removal
@@ -152,6 +158,12 @@ export function reconcilePreviewSources(
 			return patchMeta(state, event.uuid, item => (item.type === "file" ? narrowItem({ ...item.data, meta: event.meta }) : null))
 		case "folderMeta":
 			return patchMeta(state, event.uuid, item => (item.type === "directory" ? narrowItem({ ...item.data, meta: event.meta }) : null))
+		case "favorited":
+			return patchMeta(state, event.uuid, item => {
+				const next = withFavorited(item, event.favorited)
+
+				return next === item ? null : next
+			})
 	}
 }
 

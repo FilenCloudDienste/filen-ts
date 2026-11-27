@@ -4,7 +4,7 @@ import type { TFunction } from "i18next"
 import { toast } from "sonner"
 import { conflictCopyName, decideRevision, driveItemName, fileStem, nameCollisionKey } from "@filen/shared"
 import { abortSavePort } from "@filen/shared/savePort"
-import { asDirectoryOrFile, narrowItem, type DriveItem } from "@/features/drive/lib/item"
+import { asDirectoryOrFile, narrowItem, withFavorited, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import {
 	editedSaveTimes,
@@ -297,6 +297,15 @@ function handleFileMeta(ctx: RemoteChangeContext, uuid: string, meta: FileMeta):
 	}
 }
 
+// The same for a favorite toggled elsewhere: a slot's own override (a save, a toggle here) would hide the pager's patch.
+function handleFavorited(ctx: RemoteChangeContext, uuid: string, favorited: boolean): void {
+	for (const [frozenUuid, item] of ctx.savedRef.current) {
+		if (item.data.uuid === uuid && item.data.favorited !== favorited) {
+			ctx.latest.current.commitSaved(frozenUuid, withFavorited(item, favorited))
+		}
+	}
+}
+
 // Where a slot's file is looked up, if anywhere. In My Drive: its directory's listing, after each reconnect
 // and while that listing is unverified. Elsewhere: only while unverified, the cached listing of the variant
 // that holds it (a flat listing's own, a shared directory's, or the shared root's for a file shared on its
@@ -441,6 +450,10 @@ function handleEvent(ctx: RemoteChangeContext, event: PreviewReconcileEvent): vo
 
 			break
 		case "folderMeta":
+			break
+		case "favorited":
+			handleFavorited(ctx, event.uuid, event.favorited)
+
 			break
 	}
 }
