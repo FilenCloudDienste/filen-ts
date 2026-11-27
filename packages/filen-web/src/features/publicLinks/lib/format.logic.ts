@@ -70,8 +70,11 @@ export interface ResolvedRouteLink {
 // the uuid + key are resolved here. The uuid comes from the path param; the key from the URL fragment
 // (window.location.hash) so it stays client-side. Defensive fallback for a hand-built link that put
 // the key in the PATH via %23 instead of a real fragment: split the param on the first %23/# and take
-// the tail as the key. Returns null (→ the shared invalid surface) for a bad uuid or a bad/short key.
-export function resolveRouteLink(uuidParam: string, hash: string): ResolvedRouteLink | null {
+// the tail as the key. A bad uuid is "invalid"; a missing, too-short or undecodable key is "incomplete"
+// (the link was cut off at or before the '#'), so the page can ask for the full link.
+export type RouteLinkResolution = ({ status: "ok" } & ResolvedRouteLink) | { status: "invalid" } | { status: "incomplete" }
+
+export function inspectRouteLink(uuidParam: string, hash: string): RouteLinkResolution {
 	let uuid = uuidParam
 	let rawKey = stripLeadingHash(hash)
 
@@ -89,10 +92,17 @@ export function resolveRouteLink(uuidParam: string, hash: string): ResolvedRoute
 	uuid = uuid.toLowerCase()
 
 	if (!isUuid(uuid)) {
-		return null
+		return { status: "invalid" }
 	}
 
 	const key = decodeLinkKeyFragment(rawKey)
 
-	return key === null ? null : { uuid, key }
+	return key === null ? { status: "incomplete" } : { status: "ok", uuid, key }
+}
+
+// Null for any unresolvable link; callers that must tell the two failures apart use inspectRouteLink.
+export function resolveRouteLink(uuidParam: string, hash: string): ResolvedRouteLink | null {
+	const result = inspectRouteLink(uuidParam, hash)
+
+	return result.status === "ok" ? { uuid: result.uuid, key: result.key } : null
 }

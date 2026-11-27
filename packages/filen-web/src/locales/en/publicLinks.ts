@@ -7,10 +7,18 @@ export const publicLinks = {
 	/** Browser tab title for a /d/ directory link — same privacy rule as documentTitleFile */
 	documentTitleDirectory: "Shared directory",
 
-	/** Invalid/expired surface — title (shared by bad uuid, bad/short key, not-found, network failure) */
+	/** Invalid/expired surface — title (shared by bad uuid, not-found and other terminal resolution failures) */
 	unavailableTitle: "This link is unavailable",
 	/** Invalid/expired surface — body; deliberately does not distinguish "doesn't exist" from "expired" */
 	unavailableBody: "This link is invalid or has expired.",
+	/** Incomplete-link surface — title (the link was cut off at or before the '#', so its key is missing or malformed) */
+	incompleteTitle: "This link is incomplete",
+	/** Incomplete-link surface — body */
+	incompleteBody: "Ask the sender for the full link.",
+	/** Load-error surface — title (a network failure on a valid link; shown with a retry action) */
+	loadErrorTitle: "Couldn't load this link",
+	/** Load-error surface — body */
+	loadErrorBody: "Check your connection and try again.",
 	/** Invalid/expired surface — action returning to the app's home */
 	back: "Back to Filen",
 	/** File view inside a directory link — action returning to that directory's listing */

@@ -1,7 +1,7 @@
 import { Buffer } from "buffer"
 import { describe, expect, it } from "vitest"
 import { parseFilenPublicLink } from "@filen/shared"
-import { buildPublicLinkUrl, resolveRouteLink } from "@/features/publicLinks/lib/format.logic"
+import { buildPublicLinkUrl, inspectRouteLink, resolveRouteLink } from "@/features/publicLinks/lib/format.logic"
 
 // Version 4 (third group starts "4"), variant 8 (fourth "8") — @filen/shared's parseFilenPublicLink
 // validates both nibbles via the 'uuid' package.
@@ -77,5 +77,24 @@ describe("resolveRouteLink — uuid from the path param, key from the fragment",
 
 	it("rejects a too-short key fragment", () => {
 		expect(resolveRouteLink(UUID, "#abcd")).toBeNull()
+	})
+})
+
+describe("inspectRouteLink — tells a bad link from a cut-off one", () => {
+	it("resolves a complete link", () => {
+		expect(inspectRouteLink(UUID, `#${KEY_HEX}`)).toEqual({ status: "ok", uuid: UUID, key: KEY_PLAINTEXT })
+	})
+
+	it("reports a malformed uuid as invalid", () => {
+		expect(inspectRouteLink("not-a-uuid", `#${KEY_HEX}`)).toEqual({ status: "invalid" })
+	})
+
+	it("reports a link cut off before the fragment as incomplete", () => {
+		expect(inspectRouteLink(UUID, "")).toEqual({ status: "incomplete" })
+		expect(inspectRouteLink(UUID, "#")).toEqual({ status: "incomplete" })
+	})
+
+	it("reports a truncated key as incomplete", () => {
+		expect(inspectRouteLink(UUID, `#${KEY_HEX.slice(0, 8)}`)).toEqual({ status: "incomplete" })
 	})
 })
