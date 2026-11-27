@@ -70,6 +70,7 @@ function timeline(failures: PhotosTimelineResult["failures"], retry = vi.fn()): 
 		timeline: { status: "success", listing: { photos: [photo("p")], folders: {} } },
 		listedRoots: ["a", "b"],
 		failures,
+		loadingMore: false,
 		retry
 	}
 }
@@ -122,6 +123,16 @@ describe("the photos screen", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Try again" }))
 		expect(retry).toHaveBeenCalledTimes(1)
+	})
+
+	it("shows the photos already listed while another directory still loads, and says so", () => {
+		state.library = { roots: ["a", "b"], loaded: true, readOnly: false, loadFailure: null }
+		state.timeline = { ...timeline([]), loadingMore: true }
+
+		render(<PhotosScreen />)
+
+		expect(screen.getByTestId("photo-grid")).toBeTruthy()
+		expect(screen.getByRole("status", { name: "Loading more photos…" })).toBeTruthy()
 	})
 
 	it("no notice when the failed directory still shows what was read earlier", () => {

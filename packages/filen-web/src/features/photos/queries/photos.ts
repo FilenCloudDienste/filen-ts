@@ -237,6 +237,8 @@ export interface PhotosTimelineResult {
 	listedRoots: readonly string[]
 	// Roots whose listing failed (others may still have listed); `held` when a listing read earlier still shows.
 	failures: readonly PhotosRootFailure[]
+	// A root's first listing is still being walked while others already show.
+	loadingMore: boolean
 	retry: () => void
 }
 
@@ -260,9 +262,10 @@ export function unreadPhotosRootCount(failures: readonly PhotosRootFailure[], is
 	return count
 }
 
-// Every root's listing (one recursive walk each), merged into the one timeline the grid shows. Pending until every
-// root has a listing, failed, or waits for the network (offline, what is held shows at once), so the timeline
-// never reorders under the user as a late root lands.
+// Every root's listing (one recursive walk each), merged into the one timeline the grid shows. Pending only until the
+// first root has a listing (or every root failed, or waits for the network: offline, what is held shows at once); a
+// slow root never holds the others back. A late root's photos merge in at their capture positions: the merge orders
+// by capture time with a fixed tie-break (mergePhotosByCaptureDesc), so what already shows keeps its order.
 export function usePhotosTimeline(roots: readonly string[]): PhotosTimelineResult {
 	const chains = useDirectoryRootChains(roots, roots.length > 1)
 	// A chain not resolved yet (or waiting for the network) keeps its root: walking a nested root once costs less
@@ -308,16 +311,18 @@ export function usePhotosTimeline(roots: readonly string[]): PhotosTimelineResul
 	}
 
 	const [firstFailure] = failures
-	const timeline: PhotosTimeline = pending
-		? { status: "pending" }
-		: listings.length === 0 && firstFailure !== undefined
-			? { status: "error", error: firstFailure.error }
-			: { status: "success", listing: shownPhotosOf(mergedListing(listings), version) }
+	const timeline: PhotosTimeline =
+		pending && listings.length === 0
+			? { status: "pending" }
+			: listings.length === 0 && firstFailure !== undefined
+				? { status: "error", error: firstFailure.error }
+				: { status: "success", listing: shownPhotosOf(mergedListing(listings), version) }
 
 	return {
 		timeline,
 		listedRoots,
 		failures,
+		loadingMore: pending && listings.length > 0,
 		retry: () => {
 			for (const result of results) {
 				if (result.status === "error") {

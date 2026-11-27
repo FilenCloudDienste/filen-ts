@@ -33,6 +33,8 @@ export const photos = {
 	photosUnreadDirectories_one: "{{count, number}} directory could not be read, so its photos are missing.",
 	/** Notice above the timeline — some photos directories could not be read while others could, so their photos are missing; next to a Try again button — plural */
 	photosUnreadDirectories_other: "{{count, number}} directories could not be read, so their photos are missing.",
+	/** Header status while a directory's photos are still being read and the others already show */
+	photosLoadingMore: "Loading more photos…",
 
 	// ── Root-gone handling ──────────────────────────────────────────────────────
 	/** Toast shown when a photos directory no longer exists (deleted/trashed elsewhere) and was removed from Photos; with no directory left the screen falls back to the unset hero */

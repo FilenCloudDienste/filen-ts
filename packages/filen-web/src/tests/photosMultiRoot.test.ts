@@ -151,6 +151,7 @@ describe("the photos timeline over several directories", () => {
 
 		await waitFor(() => {
 			expect(view.result.current.timeline.status).toBe("success")
+			expect(view.result.current.loadingMore).toBe(false)
 		})
 
 		const timeline = view.result.current.timeline
@@ -162,6 +163,54 @@ describe("the photos timeline over several directories", () => {
 		])
 		expect(view.result.current.listedRoots).toEqual([PICS, OTHER])
 		expect(listPhotosRecursive).toHaveBeenCalledTimes(2)
+	})
+
+	it("shows the first directory's photos while a slow one still walks, then merges the late one in capture order", async () => {
+		let finishSlow: () => void = () => undefined
+		const slowDone = new Promise<void>(resolve => {
+			finishSlow = resolve
+		})
+
+		listPhotosRecursive.mockImplementation(async rootUuid => {
+			if (rootUuid === OTHER) {
+				await slowDone
+
+				return { dirs: [], files: [mockFile(testUuid("mid"), OTHER, BASE + 5 * DAY)] }
+			}
+
+			return { dirs: [], files: [mockFile(testUuid("old"), PICS, BASE), mockFile(testUuid("new"), PICS, BASE + 9 * DAY)] }
+		})
+
+		const view = renderHook(() => usePhotosTimeline([PICS, OTHER]), { wrapper })
+		const uuids = (): string[] => {
+			const timeline = view.result.current.timeline
+
+			return timeline.status === "success" ? timeline.listing.photos.map(item => item.data.uuid) : []
+		}
+
+		await waitFor(() => {
+			expect(view.result.current.timeline.status).toBe("success")
+		})
+		expect(view.result.current.loadingMore).toBe(true)
+		expect(uuids()).toEqual([testUuid("new"), testUuid("old")])
+
+		await act(async () => {
+			finishSlow()
+			await slowDone
+		})
+		await waitFor(() => {
+			expect(view.result.current.loadingMore).toBe(false)
+		})
+		expect(uuids()).toEqual([testUuid("new"), testUuid("mid"), testUuid("old")])
+	})
+
+	it("stays pending until some directory has listed", () => {
+		listPhotosRecursive.mockReturnValue(new Promise(() => undefined))
+
+		const view = renderHook(() => usePhotosTimeline([PICS, OTHER]), { wrapper })
+
+		expect(view.result.current.timeline.status).toBe("pending")
+		expect(view.result.current.loadingMore).toBe(false)
 	})
 
 	it("never walks a directory another one holds when the chains are held (restored from disk)", async () => {
@@ -258,9 +307,9 @@ describe("the photos timeline over several directories", () => {
 		const view = renderHook(() => usePhotosTimeline([PICS, OTHER]), { wrapper })
 
 		await waitFor(() => {
-			expect(view.result.current.timeline.status).toBe("success")
+			expect(view.result.current.failures.map(failure => failure.rootUuid)).toEqual([PICS])
 		})
-		expect(view.result.current.failures.map(failure => failure.rootUuid)).toEqual([PICS])
+		expect(view.result.current.timeline.status).toBe("success")
 
 		view.unmount()
 		listPhotosRecursive.mockRejectedValue(new Error("down"))

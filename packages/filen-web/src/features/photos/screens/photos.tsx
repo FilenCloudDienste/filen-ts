@@ -21,6 +21,7 @@ import { PhotosDensityControls } from "@/features/photos/components/densityContr
 import { EmptyState } from "@/features/drive/components/emptyState"
 import { LoadingState } from "@/components/loadingState"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 
 const NO_ROOTS: readonly string[] = []
@@ -47,7 +48,7 @@ export function PhotosScreen() {
 	const [singleRoot] = roots.length === 1 ? roots : []
 	const isWholeDrive = singleRoot !== undefined && singleRoot === driveRootUuid
 	const namesQuery = useDirectoryNamesQuery(singleRoot !== undefined && !isWholeDrive ? [singleRoot] : [])
-	const { timeline, listedRoots, failures, retry } = usePhotosTimeline(roots)
+	const { timeline, listedRoots, failures, loadingMore, retry } = usePhotosTimeline(roots)
 	const rootViews = usePhotosRootViews(roots, dialog !== null)
 	// Roots that failed with nothing held while others listed: their photos are missing from what shows.
 	const unreadCount = timeline.status === "success" ? unreadPhotosRootCount(failures, isOnline) : 0
@@ -184,6 +185,20 @@ export function PhotosScreen() {
 					)}
 				</h1>
 				<div className="flex shrink-0 items-center gap-2">
+					{loadingMore ? (
+						<span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+							<Spinner
+								className="size-3.5"
+								aria-label={t("photosLoadingMore")}
+							/>
+							<span
+								aria-hidden="true"
+								className="hidden sm:inline"
+							>
+								{t("photosLoadingMore")}
+							</span>
+						</span>
+					) : null}
 					{timeline.status === "success" && timeline.listing.photos.length > 0 ? <PhotosDensityControls /> : null}
 					<Button
 						variant="outline"
@@ -212,7 +227,7 @@ export function PhotosScreen() {
 				</div>
 			) : null}
 			<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-				{timeline.status === "pending" ? (
+				{timeline.status === "pending" || (timeline.status === "success" && timeline.listing.photos.length === 0 && loadingMore) ? (
 					<LoadingState size="lg" />
 				) : timeline.status === "error" ? (
 					<EmptyState
