@@ -21,11 +21,14 @@ export interface ViewModeToggleProps {
 	// the checkbox can never render half-wired. Phrased in SHOW terms to match the label; the stored
 	// preference is the HIDE polarity (mobile parity), inverted by the caller.
 	hiddenItems?: { show: boolean; onChange: (next: boolean) => void }
+	// Present only where a listing mounts the details panel; the same open/closed choice the panel's own close
+	// button and the selection bar's Details toggle set.
+	detailsPanel?: { show: boolean; onChange: (next: boolean) => void }
 }
 
 // The toolbar's "Display" control: list/grid presentation plus the hidden-items filter behind one
 // bordered dropdown slot that can grow further display options later.
-export function ViewModeToggle({ value, onChange, hiddenItems }: ViewModeToggleProps) {
+export function ViewModeToggle({ value, onChange, hiddenItems, detailsPanel }: ViewModeToggleProps) {
 	const { t } = useTranslation("drive")
 
 	return (
@@ -62,16 +65,22 @@ export function ViewModeToggle({ value, onChange, hiddenItems }: ViewModeToggleP
 				{/* Siblings of the radio group, never children of it: Base UI's GroupLabel/radio nesting rule
 				(see the label above) applies inside that group only, and a checkbox item within it would
 				inherit the wrong roving semantics. */}
+				{hiddenItems || detailsPanel ? <DropdownMenuSeparator /> : null}
 				{hiddenItems ? (
-					<>
-						<DropdownMenuSeparator />
-						<DropdownMenuCheckboxItem
-							checked={hiddenItems.show}
-							onCheckedChange={hiddenItems.onChange}
-						>
-							{t("driveShowHiddenItems")}
-						</DropdownMenuCheckboxItem>
-					</>
+					<DropdownMenuCheckboxItem
+						checked={hiddenItems.show}
+						onCheckedChange={hiddenItems.onChange}
+					>
+						{t("driveShowHiddenItems")}
+					</DropdownMenuCheckboxItem>
+				) : null}
+				{detailsPanel ? (
+					<DropdownMenuCheckboxItem
+						checked={detailsPanel.show}
+						onCheckedChange={detailsPanel.onChange}
+					>
+						{t("driveShowDetailsPanel")}
+					</DropdownMenuCheckboxItem>
 				) : null}
 			</DropdownMenuContent>
 		</DropdownMenu>

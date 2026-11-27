@@ -33,6 +33,8 @@ export const drive = {
 	driveDisplay: "Display",
 	/** Display menu — checkbox controlling whether dot-prefixed items are listed; also interpolated as {{setting}} in the hidden-items notices below */
 	driveShowHiddenItems: "Show hidden items",
+	/** Display menu checkbox: show the details side panel beside the listing while items are selected */
+	driveShowDetailsPanel: "Show details panel",
 	/** Drive listing footer — count of dot-prefixed rows the display filter removed; {{count}} = how many */
 	driveHiddenItemsNotShown_one: "{{count}} hidden item is not shown",
 	/** Drive listing footer — plural form of the hidden-row count */

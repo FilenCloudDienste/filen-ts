@@ -98,6 +98,7 @@ import { NewMenu, UploadContextMenu } from "@/features/drive/components/uploadMe
 import { UploadDropzone } from "@/features/drive/components/uploadDropzone"
 import { BulkActionBar } from "@/features/drive/components/bulkActionBar"
 import { DriveDetailsHost } from "@/features/drive/components/detailsPanel"
+import { driveDetailsPanel } from "@/features/drive/store/useDriveDetailsPanel"
 import { useWindowBarSlot } from "@/features/shell/lib/windowBarSlot"
 import { EmptyState } from "@/features/drive/components/emptyState"
 import { LoadingState } from "@/components/loadingState"
@@ -312,6 +313,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	// render the default (show everything) and then hide — the same first-paint behavior the sort and
 	// view-mode preferences already have on this screen.
 	const hiddenPref = hiddenPrefQuery.data ?? DEFAULT_HIDE_HIDDEN_ITEMS
+	const detailsPanelOpen = driveDetailsPanel.useStore(state => state.panelOpen)
 	const hiddenFilterApplies = hiddenFilterAppliesTo(variant)
 	const hideHidden = hiddenPref && hiddenFilterApplies
 	const hiddenDotFilenRoot = useHiddenDotFilenRoot()
@@ -1419,6 +1421,13 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 									}
 								}
 							: {})}
+						detailsPanel={{
+							show: detailsPanelOpen,
+							onChange: next => {
+								// The kept preference only: opening it here neither selects nor moves focus.
+								driveDetailsPanel.useStore.setState({ panelOpen: next, focusRequestedFor: null })
+							}
+						}}
 					/>
 				</div>
 				{/* Every variant gets a filter box — "drive" drives the cache-backed recursive engine
