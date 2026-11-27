@@ -66,12 +66,14 @@ interface FakeElement {
 	// A failure whose classification resolves only when `classified` does.
 	failLater: (classified: Promise<"format" | "other">) => void
 	setSample: (next: Partial<ElementSample>) => void
+	setPlayImpl: (impl: () => Promise<void>) => void
 }
 
 function makeFakeElement(initialEvents: AudioElementEvents): FakeElement {
 	const calls = { load: [] as string[], play: 0, pause: 0, clear: 0, dispose: 0, rebindCount: 0 }
 	let events = initialEvents
 	let sample: ElementSample = { currentTimeMs: 0, durationMs: 0, paused: true, ended: false }
+	let playImpl: () => Promise<void> = () => Promise.resolve()
 
 	const adapter: AudioElementAdapter = {
 		load: source => {
@@ -80,7 +82,7 @@ function makeFakeElement(initialEvents: AudioElementEvents): FakeElement {
 		play: () => {
 			calls.play++
 
-			return Promise.resolve()
+			return playImpl()
 		},
 		pause: () => {
 			calls.pause++
@@ -122,6 +124,9 @@ function makeFakeElement(initialEvents: AudioElementEvents): FakeElement {
 		},
 		setSample: next => {
 			sample = { ...sample, ...next }
+		},
+		setPlayImpl: impl => {
+			playImpl = impl
 		}
 	}
 }
@@ -267,6 +272,29 @@ describe("prefetch — promote on advance", () => {
 
 		// The outgoing cold-started "a" element was retired.
 		expect(h.mainFakes[0]?.calls.dispose).toBe(1)
+		expect(useAudioStore.getState().currentIndex).toBe(1)
+		expect(useAudioStore.getState().status).toBe("playing")
+	})
+
+	it("holds on a promoted track whose play() the browser refused (a background advance) instead of skipping it", async () => {
+		const h = makeHarness()
+
+		await h.engine.enqueueAndPlay([track("a"), track("b"), track("c")], 0)
+		await flush()
+
+		h.prefetchFakes[0]?.setPlayImpl(() => Promise.reject(new DOMException("needs a gesture", "NotAllowedError")))
+		h.mainFakes[0]?.fire("onEnded")
+		await flush()
+
+		expect(useAudioStore.getState().currentIndex).toBe(1)
+		expect(useAudioStore.getState().status).toBe("paused")
+		expect(useAudioStore.getState().lastError).toBeNull()
+
+		h.prefetchFakes[0]?.setPlayImpl(() => Promise.resolve())
+		h.engine.resume()
+		await flush()
+
+		expect(h.prefetchFakes[0]?.calls.play).toBe(2)
 		expect(useAudioStore.getState().currentIndex).toBe(1)
 		expect(useAudioStore.getState().status).toBe("playing")
 	})

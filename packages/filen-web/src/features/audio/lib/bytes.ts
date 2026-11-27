@@ -15,7 +15,13 @@ import { audioDemotions, audioRoute } from "@/lib/media/audioRoute.logic"
 import { audioMediaSource, openDecodedAudioStream } from "@/lib/media/playback/audioStream"
 import { isAudioUnsupported } from "@/lib/media/remuxTypes"
 import type { QueueTrack } from "@/features/audio/store/audioQueue"
-import type { AudioElementAdapter, AudioElementEvents, StallListener, TrackSource } from "@/features/audio/lib/engine"
+import {
+	isPlayRefused,
+	type AudioElementAdapter,
+	type AudioElementEvents,
+	type StallListener,
+	type TrackSource
+} from "@/features/audio/lib/engine"
 import type { ElementSample } from "@/features/audio/store/audioQueue"
 
 // The browser-only half of the audio engine: the concrete media-element adapter and the track→source
@@ -167,6 +173,13 @@ function createDomAudioAdapterWithPreload(initialEvents: AudioElementEvents, pre
 	element.addEventListener("ended", () => {
 		events.onEnded()
 	})
+	// A pause the browser or the OS made (an interruption, unplugged headphones); the engine tells its own apart. The
+	// end of the track and a failure pause the element too, and have their own events.
+	element.addEventListener("pause", () => {
+		if (element.error === null && !element.ended) {
+			events.onPause()
+		}
+	})
 	element.addEventListener("waiting", () => {
 		stallListener?.("waiting")
 	})
@@ -215,15 +228,22 @@ function createDomAudioAdapterWithPreload(initialEvents: AudioElementEvents, pre
 			})
 		},
 		// A rejection carries the element's own classified failure where there is one, so a source the
-		// browser cannot play reports its format, whichever of this and the error event comes first.
+		// browser cannot play reports its format, whichever of this and the error event comes first. A play the browser
+		// refused (no user activation: a background tab, a locked phone) keeps its NotAllowedError: the track is fine.
 		play: async () => {
 			await attaching
 
 			// Playing is asked for after a pause still held for a seek (@filen/shared/heldPause): the pause is dropped.
 			cancelHeldPause(element)
 
-			await element.play().catch(async () => {
-				throw new ErrorWithDTO((await classifyFailure()) ?? mediaFailureDTO("other"))
+			await element.play().catch(async (error: unknown) => {
+				const classified = await classifyFailure()
+
+				if (classified === null && isPlayRefused(error)) {
+					throw error
+				}
+
+				throw new ErrorWithDTO(classified ?? mediaFailureDTO("other"))
 			})
 		},
 		pause: () => {

@@ -90,6 +90,13 @@ export interface AudioElementEvents {
 	onDurationChange: () => void
 	onEnded: () => void
 	onError: (failure: () => Promise<ErrorDTO | null>) => void
+	// The element paused, other than at its end or on a failure: the engine's own pause, or the browser's or the OS's.
+	onPause: () => void
+}
+
+// The browser refused to start playback without user activation. The track itself is fine.
+export function isPlayRefused(error: unknown): boolean {
+	return typeof error === "object" && error !== null && "name" in error && error.name === "NotAllowedError"
 }
 
 // The element ran out of data (`waiting`) or the network stopped delivering (`stalled`).
@@ -183,7 +190,12 @@ export interface AudioEngineDeps {
 	// The connectivity hint (production: TanStack's onlineManager). A failure while offline is the connection's, not
 	// the track's, so playback holds on it instead of skipping. Absent means online.
 	isOnline?: () => boolean
+	// Connectivity changes (production: onlineManager.subscribe): a track held offline resumes when it returns.
+	subscribeOnline?: (listener: (online: boolean) => void) => void
 }
+
+// A stream that broke under a track already playing is tried again from its position after this long.
+const STREAM_RETRY_DELAY_MS = 1_000
 
 // Cover-art blob URLs are held only for the current + one-ahead prefetched track, so this is headroom
 // for a short back/forward history.
@@ -303,9 +315,15 @@ export class AudioEngine {
 	private readonly edgeReads = new Map<string, AbortController>()
 	// The output stopped rendering this session: every element plays unrouted from now on.
 	private degraded = false
-	// The degrade reload's play() was refused (background): the next resume tries again.
-	private degradeRetry = false
-	// Where a degrade reload resumes the track.
+	// A play() was refused (no user activation: a background tab, a locked phone, or the degrade reload): the track holds
+	// paused and the next resume or return to the tab tries again.
+	private playRefused = false
+	// Paused on a failure while offline: the connection coming back resumes the track.
+	private offlineHold = false
+	// The track whose broken stream already had its retry, until another track plays.
+	private streamRetryUuid: string | null = null
+	private streamRetryTimer: ReturnType<typeof setTimeout> | null = null
+	// Where a reload (a degrade, a stream retry, an offline hold) resumes the track.
 	private pendingResume: { uuid: string; ms: number } | null = null
 	private watchdog: WatchdogState = INITIAL_WATCHDOG_STATE
 	// How long a warm element takes from play() to being heard here, smoothed: a gapless switch is asked for that early.
@@ -326,6 +344,13 @@ export class AudioEngine {
 			}
 
 			this.deps.smoothTransitions?.output.setMaster(masterLevel(output))
+		})
+
+		deps.subscribeOnline?.(online => {
+			if (online && this.offlineHold) {
+				log.info("audio", "back online, resuming the held track")
+				this.resume()
+			}
 		})
 
 		if (deps.smoothTransitions) {
@@ -365,6 +390,13 @@ export class AudioEngine {
 	private bumpLoadGeneration(): number {
 		this.loadAbort?.abort()
 		this.loadAbort = null
+		this.offlineHold = false
+
+		if (this.streamRetryTimer !== null) {
+			clearTimeout(this.streamRetryTimer)
+			this.streamRetryTimer = null
+		}
+
 		this.dropStarting()
 		this.dropFading()
 
@@ -456,7 +488,34 @@ export class AudioEngine {
 						this.onPlaybackFailure(error)
 					}
 				})
+			},
+			onPause: () => {
+				this.onElementPaused()
 			}
+		}
+	}
+
+	// The element stopped while the transport still says playing: the browser or the OS paused it (an interruption,
+	// unplugged headphones). The engine's own pauses set the status first, so they never reach here.
+	private onElementPaused(): void {
+		const element = this.element
+
+		if (element === null || !this.holdsCurrent() || useAudioStore.getState().status !== "playing" || !element.sample().paused) {
+			return
+		}
+
+		log.info("audio", "paused by the browser or the system", this.failureContext())
+		this.pause()
+	}
+
+	// The current track and where it stands, for the field log.
+	private failureContext(): { uuid: string | null; route: SourceRoute | null; positionMs: number } {
+		const state = useAudioStore.getState()
+
+		return {
+			uuid: state.queue[state.currentIndex]?.uuid ?? null,
+			route: this.currentSource?.route ?? null,
+			positionMs: this.element?.sample().currentTimeMs ?? state.positionMs
 		}
 	}
 
@@ -469,7 +528,8 @@ export class AudioEngine {
 			onEnded: () => {
 				this.onOutgoingEnded(element)
 			},
-			onError: () => undefined
+			onError: () => undefined,
+			onPause: () => undefined
 		}
 	}
 
@@ -1315,7 +1375,9 @@ export class AudioEngine {
 				return
 			}
 
-			if (options.degrade === true) {
+			// Refused for want of user activation (a background tab, a locked phone): the track is fine, so it holds
+			// instead of being skipped as broken.
+			if (options.degrade === true || isPlayRefused(error)) {
 				this.holdAfterRefusedPlay(error)
 
 				return
@@ -1337,13 +1399,17 @@ export class AudioEngine {
 		this.settlePlaying(element)
 	}
 
-	// The degrade reload was refused (no gesture in a background tab): the track holds paused at its position and
+	// A play() was refused (no gesture in a background tab, a locked phone): the track holds paused at its position and
 	// plays on the next resume (a lock-screen play, a return to the tab).
 	private holdAfterRefusedPlay(error: unknown): void {
-		log.warn("audio", "the reload of a degraded output was refused", error)
-		this.degradeRetry = true
+		log.warn("audio", "play() was refused, holding paused", {
+			error: error instanceof Error ? error.name : String(error),
+			...this.failureContext()
+		})
+		this.playRefused = true
 		useAudioStore.getState().setStatus("paused")
 		this.deps.mediaSession?.setPlaybackState("paused")
+		this.deps.smoothTransitions?.output.idle()
 	}
 
 	private ensureElement(source: TrackSource | null): AudioElementAdapter {
@@ -1382,6 +1448,7 @@ export class AudioEngine {
 			onTimeUpdate: () => undefined,
 			onDurationChange: () => undefined,
 			onEnded: () => undefined,
+			onPause: () => undefined,
 			onError: failure => {
 				const failed = this.prefetchElement
 				const source = this.prefetchSource
@@ -1596,8 +1663,13 @@ export class AudioEngine {
 	// store + OS playback state, and re-arm the one-ahead prefetch for whatever is next from here.
 	private settlePlaying(element: AudioElementAdapter, prefetch = true): void {
 		this.skipGuard = 0
+
+		if (this.streamRetryUuid !== this.loadedTrackUuid) {
+			this.streamRetryUuid = null
+		}
+
 		this.lastPositionWriteAt = 0
-		this.degradeRetry = false
+		this.playRefused = false
 		this.gaplessOnlyUuid = null
 		this.planStale = true
 		// A stall on the track before still counts: two within a minute degrade, whichever tracks they hit.
@@ -1958,6 +2030,13 @@ export class AudioEngine {
 
 		const state = useAudioStore.getState()
 		const track = state.queue[state.currentIndex] ?? null
+		const online = this.deps.isOnline?.() !== false
+
+		log.warn("audio", "playback failed", { error: error.kind ?? error.message, status: state.status, online, ...this.failureContext() })
+
+		if (state.status !== "paused" && online && this.retryStream(error, track)) {
+			return
+		}
 
 		state.setError(error, track)
 
@@ -1972,7 +2051,7 @@ export class AudioEngine {
 
 		// Offline, the next track would fail the same way: skipping would run through the whole queue and lose the user's
 		// place. An unsupported format is the file's own failure, so it still skips.
-		if (error.kind !== MEDIA_FORMAT_UNSUPPORTED && this.deps.isOnline?.() === false) {
+		if (error.kind !== MEDIA_FORMAT_UNSUPPORTED && !online) {
 			this.holdOffline(track)
 
 			return
@@ -1994,8 +2073,51 @@ export class AudioEngine {
 		void this.loadAndPlay(advance.index)
 	}
 
+	// A stream that broke under a track already playing, while online (a dropped connection, a service worker that
+	// lost the stream): one more try from where it stood, after a beat, before the track counts as broken. Once per
+	// track until another one plays.
+	private retryStream(error: ErrorDTO, track: QueueTrack | null): boolean {
+		const element = this.element
+
+		if (
+			error.kind === MEDIA_FORMAT_UNSUPPORTED ||
+			track === null ||
+			element === null ||
+			this.loadedTrackUuid !== track.uuid ||
+			this.streamRetryUuid === track.uuid
+		) {
+			return false
+		}
+
+		const ms = element.sample().currentTimeMs
+
+		if (ms <= 0) {
+			return false
+		}
+
+		const generation = this.bumpLoadGeneration()
+		const pauseGeneration = this.pauseGeneration
+
+		log.warn("audio", "the stream broke, retrying from its position", { uuid: track.uuid, positionMs: ms })
+		this.streamRetryUuid = track.uuid
+		this.pendingResume = { uuid: track.uuid, ms }
+		// No longer holding it: a resume during the wait loads it again from the kept position.
+		this.loadedTrackUuid = null
+		element.pause()
+		useAudioStore.getState().setStatus("loading")
+		this.streamRetryTimer = setTimeout(() => {
+			this.streamRetryTimer = null
+
+			if (!this.superseded(generation, pauseGeneration)) {
+				void this.loadAndPlay(useAudioStore.getState().currentIndex)
+			}
+		}, STREAM_RETRY_DELAY_MS)
+
+		return true
+	}
+
 	// Paused on the failed track, from where it stood: the element no longer counts as holding it, so resuming loads it
-	// again through playCurrent, seeked to the kept position.
+	// again through playCurrent, seeked to the kept position. The connection coming back resumes it.
 	private holdOffline(track: QueueTrack | null): void {
 		const element = this.element
 
@@ -2007,7 +2129,9 @@ export class AudioEngine {
 			}
 		}
 
+		log.warn("audio", "offline, holding on the failed track", this.failureContext())
 		this.bumpLoadGeneration()
+		this.offlineHold = true
 		element?.pause()
 		this.loadedTrackUuid = null
 		useAudioStore.getState().setStatus("paused")
@@ -2070,6 +2194,15 @@ export class AudioEngine {
 	// terminal status (idle when the queue is empty, otherwise paused at the start). Any lastError set
 	// by the failure path stays visible.
 	private settleStopped(): void {
+		// An error still standing is what stopped playback; the queue's end is not worth a warning.
+		if (useAudioStore.getState().lastError !== null) {
+			log.warn("audio", "playback stopped on failures", {
+				error: useAudioStore.getState().lastError?.kind ?? null,
+				skips: this.skipGuard,
+				...this.failureContext()
+			})
+		}
+
 		this.bumpLoadGeneration()
 		this.element?.pause()
 		this.teardownPrefetch()
@@ -2236,6 +2369,7 @@ export class AudioEngine {
 	// track — nothing yet, or the previous track because a load was paused/superseded mid-flight — this
 	// starts the current track instead of replaying stale bytes.
 	public resume(): void {
+		this.offlineHold = false
 		this.clearIdleClose()
 		this.unlockOutput()
 
@@ -2261,7 +2395,7 @@ export class AudioEngine {
 				if (!this.superseded(generation, pauseGeneration)) {
 					// Playing again in place: a failure that left the track paused is over, and the next one gets a full skip pass.
 					this.skipGuard = 0
-					this.degradeRetry = false
+					this.playRefused = false
 					useAudioStore.getState().setError(null)
 					this.deps.mediaSession?.setPositionState(element.sample())
 					this.armTransitionTimer()
@@ -2279,7 +2413,7 @@ export class AudioEngine {
 					return
 				}
 
-				if (this.degradeRetry) {
+				if (this.playRefused || isPlayRefused(error)) {
 					this.holdAfterRefusedPlay(error)
 
 					return
@@ -2298,6 +2432,9 @@ export class AudioEngine {
 	// with the pause: the outgoing goes, the current plays on alone at full level on resume.
 	public pause(): void {
 		this.pauseGeneration++
+		// A pause asked for (or a video taking the session over) is not resumed behind the user's back.
+		this.offlineHold = false
+		this.playRefused = false
 		this.parkStarting()
 
 		const hadFade = this.fading !== null
@@ -2501,6 +2638,7 @@ export class AudioEngine {
 		this.lastPositionWriteAt = 0
 		this.gaplessOnlyUuid = null
 		this.pendingResume = null
+		this.streamRetryUuid = null
 		useAudioStore.getState().reset()
 		this.deps.mediaSession?.setMetadata(null)
 		this.deps.mediaSession?.setPlaybackState("none")
@@ -2560,7 +2698,7 @@ export class AudioEngine {
 			return
 		}
 
-		if (this.degradeRetry && useAudioStore.getState().status === "paused") {
+		if (this.playRefused && useAudioStore.getState().status === "paused") {
 			this.resume()
 
 			return
@@ -2615,7 +2753,8 @@ export class AudioEngine {
 		this.lastPositionWriteAt = 0
 		this.gaplessOnlyUuid = null
 		this.pendingResume = null
-		this.degradeRetry = false
+		this.streamRetryUuid = null
+		this.playRefused = false
 		useAudioStore.getState().reset()
 		useAudioStore.getState().resetMetadata()
 		this.deps.mediaSession?.setMetadata(null)

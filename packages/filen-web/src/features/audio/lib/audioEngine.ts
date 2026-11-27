@@ -65,6 +65,9 @@ export const audioEngine = new AudioEngine({
 	resolveCover: track => trackMetadata.playbackCover(track),
 	onFormatFailure: notifyFormatFailure,
 	isOnline: () => onlineManager.isOnline(),
+	subscribeOnline: listener => {
+		onlineManager.subscribe(listener)
+	},
 	smoothTransitions: {
 		output: createAudioOutput({
 			createContext,

@@ -515,7 +515,7 @@ describe("bounded auto-skip", () => {
 	it("clears the error and the skip guard when a stopped track resumes in place", async () => {
 		const h = makeHarness()
 
-		h.fake.setPlayImpl(() => Promise.reject(new DOMException("not allowed", "NotAllowedError")))
+		h.fake.setPlayImpl(() => Promise.reject(new ErrorWithDTO(mediaFailureDTO("other"))))
 
 		await h.engine.enqueueAndPlay([track("a")], 0)
 		await flush()
@@ -692,6 +692,219 @@ describe("offline failures", () => {
 
 		expect(h.resolveSource).toHaveBeenCalledTimes(2)
 		expect(useAudioStore.getState().currentIndex).toBe(1)
+	})
+})
+
+function mediaSessionSpy(): { states: string[]; publisher: NonNullable<AudioEngineDeps["mediaSession"]> } {
+	const states: string[] = []
+
+	return {
+		states,
+		publisher: {
+			setMetadata: () => undefined,
+			setPlaybackState: state => {
+				states.push(state)
+			},
+			setPositionState: () => undefined
+		}
+	}
+}
+
+describe("a play() the browser refused", () => {
+	it("holds paused on the track instead of skipping it, and plays it in place on the next resume", async () => {
+		const session = mediaSessionSpy()
+		const h = makeHarness({ mediaSession: session.publisher })
+
+		h.fake.setPlayImpl(() => Promise.reject(new DOMException("needs a gesture", "NotAllowedError")))
+
+		await h.engine.enqueueAndPlay([track("a"), track("b"), track("c")], 0)
+		await flush()
+
+		expect(h.resolveSource).toHaveBeenCalledTimes(1)
+		expect(useAudioStore.getState().currentIndex).toBe(0)
+		expect(useAudioStore.getState().status).toBe("paused")
+		expect(useAudioStore.getState().lastError).toBeNull()
+		expect(session.states.at(-1)).toBe("paused")
+
+		// A lock-screen play.
+		h.fake.setPlayImpl(() => Promise.resolve())
+		h.engine.resume()
+		await flush()
+
+		expect(h.resolveSource).toHaveBeenCalledTimes(1)
+		expect(h.fake.calls.play).toBe(2)
+		expect(useAudioStore.getState().status).toBe("playing")
+		expect(session.states.at(-1)).toBe("playing")
+	})
+
+	it("holds again when the resume is refused too", async () => {
+		const h = makeHarness()
+
+		await h.engine.enqueueAndPlay([track("a"), track("b")], 0)
+		await flush()
+		h.engine.pause()
+
+		h.fake.setPlayImpl(() => Promise.reject(new DOMException("needs a gesture", "NotAllowedError")))
+		h.engine.resume()
+		await flush()
+
+		expect(useAudioStore.getState().currentIndex).toBe(0)
+		expect(useAudioStore.getState().status).toBe("paused")
+		expect(useAudioStore.getState().lastError).toBeNull()
+	})
+})
+
+describe("a stream that broke mid-track", () => {
+	it("retries once from its position while online, then skips on a second failure", async () => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+
+		try {
+			const h = makeHarness({ isOnline: () => true })
+
+			await h.engine.enqueueAndPlay([track("a"), track("b")], 0)
+			await flush()
+
+			h.fake.setSample({ currentTimeMs: 90_000, durationMs: 240_000, paused: false, ended: false })
+			h.events().onError(() => Promise.resolve(mediaFailureDTO("other")))
+			await flush()
+
+			expect(useAudioStore.getState().currentIndex).toBe(0)
+			expect(useAudioStore.getState().status).toBe("loading")
+			expect(useAudioStore.getState().lastError).toBeNull()
+			expect(h.resolveSource).toHaveBeenCalledTimes(1)
+
+			vi.advanceTimersByTime(1_000)
+			await flush()
+
+			expect(h.resolveSource).toHaveBeenCalledTimes(2)
+			expect(h.resolveSource.mock.calls[1]?.[0].uuid).toBe("a")
+			expect(h.fake.calls.seek).toEqual([90])
+			expect(useAudioStore.getState().status).toBe("playing")
+
+			h.events().onError(() => Promise.resolve(mediaFailureDTO("other")))
+			await flush()
+
+			expect(useAudioStore.getState().currentIndex).toBe(1)
+			expect(h.resolveSource.mock.calls[2]?.[0].uuid).toBe("b")
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("drops the retry when the user skips during the wait", async () => {
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+
+		try {
+			const h = makeHarness()
+
+			await h.engine.enqueueAndPlay([track("a"), track("b"), track("c")], 0)
+			await flush()
+
+			h.fake.setSample({ currentTimeMs: 30_000, durationMs: 240_000, paused: false, ended: false })
+			h.events().onError(() => Promise.resolve(mediaFailureDTO("other")))
+			await flush()
+			await h.engine.skipNext()
+			await flush()
+			vi.advanceTimersByTime(1_000)
+			await flush()
+
+			expect(h.resolveSource.mock.calls.map(([t]) => t.uuid)).toEqual(["a", "b"])
+			expect(useAudioStore.getState().currentIndex).toBe(1)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+})
+
+describe("connectivity returning", () => {
+	it("resumes a track held offline from where it stood once the connection is back", async () => {
+		let online = true
+		const listeners: ((online: boolean) => void)[] = []
+		const h = makeHarness({
+			isOnline: () => online,
+			subscribeOnline: listener => {
+				listeners.push(listener)
+			}
+		})
+
+		await h.engine.enqueueAndPlay([track("a"), track("b")], 0)
+		await flush()
+
+		h.fake.setSample({ currentTimeMs: 90_000, durationMs: 240_000, paused: false, ended: false })
+		online = false
+		h.events().onError(() => Promise.resolve(mediaFailureDTO("other")))
+		await flush()
+
+		expect(useAudioStore.getState().status).toBe("paused")
+
+		online = true
+
+		for (const listener of listeners) {
+			listener(true)
+		}
+
+		await flush()
+
+		expect(h.resolveSource).toHaveBeenCalledTimes(2)
+		expect(h.resolveSource.mock.calls[1]?.[0].uuid).toBe("a")
+		expect(h.fake.calls.seek).toEqual([90])
+		expect(useAudioStore.getState().status).toBe("playing")
+	})
+
+	it("leaves a track the user paused alone", async () => {
+		const listeners: ((online: boolean) => void)[] = []
+		const h = makeHarness({
+			subscribeOnline: listener => {
+				listeners.push(listener)
+			}
+		})
+
+		await h.engine.enqueueAndPlay([track("a")], 0)
+		await flush()
+		h.engine.pause()
+
+		for (const listener of listeners) {
+			listener(true)
+		}
+
+		await flush()
+
+		expect(h.fake.calls.play).toBe(1)
+		expect(useAudioStore.getState().status).toBe("paused")
+	})
+})
+
+describe("a pause the engine did not make", () => {
+	it("settles the transport and the Media Session to paused", async () => {
+		const session = mediaSessionSpy()
+		const h = makeHarness({ mediaSession: session.publisher })
+
+		await h.engine.enqueueAndPlay([track("a"), track("b")], 0)
+		await flush()
+
+		h.fake.setSample({ currentTimeMs: 10_000, durationMs: 240_000, paused: true, ended: false })
+		h.events().onPause()
+
+		expect(useAudioStore.getState().status).toBe("paused")
+		expect(session.states.at(-1)).toBe("paused")
+
+		h.engine.resume()
+		await flush()
+
+		expect(useAudioStore.getState().status).toBe("playing")
+		expect(useAudioStore.getState().currentIndex).toBe(0)
+	})
+
+	it("ignores the element's pause event while it still plays", async () => {
+		const h = makeHarness()
+
+		await h.engine.enqueueAndPlay([track("a")], 0)
+		await flush()
+
+		h.fake.setSample({ currentTimeMs: 10_000, durationMs: 240_000, paused: false, ended: false })
+		h.events().onPause()
+
+		expect(useAudioStore.getState().status).toBe("playing")
 	})
 })
 

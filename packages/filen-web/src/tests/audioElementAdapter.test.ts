@@ -10,7 +10,7 @@ vi.mock("@/features/preview/lib/previewStream", () => ({
 vi.mock("@/lib/media/playback/audioStream", () => ({ audioMediaSource: vi.fn(), openDecodedAudioStream: vi.fn() }))
 
 import { createDomAudioAdapter } from "@/features/audio/lib/bytes"
-import type { AudioElementEvents, TrackSource } from "@/features/audio/lib/engine"
+import { isPlayRefused, type AudioElementEvents, type TrackSource } from "@/features/audio/lib/engine"
 import { BlockSource, type ReadRange } from "@filen/shared/videos"
 import { classifyMediaError, MEDIA_FORMAT_UNSUPPORTED, MEDIA_PLAYBACK_FAILED, type MediaFailureKind } from "@/lib/media/mediaFailure"
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
@@ -24,9 +24,11 @@ function makeAdapter(): {
 	failures: (() => Promise<ErrorDTO | null>)[]
 	adapter: ReturnType<typeof createDomAudioAdapter>
 	setError: (code: number | null) => void
+	pauses: { count: number }
 } {
 	let error: MediaError | null = null
 	const failures: (() => Promise<ErrorDTO | null>)[] = []
+	const pauses = { count: 0 }
 
 	vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined)
 	vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(() =>
@@ -41,6 +43,9 @@ function makeAdapter(): {
 		onEnded: () => undefined,
 		onError: failure => {
 			failures.push(failure)
+		},
+		onPause: () => {
+			pauses.count++
 		}
 	}
 	const adapter = createDomAudioAdapter(events)
@@ -57,6 +62,7 @@ function makeAdapter(): {
 		element,
 		failures,
 		adapter,
+		pauses,
 		setError: code => {
 			error = code === null ? null : ({ code } as MediaError)
 		}
@@ -119,6 +125,44 @@ describe("DOM audio adapter — failures", () => {
 		)
 
 		expect(error?.kind).toBe(MEDIA_PLAYBACK_FAILED)
+	})
+
+	it("keeps a play() refused for want of user activation as NotAllowedError", async () => {
+		const { adapter } = makeAdapter()
+
+		vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(() =>
+			Promise.reject(new DOMException("needs a gesture", "NotAllowedError"))
+		)
+		adapter.load(readableBytes().source)
+
+		const error = await adapter.play().then(
+			() => null,
+			(rejection: unknown) => rejection
+		)
+
+		expect(isPlayRefused(error)).toBe(true)
+	})
+})
+
+describe("DOM audio adapter — pauses", () => {
+	it("reports a pause of the element, but not the one at its end or on a failure", () => {
+		const { element, adapter, pauses, setError } = makeAdapter()
+		let ended = false
+
+		Object.defineProperty(element, "ended", { configurable: true, get: () => ended })
+		adapter.load(readableBytes().source)
+
+		element.dispatchEvent(new Event("pause"))
+		expect(pauses.count).toBe(1)
+
+		ended = true
+		element.dispatchEvent(new Event("pause"))
+		expect(pauses.count).toBe(1)
+
+		ended = false
+		setError(MEDIA_ERR_SRC_NOT_SUPPORTED)
+		element.dispatchEvent(new Event("pause"))
+		expect(pauses.count).toBe(1)
 	})
 })
 
