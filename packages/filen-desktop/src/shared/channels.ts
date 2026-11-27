@@ -28,6 +28,7 @@ export const CHANNELS = {
 	setAudioPlaying: "app:set-audio-playing",
 	setMediaTransport: "app:set-media-transport",
 	setSmoothTransitions: "app:set-smooth-transitions",
+	setAssistantHidden: "app:set-assistant-hidden",
 	quit: "app:quit",
 	windowZoom: "window:zoom",
 	windowToggleFullScreen: "window:toggle-full-screen",

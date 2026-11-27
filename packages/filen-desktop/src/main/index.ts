@@ -1031,6 +1031,7 @@ let unloadHolds = 0
 let audioPlaying = false
 let mediaTransport: DesktopMediaTransport = "none"
 let smoothTransitions = false
+let assistantHidden = false
 // The page listens for menu actions; until then clicked ones wait here.
 let menuReady = false
 let pendingMenuActions: readonly DesktopMenuAction[] = []
@@ -1040,6 +1041,7 @@ function resetPageState(): void {
 	audioPlaying = false
 	menuReady = false
 	setSmoothTransitions(false)
+	setAssistantHidden(false)
 	setMediaTransport("none")
 	scheduleIdleDestroy()
 }
@@ -1053,6 +1055,16 @@ function setSmoothTransitions(active: boolean): void {
 	smoothTransitions = active
 	applyMenu()
 	applyTrayMenu()
+}
+
+// The View menu's Toggle Assistant is left out while the page reports the assistant hidden.
+function setAssistantHidden(hidden: boolean): void {
+	if (hidden === assistantHidden) {
+		return
+	}
+
+	assistantHidden = hidden
+	applyMenu()
 }
 
 // The Controls menu and the tray offer the transport only while the page has something queued.
@@ -1511,6 +1523,7 @@ function applyMenu(): void {
 						devTools: !app.isPackaged,
 						transport: mediaTransport,
 						smoothTransitions,
+						assistantHidden,
 						onAction: action => {
 							if (TRANSPORT_ACTIONS.has(action)) {
 								runTransportAction(action)
@@ -2029,6 +2042,14 @@ if (!instanceLock.held) {
 
 		if (isTrusted(event.senderFrame) && !(active instanceof type.errors) && mainWindow?.webContents === event.sender) {
 			setSmoothTransitions(active)
+		}
+	})
+
+	ipcMain.on(CHANNELS.setAssistantHidden, (event, payload: unknown) => {
+		const hidden = booleanSchema(payload)
+
+		if (isTrusted(event.senderFrame) && !(hidden instanceof type.errors) && mainWindow?.webContents === event.sender) {
+			setAssistantHidden(hidden)
 		}
 	})
 

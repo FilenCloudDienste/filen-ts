@@ -60,6 +60,7 @@ function template(options: Partial<MenuOptions> = {}): MenuItemConstructorOption
 		devTools: false,
 		transport: "none",
 		smoothTransitions: false,
+		assistantHidden: false,
 		onAction: vi.fn(),
 		onLock: null,
 		onClose: vi.fn(),
@@ -212,6 +213,13 @@ describe("menuTemplate", () => {
 			enabled: true
 		})
 		expect(find(template({ smoothTransitions: true }), "Smooth Transitions")).toMatchObject({ checked: true, enabled: false })
+	})
+})
+
+describe("Toggle Assistant", () => {
+	it("is in the View menu, and left out while the assistant is hidden", () => {
+		expect(find(template(), "Toggle Assistant")).toBeDefined()
+		expect(find(template({ assistantHidden: true }), "Toggle Assistant")).toBeUndefined()
 	})
 })
 

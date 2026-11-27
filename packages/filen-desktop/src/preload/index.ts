@@ -366,6 +366,9 @@ const bridge: DesktopBridge = {
 		setSmoothTransitions: active => {
 			ipcRenderer.send(CHANNELS.setSmoothTransitions, active)
 		},
+		setAssistantHidden: hidden => {
+			ipcRenderer.send(CHANNELS.setAssistantHidden, hidden)
+		},
 		setMenuShortcuts: combos => {
 			ipcRenderer.send(CHANNELS.setMenuShortcuts, combos)
 		},

@@ -3,6 +3,7 @@ import type { AudioPlaybackStatus } from "@/features/audio/store/audioQueue"
 import { useAudioStore } from "@/features/audio/store/useAudioStore"
 import { useSmoothTransitionsStore } from "@/features/audio/store/useSmoothTransitionsStore"
 import { smoothTransitionsActive } from "@/features/audio/lib/smoothTransitionsUi"
+import { assistantHiddenPreference } from "@/features/assistant/store/assistantHidden"
 import { desktopBridge } from "@/lib/desktop"
 
 // What the macOS Controls menu and the tray offer: nothing without a queue, Pause while audio plays or loads, Play
@@ -72,6 +73,36 @@ export function reportSmoothTransitions(): () => void {
 
 	const unsubscribe = useSmoothTransitionsStore.subscribe(state => {
 		report(activeOf(state))
+	})
+
+	return () => {
+		unsubscribe()
+		report(false)
+	}
+}
+
+// Reports whether the user hid the assistant, which drops the shell's Toggle Assistant item, on every change (only
+// changes cross the bridge), until the returned stop, which reports shown.
+export function reportAssistantHidden(): () => void {
+	const bridge = desktopBridge()
+
+	if (bridge === undefined) {
+		return () => undefined
+	}
+
+	let reported = false
+
+	const report = (next: boolean) => {
+		if (next !== reported) {
+			reported = next
+			bridge.app.setAssistantHidden(next)
+		}
+	}
+
+	report(assistantHiddenPreference.get())
+
+	const unsubscribe = assistantHiddenPreference.subscribe(() => {
+		report(assistantHiddenPreference.get())
 	})
 
 	return () => {

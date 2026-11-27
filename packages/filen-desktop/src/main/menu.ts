@@ -178,6 +178,8 @@ export interface MenuOptions {
 	transport: DesktopMediaTransport
 	// Whether tracks blend now: Smooth Transitions' check.
 	smoothTransitions: boolean
+	// The user hid the assistant: Toggle Assistant is left out.
+	assistantHidden: boolean
 	onAction: (action: DesktopMenuAction) => void
 	// Offered only while a PIN is set and the app is unlocked.
 	onLock: (() => void) | null
@@ -208,6 +210,7 @@ export function menuTemplate({
 	devTools,
 	transport,
 	smoothTransitions,
+	assistantHidden,
 	onAction,
 	onLock,
 	onClose,
@@ -281,7 +284,7 @@ export function menuTemplate({
 				action("app.openTransfers"),
 				{ type: "separator" },
 				action("app.toggleTheme"),
-				action("app.toggleAssistant"),
+				...(assistantHidden ? [] : [action("app.toggleAssistant")]),
 				{ type: "separator" },
 				// The page's document viewers take these keys first (a PDF zooms itself); the window zooms otherwise. Zoom
 				// In's own key is Cmd+Plus, which a US keyboard types with Shift: the hidden twin takes Cmd+=.

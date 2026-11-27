@@ -9,6 +9,7 @@ const desktop = vi.hoisted(() => {
 	const app = {
 		setMenuShortcuts: vi.fn(),
 		setSmoothTransitions: vi.fn(),
+		setAssistantHidden: vi.fn(),
 		onMenuAction: vi.fn((listener: (action: string) => void) => {
 			state.listener = listener
 
@@ -33,7 +34,8 @@ const { registerAllActions } = await import("@/lib/keymap/actions")
 const { useMenuAction } = await import("@/lib/keymap/desktopMenu")
 const { useSmoothTransitionsStore } = await import("@/features/audio/store/useSmoothTransitionsStore")
 const { toggleSmoothTransitionsByUser } = await import("@/features/audio/lib/smoothTransitionsUi")
-const { reportSmoothTransitions } = await import("@/features/desktop/lib/mediaTransport")
+const { reportSmoothTransitions, reportAssistantHidden } = await import("@/features/desktop/lib/mediaTransport")
+const { assistantHiddenPreference } = await import("@/features/assistant/store/assistantHidden")
 const { DEFAULT_SMOOTH_TRANSITIONS_PREFS } = await import("@/features/audio/lib/smoothTransitions.types")
 
 registerAllActions()
@@ -181,5 +183,24 @@ describe("desktop menu Smooth Transitions", () => {
 
 		expect(useSmoothTransitionsStore.getState().prefs.enabled).toBe(false)
 		expect(toast.info).not.toHaveBeenCalled()
+	})
+})
+
+describe("desktop menu Toggle Assistant", () => {
+	afterEach(() => {
+		assistantHiddenPreference.adopt(false)
+		vi.clearAllMocks()
+	})
+
+	it("reports whether the assistant is hidden, only on a change, and shown when stopped", () => {
+		const stop = reportAssistantHidden()
+
+		assistantHiddenPreference.adopt(true)
+		assistantHiddenPreference.adopt(true)
+		assistantHiddenPreference.adopt(false)
+		assistantHiddenPreference.adopt(true)
+		stop()
+
+		expect(desktop.bridge.app.setAssistantHidden.mock.calls).toEqual([[true], [false], [true], [false]])
 	})
 })
