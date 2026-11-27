@@ -27,11 +27,8 @@ import {
 import { type ActionDef } from "@/lib/actionDescriptor"
 import { type DriveKey } from "@/lib/i18n"
 
-// Per-action label + icon (+ destructive styling) facts shared by the single-item menu
-// (itemMenu.logic.ts) and the bulk-action bar (bulkActionBar.logic.ts) so the two builders can't
-// drift on a label or icon. Each surface still owns its own ordering, gating, id naming (restore vs
-// restoreSelected, deletePermanently vs delete) and run/dialogKind wiring — only these presentation
-// facts are common. Favorite is two entries; each toggle picks by the item's/selection's favorited
+// Per-action label + icon (+ destructive styling) facts shared by the drive builder (selectionActions.ts) and the public
+// links' (publicLinks/lib/browse.logic.ts), so no surface drifts on a label or icon. Favorite is two entries; each toggle picks by the item's/selection's favorited
 // state.
 export const ACTION_DEFS = {
 	// Open is two entries, picked by item type like favorite: a directory navigates, a file previews.

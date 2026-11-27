@@ -33,7 +33,7 @@ vi.mock("@/lib/keymap/kbd", async () => {
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { queryClient } from "@/queries/client"
 import { DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
-import { DriveBulkContextMenuContent } from "@/features/drive/components/bulkMenu"
+import { DriveContextMenuContent } from "@/features/drive/components/itemMenu"
 import { DownloadAsPasswordDialog } from "@/features/drive/components/downloadAsPasswordDialog"
 import { askPassword } from "@/features/drive/lib/downloadAsPassword"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -64,7 +64,7 @@ function renderItemMenu(item: DriveItem): void {
 				DropdownMenu,
 				{ defaultOpen: true },
 				createElement(DropdownMenuTrigger, null, "menu"),
-				createElement(DriveDropdownMenuContent, { item, variant: "drive", onItemAction: vi.fn() })
+				createElement(DriveDropdownMenuContent, { items: [item], variant: "drive", onDialogAction: vi.fn() })
 			)
 		)
 	)
@@ -160,7 +160,7 @@ describe("Download as in the bulk context menu", () => {
 				ContextMenu,
 				{ defaultOpen: true },
 				createElement(ContextMenuTrigger, null, "rows"),
-				createElement(DriveBulkContextMenuContent, { variant: "drive", selectedItems: items, onBulkAction: vi.fn() })
+				createElement(DriveContextMenuContent, { variant: "drive", items, onDialogAction: vi.fn() })
 			)
 		)
 		await openDownloadAs()

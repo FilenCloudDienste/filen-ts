@@ -82,7 +82,7 @@ function sharedProps(
 	item: DriveItem,
 	selected: boolean,
 	onCursorMove: (index: number) => void,
-	handlers: Partial<Pick<DriveRowProps, "onItemAction" | "onBulkAction">> = {}
+	handlers: Partial<Pick<DriveRowProps, "onDialogAction">> = {}
 ) {
 	return {
 		item,
@@ -96,7 +96,7 @@ function sharedProps(
 		onPointerSelect: () => undefined,
 		onCursorMove,
 		onOpen: () => undefined,
-		onItemAction: () => undefined,
+		onDialogAction: () => undefined,
 		destinationActions: () => ({
 			newDirectory: () => undefined,
 			newTextFile: () => undefined,
@@ -104,7 +104,6 @@ function sharedProps(
 			pickFiles: () => undefined,
 			pickDirectory: () => undefined
 		}),
-		onBulkAction: () => undefined,
 		registerRef: () => undefined,
 		...handlers
 	}
@@ -259,7 +258,7 @@ describe("Move submenu", () => {
 		const onItemAction = vi.fn()
 		const { container } = render(
 			createElement(DriveRow, {
-				...sharedProps(item, false, () => undefined, { onItemAction }),
+				...sharedProps(item, false, () => undefined, { onDialogAction: onItemAction }),
 				start: 0,
 				directorySize: undefined
 			})
@@ -270,7 +269,7 @@ describe("Move submenu", () => {
 		expect(move.getAttribute("aria-haspopup")).toBe("menu")
 
 		fireEvent.click(screen.getByRole("menuitem", { name: /^Choose destination…\s*drive\.move$/ }))
-		expect(onItemAction).toHaveBeenCalledExactlyOnceWith("move", item, undefined)
+		expect(onItemAction).toHaveBeenCalledExactlyOnceWith("move", [item], undefined)
 	})
 
 	it("the bulk menu offers the same submenu, its picker entry dispatching the bulk move", async () => {
@@ -278,7 +277,7 @@ describe("Move submenu", () => {
 		const onBulkAction = vi.fn()
 		const { container } = render(
 			createElement(DriveRow, {
-				...sharedProps(item, true, () => undefined, { onBulkAction }),
+				...sharedProps(item, true, () => undefined, { onDialogAction: onBulkAction }),
 				start: 0,
 				directorySize: undefined
 			})
@@ -289,7 +288,7 @@ describe("Move submenu", () => {
 		expect(move.getAttribute("aria-haspopup")).toBe("menu")
 
 		fireEvent.click(screen.getByRole("menuitem", { name: /^Choose destination…\s*drive\.move$/ }))
-		expect(onBulkAction).toHaveBeenCalledExactlyOnceWith("move")
+		expect(onBulkAction).toHaveBeenCalledExactlyOnceWith("move", [item, dirItem("other")], undefined)
 	})
 
 	// The ⋯ dropdown is mounted inside the row (unlike the context menu, a sibling of its trigger), so its

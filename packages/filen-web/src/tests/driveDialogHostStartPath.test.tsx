@@ -40,7 +40,7 @@ const item = mockDirItem()
 const path = ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"]
 
 function host() {
-	return renderHook(() => useDriveDialogHost({ variant: "drive", selectedItems: [item], hiddenNoticeApplies: false }))
+	return renderHook(() => useDriveDialogHost({ variant: "drive", hiddenNoticeApplies: false }))
 }
 
 describe("the drive dialog host's start path", () => {
@@ -48,7 +48,7 @@ describe("the drive dialog host's start path", () => {
 		const { result } = host()
 
 		act(() => {
-			result.current.handleItemAction("move", item, path)
+			result.current.handleDialogAction("move", [item], path)
 		})
 		render(<>{result.current.renderActiveDialog()}</>)
 
@@ -59,14 +59,14 @@ describe("the drive dialog host's start path", () => {
 		const { result } = host()
 
 		act(() => {
-			result.current.handleBulkDialogAction("copy", path)
+			result.current.handleDialogAction("copy", [item], path)
 		})
 		render(<>{result.current.renderActiveDialog()}</>)
 
 		expect(itemDialog).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "copy", startPath: path }))
 
 		act(() => {
-			result.current.handleItemAction("extractTo", item)
+			result.current.handleDialogAction("extractTo", [item])
 		})
 		render(<>{result.current.renderActiveDialog()}</>)
 

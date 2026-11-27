@@ -54,10 +54,10 @@ function renderMenu() {
 			{ defaultOpen: true },
 			createElement(DropdownMenuTrigger, null, "menu"),
 			createElement(DriveDropdownMenuContent, {
-				item: PHOTO,
+				items: [PHOTO],
 				variant: "drive",
 				hiddenActionIds: PHOTOS_HIDDEN_ACTION_IDS,
-				onItemAction
+				onDialogAction: onItemAction
 			})
 		)
 	)
@@ -119,7 +119,7 @@ describe("photos item menu", () => {
 		await openCopySubmenu()
 		fireEvent.click(screen.getByRole("menuitem", { name: "Choose destination…" }))
 
-		expect(onItemAction).toHaveBeenCalledExactlyOnceWith("copy", PHOTO, undefined)
+		expect(onItemAction).toHaveBeenCalledExactlyOnceWith("copy", [PHOTO], undefined)
 	})
 
 	it("puts the photo on the drive clipboard from the submenu's Copy entry", async () => {

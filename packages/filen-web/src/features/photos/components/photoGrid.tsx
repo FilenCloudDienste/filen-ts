@@ -7,13 +7,13 @@ import { useVirtualizer, type Virtualizer } from "@tanstack/react-virtual"
 import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { useElementSize } from "@/lib/useElementSize"
-import { aggregateDriveSelectionFlags, selectableForSelectAll } from "@/features/drive/lib/selectionFlags"
+import { selectableForSelectAll } from "@/features/drive/lib/selectionFlags"
+import { type DriveActionId } from "@/features/drive/lib/selectionActions"
 import { reconcileSelectedItems } from "@/features/drive/components/directoryListing.logic"
-import { isBulkActionOfflineDisabled, type BulkActionDescriptor } from "@/features/drive/components/bulkActionBar.logic"
 import { listboxKeyTargetIsInteractive, openOptionContextMenu } from "@/features/drive/lib/listbox"
 import { startDownloads } from "@/features/drive/lib/download"
 import { runPhotosBulkFavorite } from "@/features/photos/lib/bulkFavorite"
-import { photoItemOffers, photosBulkActions } from "@/features/photos/lib/itemActions"
+import { photosOffer } from "@/features/photos/lib/itemActions"
 import { canCopyToClipboard, shouldHandleClipboardShortcut } from "@/features/drive/lib/clipboard.logic"
 import { clipboardShortcutContext, copyToClipboard } from "@/features/drive/lib/clipboard"
 import { KEEP_SELECTION_PROPS } from "@/features/drive/lib/clickAway.logic"
@@ -267,13 +267,9 @@ export function PhotoGrid({ rootUuids, listing }: PhotoGridProps) {
 		[selectedItems]
 	)
 
-	// Whether the selection bar offers `id` for the selection, enabled: the keys below act where and as the bar does.
-	function selectionOffers(id: BulkActionDescriptor["id"]): boolean {
-		return (
-			selectedItems.length > 0 &&
-			!isBulkActionOfflineDisabled(id, isOnline) &&
-			photosBulkActions(aggregateDriveSelectionFlags(selectedItems)).some(descriptor => descriptor.id === id)
-		)
+	// Whether the selection's menus offer `id`, enabled: the keys below act where and as the bar does.
+	function selectionOffers(id: DriveActionId): boolean {
+		return photosOffer(selectedItems, id, isOnline)
 	}
 
 	// Drive's mod+s: preventDefault whatever happens, or the browser saves the page. Synchronous, so the save picker
@@ -321,7 +317,7 @@ export function PhotoGrid({ rootUuids, listing }: PhotoGridProps) {
 		keyboardEvent => {
 			const item = items[safeActiveIndex]
 
-			if (item !== undefined && photoItemOffers(item, "rename", isOnline)) {
+			if (item !== undefined && photosOffer([item], "rename", isOnline)) {
 				keyboardEvent.preventDefault()
 				handleItemAction("rename", item)
 			}
@@ -335,7 +331,7 @@ export function PhotoGrid({ rootUuids, listing }: PhotoGridProps) {
 		keyboardEvent => {
 			const item = items[safeActiveIndex]
 
-			if (item !== undefined && photoItemOffers(item, "info", isOnline)) {
+			if (item !== undefined && photosOffer([item], "info", isOnline)) {
 				keyboardEvent.preventDefault()
 				handleItemAction("info", item)
 			}

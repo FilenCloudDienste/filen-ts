@@ -5,35 +5,22 @@ import { driveItemName } from "@filen/shared"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { type ParentNaming } from "@/features/drive/lib/archiveTargets"
-import { restoreItems } from "@/features/drive/lib/actions"
-import { toggleItemFavorite } from "@/features/drive/lib/favorite"
-import { defaultRevealDeps, runOpenContainingDirectory } from "@/features/drive/lib/reveal"
-import { copyItemLink } from "@/features/drive/lib/copyLink"
-import { DRIVE_RESTORE, driveActivity } from "@/features/drive/lib/activity"
-import { runBulkActivity } from "@/lib/activity/activity"
-import { startDownloads } from "@/features/drive/lib/download"
-import { copyText } from "@/lib/copyText"
-import { useIsOnline } from "@/lib/useIsOnline"
+import { useDriveMenuActions } from "@/features/drive/hooks/useDriveMenuActions"
 import {
-	applyOfflineGate,
 	canWriteIntoItem,
-	driveItemActions,
-	itemMenuShortcut,
 	separatorBefore,
-	type ItemActionDescriptor,
-	type ItemActionDialogKind,
-	type ItemActionId,
-	type ItemMenuShortcuts
-} from "@/features/drive/components/itemMenu.logic"
-import { driveBulkActions, driveDeleteKeyTarget } from "@/features/drive/components/bulkActionBar.logic"
-import { aggregateDriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
+	type DriveActionDescriptor,
+	type DriveActionId,
+	type DriveActionShortcuts
+} from "@/features/drive/lib/selectionActions"
+import { runDriveAction, type DriveDialogAction } from "@/features/drive/lib/selectionDispatch"
 import {
 	CONTEXT_TREE_MENU_FAMILY,
 	DROPDOWN_TREE_MENU_FAMILY,
 	type DirectoryTreeMenuFamily
 } from "@/features/drive/components/directoryTreeSubmenu"
 import { TransferSubmenu } from "@/features/drive/components/transferSubmenu"
-import { CompressSubmenu, ExtractSubmenu } from "@/features/drive/components/archiveSubmenus"
+import { BulkExtractSubmenu, CompressSubmenu, ExtractSubmenu } from "@/features/drive/components/archiveSubmenus"
 import { DownloadAsSubmenu } from "@/features/drive/components/downloadAsSubmenu"
 import { AddToPlaylistSubmenu } from "@/features/drive/components/addToPlaylistSubmenu"
 import { DirectoryDestinationEntries, type DestinationActions } from "@/features/drive/components/destinationMenu"
@@ -41,35 +28,32 @@ import { ContextMenuContent } from "@/components/ui/context-menu"
 import { DropdownMenuContent } from "@/components/ui/dropdown-menu"
 import { MenuKbd } from "@/lib/keymap/kbdHints"
 
-export interface ItemMenuContentProps {
-	item: DriveItem
+export interface DriveActionMenuProps {
+	// One item for its own menu, the selection for a right-click inside it or the selection bar.
+	items: DriveItem[]
 	variant: DriveVariant
-	// Fires for every "dialog"-run descriptor (rename/move/color/versions/info/link/trash/delete) —
-	// the listing-level dialog host (directoryListing.tsx) owns turning this into an open dialog.
-	// "direct"-run descriptors (favorite/restore) never call this — they resolve fully in place below.
-	onItemAction: (kind: ItemActionDialogKind, item: DriveItem, startPath?: readonly string[]) => void
+	// Every "dialog" entry, on these items — the surface's dialog host turns it into an open dialog.
+	onDialogAction: DriveDialogAction
 	// For a surface whose items live outside the drive listings: the preview overlay (its own per-slot
 	// item override map) and photos (its own listing cache) need the updated item the instant a
-	// "direct" descriptor resolves.
+	// favorite or restore of one item resolves.
 	onFavoriteToggled?: ((item: DriveItem) => void) | undefined
 	onRestored?: ((item: DriveItem) => void) | undefined
-	// Descriptor ids to omit from the rendered list — the preview drops "download" (its header has its
-	// own download button), photos drops "move" (photos/lib/itemActions.ts).
-	hiddenActionIds?: ReadonlySet<ItemActionId> | undefined
+	// Ids to omit — the preview drops "download" (its header has its own button), photos drops "move".
+	hiddenActionIds?: ReadonlySet<DriveActionId> | undefined
 	// The Compress presets' directory names where a surface knows its own (photos).
 	compressParentNaming?: ParentNaming | undefined
-	// True for a search hit whose parent is not the directory on screen — the only case
-	// "Open containing directory" is offered for. Omitted by every non-listing caller.
+	// One item only: a search hit whose parent is not the directory on screen, the only case "Open containing
+	// directory" is offered for.
 	searchHit?: boolean | undefined
-	// The surface's own open (a row's double-click, a tree node's navigation). Present, it puts Open at
-	// the top for any item that opens; the preview overlay omits it.
+	// One item only: the surface's own open (a row's double-click, a tree node's navigation). Present, it puts Open at the
+	// top for an item that opens; the preview overlay omits it.
 	onOpen?: (() => void) | undefined
-	// The surface's create/upload host. Present, a directory the variant can write into gets a New
-	// submenu and Paste right under Open; the preview overlay omits it.
+	// One item only: the surface's create/upload host. Present, a directory the variant can write into gets a New submenu
+	// and Paste right under Open.
 	destination?: ItemDestination | undefined
-	// The keys the surface's keymap runs each entry with, shown at the entries' ends; none where the surface has no keys
-	// of its own for its items (the sidebar tree).
-	shortcuts?: ItemMenuShortcuts | undefined
+	// The keys the surface's keymap runs each entry with; none where the surface has no keys for its items (the tree).
+	shortcuts?: DriveActionShortcuts | undefined
 }
 
 export interface ItemDestination {
@@ -81,90 +65,138 @@ export interface ItemDestination {
 	pasteShortcut: boolean
 }
 
-// Shared per-item action list, rendered by BOTH the right-click context menu and the ⋯ dropdown (see
-// DriveContextMenuContent/DriveDropdownMenuContent below) — one descriptor list (driveItemActions),
-// one mapping from descriptor to menu row. Base UI's ContextMenu and DropdownMenu are separate Root
-// families with their own Item/Separator primitives (not interchangeable across triggers even though
-// their props are structurally identical), so the one piece each caller supplies is which family to
-// render rows with. Move and Copy (transferSubmenu.tsx), Compress and Extract (archiveSubmenus.tsx) are
-// submenus that also need the family's submenu parts.
-function ItemMenuEntries({
-	item,
+// One mapping from descriptor to menu row, rendered by the right-click context menu, the ⋯ dropdown, the preview
+// header and the selection bar's overflow alike. Base UI's ContextMenu and DropdownMenu are separate Root families with
+// their own parts, so each caller supplies the family to render with. Move and Copy (transferSubmenu.tsx), Compress and
+// Extract (archiveSubmenus.tsx), Download as and Add to playlist are submenus.
+export function DriveActionMenuEntries({
+	descriptors,
+	family,
+	items,
 	variant,
-	onItemAction,
+	onDialogAction,
 	onFavoriteToggled,
 	onRestored,
-	hiddenActionIds,
 	compressParentNaming,
-	searchHit,
 	onOpen,
 	destination,
-	shortcuts,
-	family
-}: ItemMenuContentProps & { family: DirectoryTreeMenuFamily }) {
+	shortcuts
+}: DriveActionMenuProps & { descriptors: readonly DriveActionDescriptor[]; family: DirectoryTreeMenuFamily }) {
 	const { t } = useTranslation(["drive", "common"])
 	const navigate = useNavigate()
-	const isOnline = useIsOnline()
-	const descriptors = applyOfflineGate(
-		driveItemActions(item, variant, { searchHit: searchHit === true, open: onOpen !== undefined }),
-		isOnline
-	).filter(descriptor => !hiddenActionIds?.has(descriptor.id))
 	const { Item, Separator } = family
-	const writableDestination = destination !== undefined && canWriteIntoItem(item, variant) ? destination : undefined
-	// What the surface's Delete runs on this item, as on a selection of it (only worked out where Delete has a hint).
-	const deleteTarget =
-		shortcuts?.deleteKey === undefined ? null : driveDeleteKeyTarget(driveBulkActions(variant, aggregateDriveSelectionFlags([item])))
+	const [only] = items
+	const single = items.length === 1 ? only : undefined
+	const writableDestination =
+		single !== undefined && destination !== undefined && canWriteIntoItem(single, variant) ? destination : undefined
 
-	async function runDirect(descriptor: Extract<ItemActionDescriptor, { run: "direct" }>): Promise<void> {
-		// Checked FIRST, before any `await` below — startDownloads' FSA save picker needs this
-		// click's own live user gesture (see download.ts), so nothing here may yield to the event loop
-		// ahead of it. Download is always enabled (downloadDescriptor), directories included.
-		if (descriptor.id === "download") {
-			void startDownloads([item])
-			return
-		}
-
-		// Before any await too: the clipboard write needs the click's activation (Safari ends it at the first one).
-		if (descriptor.id === "copyId") {
-			void copyText(item.data.uuid, t("driveCopyIdToast"))
-			return
-		}
-
-		if (descriptor.id === "favorite") {
-			await toggleItemFavorite(item, variant, onFavoriteToggled)
-
-			return
-		}
-
-		if (descriptor.id === "openContainingDirectory") {
-			await runOpenContainingDirectory(defaultRevealDeps, item, target => {
+	function run(descriptor: DriveActionDescriptor): void {
+		runDriveAction(descriptor, items, {
+			variant,
+			onDialogAction,
+			onOpen,
+			onFavoriteToggled,
+			onRestored,
+			navigate: target => {
 				void navigate(target)
-			})
-
-			return
-		}
-
-		// Restore is the remaining direct id. A restored item always vanishes from the trash listing it
-		// was selected in (see actions.ts), so a successful outcome also drops it from selection —
-		// mirrors the dialog host's identical cleanup after a trash/delete confirm.
-		await runBulkActivity(
-			driveActivity([item], DRIVE_RESTORE, restoreItems, {
-				onDone: outcome => {
-					if (outcome.succeeded.length > 0) {
-						onRestored?.(item)
-					}
-				}
-			})
-		)
+			}
+		})
 	}
 
-	// Copy-link's own dispatch — intercepted here, BEFORE the run==="dialog" branch below, since its
-	// real behavior (copy straight to the clipboard when a link already exists) depends on data this
-	// synchronous click handler doesn't have yet (copyItemLink, shared with drive.copyLink).
-	async function runCopyLink(): Promise<void> {
-		await copyItemLink(item, t("driveLinkUrlCopiedToast"), () => {
-			onItemAction("link", item)
-		})
+	function entry(descriptor: DriveActionDescriptor) {
+		const disabled = descriptor.enabled === false
+
+		switch (descriptor.id) {
+			// They open offline too, for their clipboard entries; each gates its own destinations.
+			case "move":
+			case "copy":
+				return (
+					<TransferSubmenu
+						mode={descriptor.id}
+						family={family}
+						items={items}
+						onChooseDestination={(mode, startPath) => {
+							onDialogAction(mode, items, startPath)
+						}}
+						clipboardShortcut={descriptor.id === "copy" ? shortcuts?.copyToClipboard : undefined}
+						destinationShortcut={descriptor.kbdAction}
+					/>
+				)
+			case "compress":
+				return (
+					<CompressSubmenu
+						family={family}
+						disabled={disabled}
+						items={items}
+						variant={variant}
+						parentNaming={compressParentNaming}
+						onMoreOptions={() => {
+							onDialogAction("compress", items)
+						}}
+					/>
+				)
+			case "downloadAs":
+				return (
+					<DownloadAsSubmenu
+						family={family}
+						disabled={disabled}
+						items={items}
+					/>
+				)
+			case "addToPlaylist":
+				return (
+					<AddToPlaylistSubmenu
+						family={family}
+						disabled={disabled}
+						items={items}
+						onNewPlaylist={() => {
+							onDialogAction("addToNewPlaylist", items)
+						}}
+					/>
+				)
+			case "extract":
+				return single !== undefined ? (
+					<ExtractSubmenu
+						family={family}
+						disabled={disabled}
+						item={single}
+						variant={variant}
+						onChooseDestination={startPath => {
+							onDialogAction("extractTo", items, startPath)
+						}}
+						onOptions={() => {
+							onDialogAction("extract", items)
+						}}
+						// An archive opens into its browser, so browsing is the surface's own Open.
+						onBrowse={onOpen}
+					/>
+				) : (
+					<BulkExtractSubmenu
+						family={family}
+						disabled={disabled}
+						items={items}
+						variant={variant}
+						onChooseDestination={startPath => {
+							onDialogAction("extractTo", items, startPath)
+						}}
+					/>
+				)
+			default:
+				return (
+					<Item
+						variant={descriptor.destructive ? "destructive" : "default"}
+						disabled={disabled}
+						title={disabled && descriptor.disabledReasonKey !== undefined ? t(descriptor.disabledReasonKey) : undefined}
+						onClick={() => {
+							run(descriptor)
+						}}
+					>
+						{createElement(descriptor.icon, { "aria-hidden": true })}
+						{t(descriptor.labelKey)}
+						<MenuKbd action={descriptor.kbdAction} />
+					</Item>
+				)
+		}
 	}
 
 	return (
@@ -172,96 +204,17 @@ function ItemMenuEntries({
 			{descriptors.map((descriptor, index) => (
 				<Fragment key={descriptor.id}>
 					{separatorBefore(descriptors, index) ? <Separator /> : null}
-					{/* The Move and Copy submenus open offline too, for their clipboard entries; each gates its own
-					    destinations, so their descriptors' offline flag is not applied to the trigger. */}
-					{descriptor.id === "move" || descriptor.id === "copy" ? (
-						<TransferSubmenu
-							mode={descriptor.id}
-							family={family}
-							items={[item]}
-							onChooseDestination={(mode, startPath) => {
-								onItemAction(mode, item, startPath)
-							}}
-							clipboardShortcut={descriptor.id === "copy" ? shortcuts?.copyToClipboard : undefined}
-							destinationShortcut={itemMenuShortcut(shortcuts, descriptor.id, deleteTarget)}
-						/>
-					) : descriptor.id === "compress" ? (
-						<CompressSubmenu
-							family={family}
-							disabled={descriptor.enabled === false}
-							items={[item]}
-							variant={variant}
-							parentNaming={compressParentNaming}
-							onMoreOptions={() => {
-								onItemAction("compress", item)
-							}}
-						/>
-					) : descriptor.id === "downloadAs" ? (
-						<DownloadAsSubmenu
-							family={family}
-							disabled={descriptor.enabled === false}
-							items={[item]}
-						/>
-					) : descriptor.id === "addToPlaylist" ? (
-						<AddToPlaylistSubmenu
-							family={family}
-							disabled={descriptor.enabled === false}
-							items={[item]}
-							onNewPlaylist={() => {
-								onItemAction("addToNewPlaylist", item)
-							}}
-						/>
-					) : descriptor.id === "extract" ? (
-						<ExtractSubmenu
-							family={family}
-							disabled={descriptor.enabled === false}
-							item={item}
-							variant={variant}
-							onChooseDestination={startPath => {
-								onItemAction("extractTo", item, startPath)
-							}}
-							onOptions={() => {
-								onItemAction("extract", item)
-							}}
-							// An archive opens into its browser, so browsing is the surface's own Open.
-							onBrowse={onOpen}
-						/>
-					) : (
-						<Item
-							variant={descriptor.destructive ? "destructive" : "default"}
-							disabled={descriptor.enabled === false}
-							title={descriptor.enabled === false && !isOnline ? t("common:offlineActionDisabled") : undefined}
-							onClick={() => {
-								// Synchronous off the click, like the double-click it mirrors: audio starts
-								// playback from here.
-								if (descriptor.id === "open") {
-									onOpen?.()
-									return
-								}
-
-								if (descriptor.id === "copyLink") {
-									void runCopyLink()
-									return
-								}
-
-								if (descriptor.run === "direct") {
-									void runDirect(descriptor)
-									return
-								}
-
-								onItemAction(descriptor.dialogKind, item)
-							}}
-						>
-							{createElement(descriptor.icon, { "aria-hidden": true })}
-							{t(descriptor.labelKey)}
-							<MenuKbd action={itemMenuShortcut(shortcuts, descriptor.id, deleteTarget)} />
-						</Item>
-					)}
-					{descriptor.id === "open" && writableDestination !== undefined ? (
+					{entry(descriptor)}
+					{descriptor.id === "open" && single !== undefined && writableDestination !== undefined ? (
 						<DirectoryDestinationEntries
 							family={family}
-							directory={{ variant, uuid: item.data.uuid, ancestry: writableDestination.ancestry, name: driveItemName(item) }}
-							actions={writableDestination.actionsFor(item.data.uuid)}
+							directory={{
+								variant,
+								uuid: single.data.uuid,
+								ancestry: writableDestination.ancestry,
+								name: driveItemName(single)
+							}}
+							actions={writableDestination.actionsFor(single.data.uuid)}
 							pasteShortcut={writableDestination.pasteShortcut}
 						/>
 					) : null}
@@ -271,70 +224,33 @@ function ItemMenuEntries({
 	)
 }
 
-// Right-click surface — rendered inside a per-row/tile <ContextMenu> (see driveRow.tsx/driveTile.tsx)
-// and the sidebar tree's one menu (directoryTreeMenu.tsx), which gives a node exactly its row's menu.
-export function DriveContextMenuContent({
-	item,
-	variant,
-	onItemAction,
-	onFavoriteToggled,
-	onRestored,
-	hiddenActionIds,
-	compressParentNaming,
-	searchHit,
-	onOpen,
-	destination,
-	shortcuts
-}: ItemMenuContentProps) {
+// Right-click surface — a row's or tile's <ContextMenu> (driveRow.tsx/driveTile.tsx), inside a selection the whole
+// selection's, and the sidebar tree's one menu (directoryTreeMenu.tsx). Content mounts only while open (Base UI portal),
+// so the hooks cost nothing per row.
+export function DriveContextMenuContent(props: DriveActionMenuProps) {
+	const descriptors = useDriveMenuActions(props)
+
 	return (
 		<ContextMenuContent>
-			<ItemMenuEntries
-				item={item}
-				variant={variant}
-				onItemAction={onItemAction}
-				onFavoriteToggled={onFavoriteToggled}
-				onRestored={onRestored}
-				hiddenActionIds={hiddenActionIds}
-				compressParentNaming={compressParentNaming}
-				searchHit={searchHit}
-				onOpen={onOpen}
-				destination={destination}
-				shortcuts={shortcuts}
+			<DriveActionMenuEntries
+				{...props}
+				descriptors={descriptors}
 				family={CONTEXT_TREE_MENU_FAMILY}
 			/>
 		</ContextMenuContent>
 	)
 }
 
-// ⋯ trigger surface — rendered inside a per-row/tile <DropdownMenu> (see driveRow.tsx/driveTile.tsx/
-// photoTile.tsx), and by the preview header's own item menu (previewOverlay.tsx).
-export function DriveDropdownMenuContent({
-	item,
-	variant,
-	onItemAction,
-	onFavoriteToggled,
-	onRestored,
-	hiddenActionIds,
-	compressParentNaming,
-	searchHit,
-	onOpen,
-	destination,
-	shortcuts
-}: ItemMenuContentProps) {
+// ⋯ trigger surface — a row's or tile's <DropdownMenu> (driveRow.tsx/driveTile.tsx/photoTile.tsx), and the preview
+// header's item menu (previewOverlay.tsx).
+export function DriveDropdownMenuContent(props: DriveActionMenuProps) {
+	const descriptors = useDriveMenuActions(props)
+
 	return (
 		<DropdownMenuContent align="end">
-			<ItemMenuEntries
-				item={item}
-				variant={variant}
-				onItemAction={onItemAction}
-				onFavoriteToggled={onFavoriteToggled}
-				onRestored={onRestored}
-				hiddenActionIds={hiddenActionIds}
-				compressParentNaming={compressParentNaming}
-				searchHit={searchHit}
-				onOpen={onOpen}
-				destination={destination}
-				shortcuts={shortcuts}
+			<DriveActionMenuEntries
+				{...props}
+				descriptors={descriptors}
 				family={DROPDOWN_TREE_MENU_FAMILY}
 			/>
 		</DropdownMenuContent>

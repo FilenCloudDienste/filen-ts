@@ -436,22 +436,37 @@ describe("BulkExtractSubmenu", () => {
 	})
 })
 
-describe("BulkActionBar — archive menu buttons", () => {
-	it("opens the Compress and Extract entries from the selection bar", async () => {
-		const items = [archive("a.zip"), archive("b.zip")]
-
+describe("BulkActionBar — archive entries in the overflow menu", () => {
+	function renderBar(items: DriveItem[]) {
 		render(
 			createElement(
 				QueryClientProvider,
 				{ client: queryClient },
-				createElement(BulkActionBar, { variant: "drive", selectedItems: items, onDialogAction: vi.fn() })
+				createElement(BulkActionBar, {
+					variant: "drive",
+					selectedItems: items,
+					onDialogAction: vi.fn(),
+					onOpen: vi.fn(),
+					searchHit: () => false,
+					destination: () => ({ actionsFor: vi.fn(), ancestry: [], pasteShortcut: false })
+				})
 			)
 		)
+	}
 
+	async function openOverflow(): Promise<void> {
 		await act(async () => {
-			fireEvent.click(screen.getByRole("button", { name: "Compress" }))
+			fireEvent.click(screen.getByRole("button", { name: "More actions" }))
 			await Promise.resolve()
 		})
+	}
+
+	it("opens the Compress and Extract submenus from the bar's More actions", async () => {
+		const items = [archive("a.zip"), archive("b.zip")]
+
+		renderBar(items)
+		await openOverflow()
+		await openSubmenu("Compress")
 
 		expect(entry("Tarball (.tar.gz)")).toBeDefined()
 
@@ -460,29 +475,18 @@ describe("BulkActionBar — archive menu buttons", () => {
 		})
 		expect(compressWithPreset).toHaveBeenCalledExactlyOnceWith(items, "drive", "tar.gz", undefined)
 
-		await act(async () => {
-			fireEvent.click(screen.getByRole("button", { name: "Extract" }))
-			await Promise.resolve()
-		})
+		await openOverflow()
+		await openSubmenu("Extract")
 
 		expect(entry("Extract here (each into its own directory)")).toBeDefined()
 		expect(workerCalls()).toBe(0)
 	})
 
-	it("offers no Extract button unless every item is an archive", () => {
-		render(
-			createElement(
-				QueryClientProvider,
-				{ client: queryClient },
-				createElement(BulkActionBar, {
-					variant: "drive",
-					selectedItems: [archive("a.zip"), archive("b.pdf")],
-					onDialogAction: vi.fn()
-				})
-			)
-		)
+	it("offers no Extract unless every item is an archive", async () => {
+		renderBar([archive("a.zip"), archive("b.pdf")])
+		await openOverflow()
 
-		expect(screen.getByRole("button", { name: "Compress" })).toBeDefined()
-		expect(screen.queryByRole("button", { name: "Extract" })).toBeNull()
+		expect(entry("Compress")).toBeDefined()
+		expect(screen.queryByRole("menuitem", { name: "Extract" })).toBeNull()
 	})
 })

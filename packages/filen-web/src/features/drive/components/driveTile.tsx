@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next"
 import { CheckIcon, PlayIcon, StarIcon } from "lucide-react"
 import { ItemThumbnail } from "@/features/drive/components/itemThumbnail"
 import { DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
-import { DRIVE_ITEM_SHORTCUTS } from "@/features/drive/components/itemMenu.logic"
+import { DRIVE_ACTION_SHORTCUTS } from "@/features/drive/lib/selectionActions"
 import { DriveCellContextMenuContent } from "@/features/drive/components/bulkMenu"
 import { showVideoBadge } from "@/features/drive/components/driveTile.logic"
 import { useFileKindVerdict } from "@/features/drive/hooks/useFileKindVerdict"
@@ -29,9 +29,8 @@ export function DriveTile({
 	onPointerSelect,
 	onCursorMove,
 	onOpen,
-	onItemAction,
+	onDialogAction,
 	destinationActions,
-	onBulkAction,
 	registerRef
 }: DriveItemCellProps) {
 	const { t } = useTranslation("drive")
@@ -156,13 +155,13 @@ export function DriveTile({
 								/>
 								{/* The ⋯ dropdown stays single-item — see DriveRow's identical note. */}
 								<DriveDropdownMenuContent
-									item={item}
+									items={[item]}
 									variant={variant}
-									onItemAction={onItemAction}
+									onDialogAction={onDialogAction}
 									searchHit={searchHit}
 									onOpen={open}
 									destination={destination}
-									shortcuts={DRIVE_ITEM_SHORTCUTS}
+									shortcuts={DRIVE_ACTION_SHORTCUTS}
 								/>
 							</DropdownMenu>
 						</div>
@@ -188,8 +187,7 @@ export function DriveTile({
 				item={item}
 				variant={variant}
 				selectedItems={selectedItems}
-				onBulkAction={onBulkAction}
-				onItemAction={onItemAction}
+				onDialogAction={onDialogAction}
 				searchHit={searchHit}
 				onOpen={open}
 				destination={destination}

@@ -6,8 +6,7 @@ import { sharedIdentityLabel } from "@/features/drive/lib/format"
 import { splatToUuids } from "@/features/drive/lib/navigate"
 import { canDragVariant } from "@/features/drive/lib/dnd.logic"
 import { buildDragSourceProps } from "@/features/drive/lib/dnd"
-import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
-import { type BulkDialogActionKind } from "@/features/drive/components/bulkActionBar.logic"
+import { type DriveDialogAction } from "@/features/drive/lib/selectionDispatch"
 import { type ItemDestination } from "@/features/drive/components/itemMenu"
 import { type DestinationActions } from "@/features/drive/components/destinationMenu"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
@@ -42,10 +41,10 @@ export interface DriveItemCellProps {
 	// half of a right-click or a touch long-press, neither of which reaches onPointerSelect.
 	onCursorMove: (index: number) => void
 	onOpen: (index: number) => void
-	onItemAction: (kind: ItemActionDialogKind, item: DriveItem, startPath?: readonly string[]) => void
+	// Every dialog entry of the cell's menus, on the items it acts on (the cell, or the selection it is in).
+	onDialogAction: DriveDialogAction
 	// The listing's create/upload host (useDirectoryDestination), for a directory cell's New submenu.
 	destinationActions: (uuid: string | null) => DestinationActions
-	onBulkAction: (kind: BulkDialogActionKind, startPath?: readonly string[]) => void
 	registerRef: (index: number, el: HTMLDivElement | null) => void
 }
 

@@ -30,7 +30,11 @@ import {
 	unsavedPromptOpen
 } from "@/features/preview/components/previewOverlay.logic"
 import { PHOTOS_HIDDEN_ACTION_IDS } from "@/features/photos/lib/itemActions"
-import { driveItemActions, type ItemActionId } from "@/features/drive/components/itemMenu.logic"
+import { driveSelectionActions, type DriveActionDescriptor, type DriveActionId } from "@/features/drive/lib/selectionActions"
+
+function driveItemActions(item: DriveItem, variant: DriveVariant): DriveActionDescriptor[] {
+	return driveSelectionActions([item], variant, { isOnline: true })
+}
 import type { DriveVariant } from "@/features/drive/lib/preferences"
 import type { ImageEditState } from "@/features/preview/imageEdit/editSession"
 
@@ -116,7 +120,7 @@ function fileItem(overrides: Partial<File> = {}): DriveItem {
 }
 
 // The header menu is the row/tile dropdown's driveItemActions minus previewMenuHiddenActionIds.
-function menuIds(item: DriveItem, variant: DriveVariant, extraHidden?: ReadonlySet<ItemActionId>): string[] {
+function menuIds(item: DriveItem, variant: DriveVariant, extraHidden?: ReadonlySet<DriveActionId>): string[] {
 	const hidden = previewMenuHiddenActionIds(extraHidden)
 
 	return driveItemActions(item, variant)
@@ -189,6 +193,7 @@ describe("previewMenuHiddenActionIds (preview header item-menu derivation)", () 
 			"share",
 			"publicLink",
 			"copyLink",
+			"disableLink",
 			"trash"
 		])
 		expect(menuIds(fileItem(), "sharedIn")).toEqual(["info", "copyId", "copy", "compress"])

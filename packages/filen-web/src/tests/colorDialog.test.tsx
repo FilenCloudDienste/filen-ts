@@ -21,9 +21,9 @@ import { ColorDialog } from "@/features/drive/components/colorDialog"
 import { DIR_COLOR_SWATCHES, withRecentDirColor } from "@/features/drive/lib/dirColor"
 import { testUuid } from "@/tests/support/uuid"
 
-function directory(color: string): Extract<DriveItem, { type: "directory" }> {
+function directory(color: string, uuid = testUuid("dir")): Extract<DriveItem, { type: "directory" }> {
 	const raw: Dir = {
-		uuid: testUuid("dir"),
+		uuid,
 		parent: testUuid("parent"),
 		color,
 		timestamp: 0n,
@@ -42,7 +42,7 @@ function directory(color: string): Extract<DriveItem, { type: "directory" }> {
 const onClose = vi.fn()
 
 function renderDialog(color = "default"): void {
-	render(createElement(ColorDialog, { directory: directory(color), onClose }))
+	render(createElement(ColorDialog, { directories: [directory(color)], onClose }))
 }
 
 beforeEach(() => {
@@ -67,6 +67,24 @@ describe("withRecentDirColor", () => {
 })
 
 describe("ColorDialog", () => {
+	it("colors every directory of a selection alike, checking a color only when they share it", async () => {
+		const directories = [directory("blue", testUuid("a")), directory("red", testUuid("b"))]
+
+		render(createElement(ColorDialog, { directories, onClose }))
+
+		expect(screen.getAllByRole("radio").filter(radio => radio.getAttribute("aria-checked") === "true")).toHaveLength(0)
+
+		fireEvent.click(screen.getByRole("radio", { name: "Green" }))
+
+		await waitFor(() => {
+			expect(onClose).toHaveBeenCalled()
+		})
+		expect(setColor.mock.calls.map(call => [call[0], call[1]])).toEqual([
+			[directories[0], "green"],
+			[directories[1], "green"]
+		])
+	})
+
 	it("renders every swatch as a radio and marks the current one", () => {
 		renderDialog("blue")
 

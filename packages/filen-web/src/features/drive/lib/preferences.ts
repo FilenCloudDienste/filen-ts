@@ -61,7 +61,7 @@ export function canMoveVariant(variant: DriveVariant): boolean {
 // Whether the currently-browsed location accepts create/upload/drag-drop. "drive" always (My Drive's
 // own navigable tree). A nested sharedOut directory (uuid !== null) too — the caller owns that
 // directory, since sharedOut only ever lists items THEY shared out, so it's writable exactly like the
-// identical directory reached via My Drive (see itemMenu.logic.ts's own ownerMutable gate for the
+// identical directory reached via My Drive (see selectionActions.ts's own ownerMutable gate for the
 // matching per-item rationale). The sharedOut ROOT (uuid === null) is excluded: it's the virtual
 // "everything I've shared out" aggregation, not a real directory with a parent to create into. Every
 // other variant (recents/favorites/trash/links/sharedIn) has no owned/navigable parent to write into.

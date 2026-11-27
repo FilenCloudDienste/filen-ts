@@ -90,8 +90,8 @@ export function BulkActionButton(props: {
 	)
 }
 
-// The key that opens a BulkActionMenuButton's menu, mounted only while the button has one and is enabled.
-function MenuShortcut(props: { action: string; onPress: () => void }) {
+// A key that opens a bar menu, mounted only while that menu is offered and enabled.
+export function MenuShortcut(props: { action: string; onPress: () => void }) {
 	useAction(
 		props.action,
 		keyboardEvent => {
@@ -104,17 +104,24 @@ function MenuShortcut(props: { action: string; onPress: () => void }) {
 	return null
 }
 
-// A BulkActionButton that opens a menu of its `children` (dropdown-family entries) instead of acting. `kbdAction`
-// opens it from the keyboard too, while it is enabled and nothing else is open, and shows in its tooltip.
+// A BulkActionButton that opens a menu of its `children` (dropdown-family entries) instead of acting. `kbdAction` shows in
+// its tooltip and, unless `kbdOpensMenu` is false (a key the surface runs itself), opens it from the keyboard too while it
+// is enabled and nothing else is open. `open`/`onOpenChange` control it from outside (a key that opens it on other
+// content).
 export function BulkActionMenuButton(props: {
 	icon: LucideIcon
 	label: string
 	disabled?: boolean | undefined
 	disabledReason?: string | undefined
 	kbdAction?: string | undefined
+	kbdOpensMenu?: boolean | undefined
+	open?: boolean | undefined
+	onOpenChange?: ((open: boolean) => void) | undefined
 	children: ReactNode
 }) {
-	const [open, setOpen] = useState(false)
+	const [ownOpen, setOwnOpen] = useState(false)
+	const open = props.open ?? ownOpen
+	const setOpen = props.onOpenChange ?? setOwnOpen
 	const reasonId = useId()
 	const reason = props.disabled === true ? props.disabledReason : undefined
 	const explained = reason !== undefined
@@ -124,7 +131,7 @@ export function BulkActionMenuButton(props: {
 			open={open}
 			onOpenChange={setOpen}
 		>
-			{props.kbdAction === undefined || props.disabled === true ? null : (
+			{props.kbdAction === undefined || props.kbdOpensMenu === false || props.disabled === true ? null : (
 				<MenuShortcut
 					action={props.kbdAction}
 					onPress={() => {

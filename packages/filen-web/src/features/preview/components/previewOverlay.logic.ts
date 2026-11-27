@@ -4,11 +4,11 @@
 
 import { matchesCombo, type ChordEvent } from "@filen/shared/keymap"
 import {
-	type ItemActionDescriptor,
-	type ItemActionDialogKind,
-	type ItemActionId,
-	type ItemMenuShortcuts
-} from "@/features/drive/components/itemMenu.logic"
+	type DriveActionDescriptor,
+	type DriveActionDialogKind,
+	type DriveActionId,
+	type DriveActionShortcuts
+} from "@/features/drive/lib/selectionActions"
 import { PREVIEW_OVERLAY_ACTIONS, type PreviewOverlayAction } from "@/features/preview/lib/keymap"
 import { bindingOf } from "@/lib/keymap/bindingOf"
 import { hasClosest } from "@/lib/domTarget"
@@ -27,16 +27,16 @@ import { i18n } from "@/lib/i18n"
 
 // The header item-menu never offers Download — the header already has its own dedicated download
 // button right next to the menu's own trigger (previewOverlay.tsx).
-export const PREVIEW_MENU_HIDDEN_ACTION_IDS = new Set<ItemActionId>(["download"])
+export const PREVIEW_MENU_HIDDEN_ACTION_IDS = new Set<DriveActionId>(["download"])
 
 // Download, plus whatever the opening surface leaves out of its own menus (Photos: Move), plus Download as where the
 // file may not be downloaded (previewDownloadable): it is a download too.
-export function previewMenuHiddenActionIds(extra?: ReadonlySet<ItemActionId>, downloadable = true): ReadonlySet<ItemActionId> {
+export function previewMenuHiddenActionIds(extra?: ReadonlySet<DriveActionId>, downloadable = true): ReadonlySet<DriveActionId> {
 	if (extra === undefined && downloadable) {
 		return PREVIEW_MENU_HIDDEN_ACTION_IDS
 	}
 
-	return new Set<ItemActionId>([...PREVIEW_MENU_HIDDEN_ACTION_IDS, ...(extra ?? []), ...(downloadable ? [] : ["downloadAs" as const])])
+	return new Set<DriveActionId>([...PREVIEW_MENU_HIDDEN_ACTION_IDS, ...(extra ?? []), ...(downloadable ? [] : ["downloadAs" as const])])
 }
 
 // True while `target` sits inside a CodeMirror surface (editable OR read-only alike) — CodeMirror's
@@ -131,7 +131,7 @@ export function pagerIntent(action: PreviewOverlayAction): PreviewDismissIntent 
 }
 
 // The item-menu entries the overlay's keys open (each a dialog of the menu's own), by action.
-const ITEM_KEY_ACTIONS: Readonly<Partial<Record<PreviewOverlayAction, ItemActionId>>> = {
+const ITEM_KEY_ACTIONS: Readonly<Partial<Record<PreviewOverlayAction, DriveActionId>>> = {
 	"preview.rename": "rename",
 	"preview.move": "move",
 	"preview.versions": "versions",
@@ -141,7 +141,7 @@ const ITEM_KEY_ACTIONS: Readonly<Partial<Record<PreviewOverlayAction, ItemAction
 }
 
 // The overlay's keys on its file's ⋯ menu entries: the ones above, and favorite (a direct entry, run by the overlay).
-export const PREVIEW_ITEM_SHORTCUTS: ItemMenuShortcuts = {
+export const PREVIEW_ITEM_SHORTCUTS: DriveActionShortcuts = {
 	entries: {
 		...Object.fromEntries(Object.entries(ITEM_KEY_ACTIONS).map(([action, id]) => [id, action])),
 		favorite: "preview.favorite",
@@ -151,10 +151,10 @@ export const PREVIEW_ITEM_SHORTCUTS: ItemMenuShortcuts = {
 
 // The dialog an item-menu key opens, where the file's menu offers that entry enabled (`descriptors`, as the menu lists
 // them); null otherwise, so a key never reaches past what the menu itself allows.
-export type ItemKeyEntry = Pick<ItemActionDescriptor, "id" | "enabled"> &
-	({ readonly run: "direct" } | { readonly run: "dialog"; readonly dialogKind: ItemActionDialogKind })
+export type ItemKeyEntry = Pick<DriveActionDescriptor, "id" | "enabled"> &
+	({ readonly run: "direct" } | { readonly run: "dialog"; readonly dialogKind: DriveActionDialogKind })
 
-export function itemKeyDialog(action: PreviewOverlayAction, descriptors: readonly ItemKeyEntry[]): ItemActionDialogKind | null {
+export function itemKeyDialog(action: PreviewOverlayAction, descriptors: readonly ItemKeyEntry[]): DriveActionDialogKind | null {
 	const id = ITEM_KEY_ACTIONS[action]
 	const descriptor = id === undefined ? undefined : descriptors.find(entry => entry.id === id)
 

@@ -30,7 +30,7 @@ import type { DriveItemLinkStatus } from "@/features/drive/queries/drive"
 import { TEXT_MAX_BYTES } from "@/features/drive/lib/preview.logic"
 import { mockSharedFile, mockSharedRootDir, sharerRole } from "@/tests/fixtures/sdk"
 
-// itemMenu.logic.ts's imports reach the query client — unwanted under node vitest.
+// selectionActions.ts's imports reach the query client — unwanted under node vitest.
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
@@ -47,14 +47,23 @@ vi.mock("@/features/drive/lib/saveDownload", async importOriginal => {
 })
 
 import {
-	applyOfflineGate,
 	canOpenItem,
 	canWriteIntoItem,
-	driveItemActions,
-	resolveCopyLinkAction,
+	driveSelectionActions,
 	separatorBefore,
-	type ItemActionId
-} from "@/features/drive/components/itemMenu.logic"
+	type DriveActionDescriptor,
+	type DriveActionId
+} from "@/features/drive/lib/selectionActions"
+import { resolveCopyLinkAction } from "@/features/drive/components/itemMenu.logic"
+
+// One item's menu, as the item menus build it.
+function driveItemActions(
+	item: DriveItem,
+	variant: DriveVariant,
+	options: { searchHit?: boolean; open?: boolean; isOnline?: boolean } = {}
+): DriveActionDescriptor[] {
+	return driveSelectionActions([item], variant, { isOnline: true, ...options })
+}
 
 beforeEach(() => {
 	isFsaAvailableMock.mockReturnValue(false)
@@ -133,14 +142,14 @@ function sharedFileItem(): DriveItem {
 	return narrowItem({ ...mockFile({ uuid: "77777777-7777-7777-7777-777777777777" }), sharingRole: sharerRole(1, "a@filen.io") })
 }
 
-function ids(item: DriveItem, variant: Parameters<typeof driveItemActions>[1]): string[] {
+function ids(item: DriveItem, variant: DriveVariant): string[] {
 	return driveItemActions(item, variant).map(descriptor => descriptor.id)
 }
 
 // Pins the shared per-action label + icon facts (factored into ACTION_DEFS) so a drift in either the
 // map or a builder's reference to it surfaces here — the id-only lists above prove ordering/gating
 // but never which label or icon a descriptor carries.
-function facts(item: DriveItem, variant: Parameters<typeof driveItemActions>[1]): { id: string; labelKey: string; icon: unknown }[] {
+function facts(item: DriveItem, variant: DriveVariant): { id: string; labelKey: string; icon: unknown }[] {
 	return driveItemActions(item, variant).map(descriptor => ({ id: descriptor.id, labelKey: descriptor.labelKey, icon: descriptor.icon }))
 }
 
@@ -273,7 +282,7 @@ describe("driveItemActions (item menu gating)", () => {
 // copyLink), share, and download/info all behave as on every other owned surface — canShareVariant
 // includes links (the top-level row is the user's own item, same share-with-contact flow as My Drive).
 describe("driveItemActions — links variant gating", () => {
-	it("directory: rename/copy/compress/favorite/color/info/download/share/publicLink/copyLink/trash, in that order (no move)", () => {
+	it("directory: rename/copy/compress/favorite/color/info/download/share/publicLink/copyLink/disableLink/trash, in that order (no move)", () => {
 		expect(ids(dirItem(), "links")).toEqual([
 			"rename",
 			"copy",
@@ -286,11 +295,12 @@ describe("driveItemActions — links variant gating", () => {
 			"share",
 			"publicLink",
 			"copyLink",
+			"disableLink",
 			"trash"
 		])
 	})
 
-	it("file: rename/copy/compress/favorite/versions/info/download/share/publicLink/copyLink/trash, in that order (no move)", () => {
+	it("file: rename/copy/compress/favorite/versions/info/download/share/publicLink/copyLink/disableLink/trash, in that order (no move)", () => {
 		expect(ids(fileItem(), "links")).toEqual([
 			"rename",
 			"copy",
@@ -303,6 +313,7 @@ describe("driveItemActions — links variant gating", () => {
 			"share",
 			"publicLink",
 			"copyLink",
+			"disableLink",
 			"trash"
 		])
 	})
@@ -318,9 +329,9 @@ describe("driveItemActions — links variant gating", () => {
 		expect(descriptors.find(d => d.id === "copyLink")).toMatchObject({ run: "dialog", dialogKind: "link" })
 	})
 
-	it("an undecryptable links item reduces to info/trash (same as any other owned surface)", () => {
+	it("an undecryptable links item reduces to info/disableLink/trash (a link is disabled by uuid)", () => {
 		const undecryptable = narrowItem(mockFile({ meta: { type: "encrypted", data: "ciphertext" } }))
-		expect(ids(undecryptable, "links")).toEqual(["info", "copyId", "trash"])
+		expect(ids(undecryptable, "links")).toEqual(["info", "copyId", "disableLink", "trash"])
 	})
 })
 
@@ -462,14 +473,13 @@ describe("driveItemActions — sharedIn safe subset (read-only surface)", () => 
 // copyLink/trash), plus the sharing-scoped SHARE and the root-only UNSHARE. Mirrors
 // itemMenu.logic.ts's own `ownerMutable = !isReadOnlySharedVariant(variant)` gate.
 describe("driveItemActions — sharedOut full owner toolbar (owned surface)", () => {
-	it("sharedOut root, directory: full owner set + share + unshare, in order", () => {
+	it("sharedOut root, directory: full owner set + share + unshare, in order (no Color: a share's directory has no color of its own to set)", () => {
 		expect(ids(sharedRootDirItem(), "sharedOut")).toEqual([
 			"rename",
 			"move",
 			"copy",
 			"compress",
 			"favorite",
-			"color",
 			"info",
 			"copyId",
 			"download",
@@ -505,7 +515,6 @@ describe("driveItemActions — sharedOut full owner toolbar (owned surface)", ()
 			"copy",
 			"compress",
 			"favorite",
-			"color",
 			"info",
 			"copyId",
 			"download",
@@ -542,21 +551,21 @@ describe("driveItemActions — download gating (enabled unconditionally, transpo
 	it("is present and enabled for a file, regardless of FSA availability", () => {
 		const descriptor = driveItemActions(fileItem(), "drive").find(d => d.id === "download")
 
-		expect(descriptor).toMatchObject({ run: "direct", enabled: true, icon: DownloadIcon })
+		expect(descriptor).toMatchObject({ run: "direct", icon: DownloadIcon })
 	})
 
 	it("is present and enabled for a directory on a non-FSA browser (isFsaAvailable false) — the sw zip route covers it", () => {
 		isFsaAvailableMock.mockReturnValue(false)
 		const descriptor = driveItemActions(dirItem(), "drive").find(d => d.id === "download")
 
-		expect(descriptor).toMatchObject({ run: "direct", enabled: true })
+		expect(descriptor).toMatchObject({ run: "direct" })
 	})
 
 	it("is present and enabled for a directory when isFsaAvailable() is true", () => {
 		isFsaAvailableMock.mockReturnValue(true)
 		const descriptor = driveItemActions(dirItem(), "drive").find(d => d.id === "download")
 
-		expect(descriptor).toMatchObject({ run: "direct", enabled: true })
+		expect(descriptor).toMatchObject({ run: "direct" })
 	})
 
 	it("is absent from the trash-reduced menu (mirrors bulk-bar/keymap's own trash exclusion)", () => {
@@ -653,7 +662,7 @@ describe("driveItemActions — Open containing directory (search hits only)", ()
 	})
 
 	it("is offline-gated — its handler awaits the ancestor walk", () => {
-		const descriptor = applyOfflineGate(driveItemActions(fileItem(), "drive", { searchHit: true }), false).find(
+		const descriptor = driveItemActions(fileItem(), "drive", { searchHit: true, isOnline: false }).find(
 			d => d.id === "openContainingDirectory"
 		)
 
@@ -838,7 +847,7 @@ describe("driveItemActions — Compress and Extract", () => {
 	})
 
 	it("disables both offline", () => {
-		const gated = applyOfflineGate(driveItemActions(ARCHIVE(), "drive"), false)
+		const gated = driveItemActions(ARCHIVE(), "drive", { isOnline: false })
 
 		expect(gated.filter(d => d.id === "extract" || d.id === "compress").map(d => d.enabled)).toEqual([false, false])
 	})
@@ -892,20 +901,18 @@ describe("canWriteIntoItem (the New submenu and a directory row's Paste)", () =>
 	})
 })
 
-describe("applyOfflineGate", () => {
-	it("leaves every descriptor untouched while online", () => {
-		const actions = driveItemActions(dirItem(), "drive")
-
-		expect(applyOfflineGate(actions, true)).toEqual(actions)
+describe("offline gating", () => {
+	it("leaves every descriptor enabled while online", () => {
+		expect(driveItemActions(dirItem(), "drive").filter(descriptor => descriptor.enabled === false)).toEqual([])
 	})
 
 	// The gate contract, classified per id rather than mirrored from the implementation's own set: a
-	// Record over the whole ItemActionId union, so widening it forces a conscious "gated" (the handler
+	// Record over the whole DriveActionId union, so widening it forces a conscious "gated" (the handler
 	// awaits an sdkApi call) or "readOnly" (a dialog rendering local metadata / its own query error
 	// state, gating its network sub-actions inside) decision here. The expectation is then checked
 	// against what the REAL builders offer, so an entry that claims "gated" but is missing from
 	// OFFLINE_GATED_IDS fails rather than shipping ungated.
-	const OFFLINE_EXPECTATION: Record<ItemActionId, "gated" | "readOnly"> = {
+	const OFFLINE_EXPECTATION: Record<DriveActionId, "gated" | "readOnly"> = {
 		// Mirrors the double-click, which isn't gated either: a cached listing or the preview's own error
 		// state takes over offline.
 		open: "readOnly",
@@ -931,6 +938,7 @@ describe("applyOfflineGate", () => {
 		extract: "gated",
 		publicLink: "gated",
 		copyLink: "gated",
+		disableLink: "gated",
 		share: "gated",
 		unshare: "gated",
 		trash: "gated",
@@ -954,7 +962,9 @@ describe("applyOfflineGate", () => {
 		() => unknownFileItem("song.mp3")
 	]
 	const EVERY_DESCRIPTOR = VARIANTS.flatMap(variant =>
-		ITEMS.flatMap(item => [true, false].flatMap(searchHit => driveItemActions(item(), variant, { searchHit, open: true })))
+		ITEMS.flatMap(item =>
+			[true, false].flatMap(searchHit => driveItemActions(item(), variant, { searchHit, open: true, isOnline: false }))
+		)
 	)
 
 	it("offers every classified id somewhere, so the table cannot drift away from the builders", () => {
@@ -962,20 +972,17 @@ describe("applyOfflineGate", () => {
 	})
 
 	it("gates exactly the ids classified as network writes, across every descriptor the real builders offer", () => {
-		const misgated = applyOfflineGate(EVERY_DESCRIPTOR, false).filter(
+		const misgated = EVERY_DESCRIPTOR.filter(
 			descriptor => (OFFLINE_EXPECTATION[descriptor.id] === "gated") !== (descriptor.enabled === false)
 		)
 
 		expect([...new Set(misgated.map(descriptor => descriptor.id))]).toEqual([])
 	})
 
-	it("does not mutate the input array's descriptor objects", () => {
-		const actions = driveItemActions(dirItem(), "drive")
-		const renameBefore = actions.find(d => d.id === "rename")
-
-		applyOfflineGate(actions, false)
-
-		expect(renameBefore?.enabled).not.toBe(false)
+	it("gives the offline reason on every gated entry", () => {
+		for (const descriptor of EVERY_DESCRIPTOR.filter(each => each.enabled === false)) {
+			expect(descriptor.disabledReasonKey).toBe("common:offlineActionDisabled")
+		}
 	})
 })
 

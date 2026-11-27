@@ -18,9 +18,7 @@ import {
 	downloadAsSource,
 	downloadAsTargets
 } from "@/features/drive/lib/downloadAs.logic"
-import { applyOfflineGate, driveItemActions } from "@/features/drive/components/itemMenu.logic"
-import { driveBulkActions, isBulkActionOfflineDisabled } from "@/features/drive/components/bulkActionBar.logic"
-import { aggregateDriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
+import { driveSelectionActions } from "@/features/drive/lib/selectionActions"
 import { previewMenuHiddenActionIds } from "@/features/preview/components/previewOverlay.logic"
 
 // Where Download as is offered: every format the document and spreadsheet viewers open, wherever Download is
@@ -61,7 +59,7 @@ const DOCUMENTS = ["docx", "docm", "dotx", "dotm", "doc", "dot", "odt", "ott", "
 const SPREADSHEETS = ["xlsx", "xlsm", "xltx", "xltm", "xls", "xlt", "ods", "ots", "csv", "tsv", "tab"]
 
 function ids(item: DriveItem, variant: DriveVariant): string[] {
-	return driveItemActions(item, variant).map(descriptor => descriptor.id)
+	return driveSelectionActions([item], variant, { isOnline: true }).map(descriptor => descriptor.id)
 }
 
 describe("downloadAsFormat", () => {
@@ -181,7 +179,7 @@ describe("Download as in the item menu", () => {
 	})
 
 	it("is disabled offline, as Download is", () => {
-		const offline = applyOfflineGate(driveItemActions(file("report.docx"), "drive"), false)
+		const offline = driveSelectionActions([file("report.docx")], "drive", { isOnline: false })
 
 		expect(offline.find(descriptor => descriptor.id === "downloadAs")?.enabled).toBe(false)
 		expect(offline.find(descriptor => descriptor.id === "download")?.enabled).toBe(false)
@@ -195,7 +193,7 @@ describe("Download as in the item menu", () => {
 
 describe("Download as in the bulk menus", () => {
 	it("is offered after Download when every selected file exports", () => {
-		const list = driveBulkActions("drive", aggregateDriveSelectionFlags([file("a.docx"), file("b.xlsx"), file("c.rtf")])).map(
+		const list = driveSelectionActions([file("a.docx"), file("b.xlsx"), file("c.rtf")], "drive", { isOnline: true }).map(
 			descriptor => descriptor.id
 		)
 
@@ -203,22 +201,22 @@ describe("Download as in the bulk menus", () => {
 	})
 
 	it("is not offered for a selection holding anything else, in the trash, or with an undecryptable item", () => {
-		expect(driveBulkActions("drive", aggregateDriveSelectionFlags([file("a.docx"), file("b.png")])).map(d => d.id)).not.toContain(
+		expect(driveSelectionActions([file("a.docx"), file("b.png")], "drive", { isOnline: true }).map(d => d.id)).not.toContain(
 			"downloadAs"
 		)
-		expect(driveBulkActions("trash", aggregateDriveSelectionFlags([file("a.docx"), file("b.docx")])).map(d => d.id)).not.toContain(
+		expect(driveSelectionActions([file("a.docx"), file("b.docx")], "trash", { isOnline: true }).map(d => d.id)).not.toContain(
 			"downloadAs"
 		)
 		expect(
-			driveBulkActions(
-				"drive",
-				aggregateDriveSelectionFlags([file("a.docx"), file("b.docx", 1_024n, { meta: { type: "encrypted", data: "ciphertext" } })])
-			).map(d => d.id)
+			driveSelectionActions([file("a.docx"), file("b.docx", 1_024n, { meta: { type: "encrypted", data: "ciphertext" } })], "drive", {
+				isOnline: true
+			}).map(d => d.id)
 		).not.toContain("downloadAs")
 	})
 
 	it("is disabled offline", () => {
-		expect(isBulkActionOfflineDisabled("downloadAs", false)).toBe(true)
-		expect(isBulkActionOfflineDisabled("downloadAs", true)).toBe(false)
+		const offline = driveSelectionActions([file("a.docx"), file("b.docx")], "drive", { isOnline: false })
+
+		expect(offline.find(descriptor => descriptor.id === "downloadAs")?.enabled).toBe(false)
 	})
 })

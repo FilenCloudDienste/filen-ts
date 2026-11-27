@@ -1,16 +1,10 @@
 import { useTranslation } from "react-i18next"
-import {
-	isBulkActionOfflineDisabled,
-	isBulkDownloadEnabled,
-	type BulkActionDescriptor,
-	type BulkDialogActionKind
-} from "@/features/drive/components/bulkActionBar.logic"
-import { aggregateDriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
+import { type DriveActionDescriptor, type DriveActionDialogKind } from "@/features/drive/lib/selectionActions"
 import { startDownloads } from "@/features/drive/lib/download"
 import { runPhotosBulkFavorite } from "@/features/photos/lib/bulkFavorite"
 import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
-import { photosBulkActions, photosParentNaming } from "@/features/photos/lib/itemActions"
+import { photosActions, photosParentNaming } from "@/features/photos/lib/itemActions"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { DROPDOWN_TREE_MENU_FAMILY } from "@/features/drive/components/directoryTreeSubmenu"
 import { CompressMenuEntries } from "@/features/drive/components/archiveSubmenus"
@@ -19,16 +13,7 @@ import { BulkActionButton, BulkActionMenuButton, SelectionActionBar } from "@/co
 export interface PhotosBulkActionBarProps {
 	rootUuids: readonly string[]
 	selectedItems: PhotoItem[]
-	onDialogAction: (kind: BulkDialogActionKind) => void
-}
-
-// Descriptors with a registered keyboard shortcut surface it in their tooltip alongside the label —
-// mirrors drive's own bulk bar.
-const KEYMAP_ACTION_FOR: Partial<Record<BulkActionDescriptor["id"], string>> = {
-	favorite: "photos.toggleFavorite",
-	download: "photos.download",
-	share: "photos.share",
-	trash: "photos.trash"
+	onDialogAction: (kind: DriveActionDialogKind) => void
 }
 
 // Floating selection bar for the photos grid — drive's own descriptors and gates, against the
@@ -36,23 +21,24 @@ const KEYMAP_ACTION_FOR: Partial<Record<BulkActionDescriptor["id"], string>> = {
 export function PhotosBulkActionBar({ rootUuids, selectedItems, onDialogAction }: PhotosBulkActionBarProps) {
 	const { t } = useTranslation(["drive", "photos", "common"])
 	const isOnline = useIsOnline()
-	const flags = aggregateDriveSelectionFlags(selectedItems)
-	const descriptors = photosBulkActions(flags)
+	const descriptors = photosActions(selectedItems, isOnline)
 
 	// download is checked first — startDownloads' FSA save picker needs this click's own live user
 	// gesture (mirrors drive's identical ordering rationale), so nothing here may yield ahead of it.
-	function runDescriptor(descriptor: BulkActionDescriptor): void {
+	function runDescriptor(descriptor: DriveActionDescriptor): void {
 		if (descriptor.id === "download") {
 			void startDownloads(selectedItems)
 			return
 		}
 
-		if (descriptor.run === "direct") {
+		if (descriptor.id === "favorite") {
 			void runPhotosBulkFavorite(rootUuids, selectedItems)
 			return
 		}
 
-		onDialogAction(descriptor.dialogKind)
+		if (descriptor.run === "dialog") {
+			onDialogAction(descriptor.dialogKind)
+		}
 	}
 
 	return (
@@ -64,9 +50,8 @@ export function PhotosBulkActionBar({ rootUuids, selectedItems, onDialogAction }
 			}}
 		>
 			{descriptors.map(descriptor => {
-				const offlineDisabled = isBulkActionOfflineDisabled(descriptor.id, isOnline)
-				const disabled = (descriptor.id === "download" && !isBulkDownloadEnabled(selectedItems)) || offlineDisabled
-				const disabledReason = offlineDisabled ? t("common:offlineActionDisabled") : undefined
+				const disabled = descriptor.enabled === false
+				const disabledReason = disabled && descriptor.disabledReasonKey !== undefined ? t(descriptor.disabledReasonKey) : undefined
 
 				// Compress opens the same entries its submenu holds in the menus, like drive's bar.
 				if (descriptor.id === "compress") {
@@ -99,7 +84,7 @@ export function PhotosBulkActionBar({ rootUuids, selectedItems, onDialogAction }
 						destructive={descriptor.destructive}
 						disabled={disabled}
 						disabledReason={disabledReason}
-						kbdAction={KEYMAP_ACTION_FOR[descriptor.id]}
+						kbdAction={descriptor.kbdAction}
 						onClick={() => {
 							runDescriptor(descriptor)
 						}}

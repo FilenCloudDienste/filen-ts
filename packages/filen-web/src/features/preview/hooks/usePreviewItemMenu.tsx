@@ -7,7 +7,7 @@ import { renameItem, trashItems, deleteItemsPermanently } from "@/features/drive
 import { unshareItems } from "@/features/drive/lib/share/actions"
 import { DRIVE_DELETE_PERMANENTLY, DRIVE_TRASH, DRIVE_UNSHARE, driveActivity } from "@/features/drive/lib/activity"
 import type { ParentNaming } from "@/features/drive/lib/archiveTargets"
-import type { ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
+import type { DriveActionDialogKind } from "@/features/drive/lib/selectionActions"
 import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
 import { ItemDialog, RenameItemDialog, TrashConfirmDialog } from "@/features/drive/components/itemDialogs"
 import type { usePreviewRemoteChanges } from "@/features/preview/hooks/usePreviewRemoteChanges"
@@ -67,10 +67,10 @@ export function usePreviewItemMenu({
 	// Which secondary dialog the header's item menu currently has open, if any — a single slot
 	// since only ever one item (the currently-viewed one) is ever being acted on from in here, unlike
 	// useDriveDialogHost's own activeDialog which also has to carry a whole bulk-selection items[].
-	// "color" and "openAsText" are part of the shared ItemActionDialogKind union but unreachable here —
-	// driveItemActions only ever offers Color for a directory, which never opens this overlay, and Open
+	// "color" and "openAsText" are part of the shared DriveActionDialogKind union but unreachable here —
+	// driveSelectionActions only ever offers Color for a directory, which never opens this overlay, and Open
 	// as text only to a surface that opens items (this header menu has its item open already).
-	const [menuDialogKind, setMenuDialogKind] = useState<ItemActionDialogKind | null>(null)
+	const [menuDialogKind, setMenuDialogKind] = useState<DriveActionDialogKind | null>(null)
 	// Where its destination picker (move, copy, extract to) opens: the tree menu level whose More… opened it.
 	const [menuStartPath, setMenuStartPath] = useState<readonly string[] | undefined>(undefined)
 	const [menuPending, setMenuPending] = useState(false)
@@ -295,7 +295,7 @@ export function usePreviewItemMenu({
 		}
 	}
 
-	function openMenuDialog(kind: ItemActionDialogKind, startPath?: readonly string[]): void {
+	function openMenuDialog(kind: DriveActionDialogKind, startPath?: readonly string[]): void {
 		setMenuStartPath(startPath)
 		setMenuDialogKind(kind)
 	}

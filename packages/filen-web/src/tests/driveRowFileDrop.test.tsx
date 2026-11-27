@@ -60,7 +60,7 @@ function renderRow(item: DriveItem, variant: DriveVariant) {
 			onPointerSelect: () => undefined,
 			onCursorMove: () => undefined,
 			onOpen: () => undefined,
-			onItemAction: () => undefined,
+			onDialogAction: () => undefined,
 			destinationActions: () => ({
 				newDirectory: () => undefined,
 				newTextFile: () => undefined,
@@ -68,7 +68,6 @@ function renderRow(item: DriveItem, variant: DriveVariant) {
 				pickFiles: () => undefined,
 				pickDirectory: () => undefined
 			}),
-			onBulkAction: () => undefined,
 			registerRef: () => undefined
 		})
 	)

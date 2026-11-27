@@ -62,7 +62,7 @@ function renderMenu(item: DriveItem, onOpen: (() => void) | undefined): void {
 				DropdownMenu,
 				{ defaultOpen: true },
 				createElement(DropdownMenuTrigger, null, "menu"),
-				createElement(DriveDropdownMenuContent, { item, variant: "drive", onItemAction: vi.fn(), onOpen })
+				createElement(DriveDropdownMenuContent, { items: [item], variant: "drive", onDialogAction: vi.fn(), onOpen })
 			)
 		)
 	)

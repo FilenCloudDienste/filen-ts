@@ -60,8 +60,7 @@ vi.mock("@/features/drive/hooks/useMarqueeSelection", () => ({
 vi.mock("@/features/drive/hooks/useDriveDialogHost", () => ({
 	useDriveDialogHost: () => ({
 		isDialogOpen: false,
-		handleItemAction: vi.fn(),
-		handleBulkDialogAction: vi.fn(),
+		handleDialogAction: vi.fn(),
 		handleEmptyTrash: vi.fn(),
 		openPreview: vi.fn(),
 		renderActiveDialog: () => null

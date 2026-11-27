@@ -91,7 +91,7 @@ function renderMenu(onItemAction: () => void) {
 			DropdownMenu,
 			{ defaultOpen: true },
 			createElement(DropdownMenuTrigger, null, "menu"),
-			createElement(DriveDropdownMenuContent, { item: FILE, variant: "links", onItemAction })
+			createElement(DriveDropdownMenuContent, { items: [FILE], variant: "links", onDialogAction: onItemAction })
 		)
 	)
 }
@@ -116,7 +116,7 @@ describe("item menu Copy link", () => {
 					DropdownMenu,
 					{ defaultOpen: true },
 					createElement(DropdownMenuTrigger, null, "menu"),
-					createElement(DriveDropdownMenuContent, { item: FILE, variant: "links", onItemAction })
+					createElement(DriveDropdownMenuContent, { items: [FILE], variant: "links", onDialogAction: onItemAction })
 				)
 			)
 
@@ -186,7 +186,7 @@ describe("item menu Copy link", () => {
 			await settle()
 		})
 
-		expect(onItemAction).toHaveBeenCalledWith("link", FILE)
+		expect(onItemAction).toHaveBeenCalledWith("link", [FILE])
 		expect(toastError).not.toHaveBeenCalled()
 		expect(toastSuccess).not.toHaveBeenCalled()
 	})

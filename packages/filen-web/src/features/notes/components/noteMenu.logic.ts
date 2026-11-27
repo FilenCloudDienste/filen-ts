@@ -6,7 +6,7 @@ import { type ActionDescriptor } from "@/lib/actionDescriptor"
 import type { NotesKey } from "@/lib/i18n"
 
 // Dialog kinds a note-menu entry can dispatch to the surface-level dialog host (useNoteDialogHost) —
-// mirrors drive's ItemActionDialogKind split (itemMenu.logic.ts). "trash" is the keyboard's alone: Delete on the note
+// mirrors drive's DriveActionDialogKind split (selectionActions.ts). "trash" is the keyboard's alone: Delete on the note
 // on screen, with no row focused, asks first (the menu's Trash, on a row the user picked, does not).
 export type NoteActionDialogKind = "rename" | "delete" | "leave" | "trash" | "createTag" | "participants" | "history"
 
@@ -32,7 +32,7 @@ export type NoteActionId =
 	| "deletePermanently"
 	| "leave"
 
-// "submenu" nests a tags/type picker. `enabled` mirrors itemMenu.logic.ts's own field; only
+// "submenu" nests a tags/type picker. `enabled` mirrors drive's descriptors' own field; only
 // applyNoteOfflineGate below ever sets it.
 export type NoteActionDescriptor = ActionDescriptor<
 	NotesKey,
@@ -82,7 +82,7 @@ function favoriteDescriptor(note: Note): NoteActionDescriptor {
 
 // Pure per-note menu builder shared by both the sidebar row's context menu and the editor header's ⋮
 // trigger (noteMenu.tsx) — one descriptor list, gated purely on the note's own flags + ownership, so it
-// stays trivially testable without rendering anything (mirrors driveItemActions).
+// stays trivially testable without rendering anything (mirrors driveSelectionActions).
 export function noteMenuActions(note: Note, currentUserId: bigint | undefined): NoteActionDescriptor[] {
 	const owner = isNoteOwner(note, currentUserId)
 
@@ -96,7 +96,7 @@ export function noteMenuActions(note: Note, currentUserId: bigint | undefined): 
 	// ciphertext — every action that needs decrypted data (rename/duplicate/export/copyId/pin/favorite/
 	// tags/type/participants/history/archive) is impossible. Only the pure-uuid dispositions survive:
 	// the owner can trash it, a participant can leave it. Mirrors drive + chats, where an undecryptable
-	// item is likewise reduced to its uuid-only actions (driveItemActions / chatMenuActions).
+	// item is likewise reduced to its uuid-only actions (driveSelectionActions / chatMenuActions).
 	if (isNoteUndecryptable(note)) {
 		return owner ? [TRASH] : [LEAVE]
 	}

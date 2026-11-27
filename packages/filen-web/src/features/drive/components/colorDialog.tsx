@@ -22,7 +22,8 @@ import { RadioGroup } from "@/components/ui/radio-group"
 import { CustomColorPopover } from "@/features/drive/components/customColorPopover"
 
 export interface ColorDialogProps {
-	directory: DirectoryItem
+	// One directory, or a selection of them that the pick colors alike.
+	directories: DirectoryItem[]
 	onClose: () => void
 }
 
@@ -56,13 +57,15 @@ function Swatch({ value, label, fill, disabled, title }: SwatchProps) {
 
 // Mounted-when-active by the listing's dialog host (directoryListing.tsx): there's no trigger left to
 // anchor a popover to once the context menu that dispatched it has closed.
-export function ColorDialog({ directory, onClose }: ColorDialogProps) {
+export function ColorDialog({ directories, onClose }: ColorDialogProps) {
 	const { t } = useTranslation(["drive", "common"])
 	const isOnline = useIsOnline()
 	const [pending, setPending] = useState(false)
 	const [recent, setRecent] = useState<string[]>([])
-	const current = directory.data.color
-	const selectedValue = dirColorRadioValue(current)
+	// The directories' shared color; none checked when they differ.
+	const current = directories[0]?.data.color ?? "default"
+	const shared = directories.every(directory => directory.data.color === current)
+	const selectedValue = shared ? dirColorRadioValue(current) : ""
 	const disabled = pending || !isOnline
 	const offlineTitle = isOnline ? undefined : t("common:offlineActionDisabled")
 	const onSwatch = DIR_COLOR_SWATCHES.some(swatch => swatch.value === selectedValue)
@@ -90,11 +93,13 @@ export function ColorDialog({ directory, onClose }: ColorDialogProps) {
 
 	async function handleSelect(color: DirColor): Promise<void> {
 		setPending(true)
-		const outcome = await setColor(directory, color)
+		const outcomes = await Promise.all(directories.map(directory => setColor(directory, color)))
 		setPending(false)
 
-		if (outcome.status === "error") {
-			toast.error(errorLabel(outcome.dto))
+		const failed = outcomes.find(outcome => outcome.status === "error")
+
+		if (failed?.status === "error") {
+			toast.error(errorLabel(failed.dto))
 			return
 		}
 
@@ -143,7 +148,7 @@ export function ColorDialog({ directory, onClose }: ColorDialogProps) {
 						<CustomColorPopover
 							initialHex={isCustomDirColor(current) ? dirColorHex(current) : DEFAULT_CUSTOM_HEX}
 							disabled={disabled}
-							selected={!onSwatch && !onRecent}
+							selected={shared && !onSwatch && !onRecent}
 							offlineTitle={offlineTitle}
 							onApply={hex => {
 								void handleSelect(hex)

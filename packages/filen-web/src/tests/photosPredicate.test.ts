@@ -93,7 +93,7 @@ describe("isPhotoItem", () => {
 
 	// Documents the invariant photos/lib/itemActions.ts and bulkActions.ts rely on instead of gating:
 	// a photos listing item can NEVER be undecryptable, so neither builder needs its own undecryptable
-	// branch (unlike driveItemActions/driveBulkActions, which both do).
+	// branch (unlike driveSelectionActions, which does).
 	it("drops an undecryptable file even when its (unreadable) name would otherwise look like media", () => {
 		const undecryptable = narrowItem(mockFile({ meta: { type: "encrypted", data: "ciphertext" } }))
 

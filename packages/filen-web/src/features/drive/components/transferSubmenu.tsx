@@ -11,6 +11,7 @@ import { startCopyWithCard } from "@/features/transfers/lib/copyToast"
 import { type CopyDestination } from "@/features/drive/lib/copy.logic"
 import { createMoveTreeGates } from "@/features/drive/components/moveTargetDialog.logic"
 import {
+	DirectoryTreeEntries,
 	DirectoryTreeSubmenu,
 	type DirectoryTreeMenuFamily,
 	type DirectoryTreeTarget
@@ -71,30 +72,22 @@ function readDriveListing(uuid: string | null): DriveItem[] | undefined {
 	return cachedListing("drive", uuid)
 }
 
-// "Move" or "Copy" as a submenu: the clipboard entry (for a later paste), the destination picker, then
-// the Cloud Drive tree for moving or copying in one pick. The tree greys out exactly what the dialog
-// would; unlike a move, a copy may land in the source's own directory (the copy gets a free name there).
-export function TransferSubmenu({
-	mode,
-	family,
-	items,
-	onChooseDestination,
-	clipboardShortcut,
-	destinationShortcut
-}: TransferSubmenuProps) {
+// The clipboard entry (for a later paste), the destination picker, then the Cloud Drive tree for moving or copying in one
+// pick: "Move" or "Copy" as a submenu of the menus, or as the selection bar's own menu. The tree greys out exactly what
+// the dialog would; unlike a move, a copy may land in the source's own directory (the copy gets a free name there).
+function useTransferTree({ mode, family, items, onChooseDestination, clipboardShortcut, destinationShortcut }: TransferSubmenuProps) {
 	const { t } = useTranslation(["drive", "common"])
-	// Offline the submenu still opens for its clipboard entry; only the destinations need the network.
+	// Offline the menu still opens for its clipboard entry; only the destinations need the network.
 	const isOnline = useIsOnline()
 	const gates = createMoveTreeGates(items, readDriveListing, mode)
 	const config = MODES[mode]
 	const { Item } = family
 
-	return (
-		<DirectoryTreeSubmenu
-			family={family}
-			label={t(config.def.labelKey)}
-			icon={config.def.icon}
-			leading={
+	return {
+		config,
+		tree: {
+			family,
+			leading: (
 				<>
 					<Item
 						onClick={() => {
@@ -117,17 +110,36 @@ export function TransferSubmenu({
 						<MenuKbd action={destinationShortcut} />
 					</Item>
 				</>
-			}
-			actionLabel={t(config.actionLabelKey)}
-			actionIcon={config.def.icon}
-			isBrowseDisabled={target => !isOnline || gates.isBrowseDisabled(target)}
-			isTargetDisabled={target => !isOnline || gates.isTargetDisabled(target)}
-			onMore={target => {
+			),
+			actionLabel: t(config.actionLabelKey),
+			actionIcon: config.def.icon,
+			isBrowseDisabled: (target: DirectoryTreeTarget) => !isOnline || gates.isBrowseDisabled(target),
+			isTargetDisabled: (target: DirectoryTreeTarget) => !isOnline || gates.isTargetDisabled(target),
+			onMore: (target: DirectoryTreeTarget) => {
 				onChooseDestination(mode, target.ancestry)
-			}}
-			onSelect={target => {
+			},
+			onSelect: (target: DirectoryTreeTarget) => {
 				config.select(items, { uuid: target.uuid, name: targetName(target, t("driveMyDrive")) })
-			}}
+			}
+		}
+	}
+}
+
+export function TransferSubmenu(props: TransferSubmenuProps) {
+	const { t } = useTranslation("drive")
+	const { config, tree } = useTransferTree(props)
+
+	return (
+		<DirectoryTreeSubmenu
+			label={t(config.def.labelKey)}
+			icon={config.def.icon}
+			{...tree}
 		/>
 	)
+}
+
+export function TransferMenuEntries(props: TransferSubmenuProps) {
+	const { tree } = useTransferTree(props)
+
+	return <DirectoryTreeEntries {...tree} />
 }

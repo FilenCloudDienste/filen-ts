@@ -98,7 +98,7 @@ export function DirectoryTreeMenu({ render, onNavigate }: DirectoryTreeMenuProps
 	// The row a contextmenu or touch landed on, read as the menu opens.
 	const pendingRowRef = useRef<HTMLElement | null>(null)
 	const openRowRef = useRef<HTMLElement | null>(null)
-	const dialogHost = useDriveDialogHost({ variant: "drive", selectedItems: [], hiddenNoticeApplies: hiddenNotice })
+	const dialogHost = useDriveDialogHost({ variant: "drive", hiddenNoticeApplies: hiddenNotice })
 	const destination = useDirectoryDestination({
 		disabled: !isOnline,
 		openPreview: dialogHost.openPreview,
@@ -258,9 +258,9 @@ export function DirectoryTreeMenu({ render, onNavigate }: DirectoryTreeMenuProps
 					</ContextMenuContent>
 				) : (
 					<DriveContextMenuContent
-						item={target.item}
+						items={[target.item]}
 						variant="drive"
-						onItemAction={dialogHost.handleItemAction}
+						onDialogAction={dialogHost.handleDialogAction}
 						onOpen={() => {
 							onNavigate(target.path)
 						}}

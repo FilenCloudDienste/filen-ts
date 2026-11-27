@@ -179,7 +179,14 @@ export interface ExtractSubmenuProps extends SubmenuTriggerProps {
 	onBrowse?: (() => void) | undefined
 }
 
-function ExtractMenuEntries({ family, item, variant, onChooseDestination, onOptions, onBrowse }: Omit<ExtractSubmenuProps, "disabled">) {
+export function ExtractMenuEntries({
+	family,
+	item,
+	variant,
+	onChooseDestination,
+	onOptions,
+	onBrowse
+}: Omit<ExtractSubmenuProps, "disabled">) {
 	const { t } = useTranslation(["archive", "drive"])
 	const isOnline = useIsOnline()
 	const info = useArchiveNameInfo(driveItemName(item))

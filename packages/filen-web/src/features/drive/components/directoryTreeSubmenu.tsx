@@ -97,8 +97,7 @@ export interface DirectoryTreeSubmenuProps extends DirectoryTreeActions {
 // submenu: Base UI routes Enter/Space and touch taps on a trigger to opening it, so the action lives on
 // its own entry.
 export function DirectoryTreeSubmenu({ label, icon: Icon, leading, ...actions }: DirectoryTreeSubmenuProps) {
-	const { t } = useTranslation("drive")
-	const { Sub, SubTrigger, SubContent, Separator, Group, Label } = actions.family
+	const { Sub, SubTrigger, SubContent } = actions.family
 
 	return (
 		<Sub>
@@ -107,17 +106,32 @@ export function DirectoryTreeSubmenu({ label, icon: Icon, leading, ...actions }:
 				{label}
 			</SubTrigger>
 			<SubContent className="max-w-72">
-				{leading}
-				{leading !== undefined ? <Separator /> : null}
-				<Group>
-					<Label>{t("driveMyDrive")}</Label>
-					<DirectoryTreeSubmenuLevel
-						{...actions}
-						target={ROOT_TARGET}
-					/>
-				</Group>
+				<DirectoryTreeEntries
+					leading={leading}
+					{...actions}
+				/>
 			</SubContent>
 		</Sub>
+	)
+}
+
+// The submenu's content, for a menu that holds it directly (the selection bar's Move and Copy).
+export function DirectoryTreeEntries({ leading, ...actions }: DirectoryTreeActions & { leading?: ReactNode }) {
+	const { t } = useTranslation("drive")
+	const { Separator, Group, Label } = actions.family
+
+	return (
+		<>
+			{leading}
+			{leading !== undefined ? <Separator /> : null}
+			<Group>
+				<Label>{t("driveMyDrive")}</Label>
+				<DirectoryTreeSubmenuLevel
+					{...actions}
+					target={ROOT_TARGET}
+				/>
+			</Group>
+		</>
 	)
 }
 

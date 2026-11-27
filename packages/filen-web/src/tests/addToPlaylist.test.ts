@@ -16,8 +16,7 @@ vi.mock("@/features/audio/lib/playlists", () => ({ addTracksToPlaylistAction: ad
 
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
-import { driveItemActions } from "@/features/drive/components/itemMenu.logic"
-import { driveBulkActions } from "@/features/drive/components/bulkActionBar.logic"
+import { driveSelectionActions } from "@/features/drive/lib/selectionActions"
 import { aggregateDriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
 import { addSelectionToPlaylist } from "@/features/audio/lib/addTracks"
 import { mockDirItem, mockFile, ownedFileItem } from "@/tests/fixtures/sdk"
@@ -33,11 +32,11 @@ const UNDECRYPTABLE = narrowItem({ ...mockFile({ uuid: testUuid("enc") }), meta:
 const PLAYLIST = { uuid: testUuid("playlist"), name: "Mix" } as Playlist
 
 function bulkOffers(variant: DriveVariant, items: DriveItem[]): boolean {
-	return driveBulkActions(variant, aggregateDriveSelectionFlags(items)).some(descriptor => descriptor.id === "addToPlaylist")
+	return driveSelectionActions(items, variant, { isOnline: true }).some(descriptor => descriptor.id === "addToPlaylist")
 }
 
 function itemOffers(variant: DriveVariant, item: DriveItem): boolean {
-	return driveItemActions(item, variant, { open: true }).some(descriptor => descriptor.id === "addToPlaylist")
+	return driveSelectionActions([item], variant, { isOnline: true, open: true }).some(descriptor => descriptor.id === "addToPlaylist")
 }
 
 describe("Add to playlist visibility", () => {

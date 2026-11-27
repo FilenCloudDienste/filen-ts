@@ -19,8 +19,8 @@ export type NoteBulkActionDescriptor = ActionDescriptor<
 	{ run: "submenu"; submenu: "type" | "tags" }
 >
 
-// Pure gating builder for the notes bulk-action bar — mirrors bulkActionBar.logic.ts's
-// driveBulkActions (variant/flag-gated descriptor list, testable without rendering anything). Which
+// Pure gating builder for the notes bulk-action bar — mirrors selectionActions.ts's
+// driveSelectionActions (variant/flag-gated descriptor list, testable without rendering anything). Which
 // of the eleven actions the selection permits is the shared decision matrix (identical on mobile);
 // this function only attaches the descriptor/icon/label/dispatch apparatus that stays per-app.
 export function noteBulkActions(flags: NoteSelectionFlags): NoteBulkActionDescriptor[] {

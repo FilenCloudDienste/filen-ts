@@ -15,8 +15,7 @@ import {
 	DRIVE_UNSHARE,
 	driveActivity
 } from "@/features/drive/lib/activity"
-import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
-import { type BulkDialogActionKind } from "@/features/drive/components/bulkActionBar.logic"
+import { type DriveActionDialogKind } from "@/features/drive/lib/selectionActions"
 import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
 import { ColorDialog } from "@/features/drive/components/colorDialog"
 import { ItemDialog, RenameItemDialog, TrashConfirmDialog } from "@/features/drive/components/itemDialogs"
@@ -30,12 +29,9 @@ import { includesRootDotFilen } from "@/features/drive/lib/dotFilenGuard"
 import { cachedListing } from "@/features/drive/queries/drive"
 import { DOT_FILEN_DIR_NAME } from "@filen/shared"
 
-// The listing-level dialog host's own state shape. Widens itemMenu.logic.ts's ItemActionDialogKind
-// with two listing-level kinds neither dispatched by a per-item menu, so neither has a place in that
-// narrower, per-item-scoped union: "emptyTrash" (the trash toolbar) and "restoreSelected" (the bulk
-// bar's confirm — a single-item restore stays direct/unconfirmed, see itemMenu.logic.ts's RESTORE).
-// "openAsText" opens the preview instead (handleItemAction), so it is never a dialog kind of its own.
-type ActiveDialogKind = Exclude<ItemActionDialogKind, "openAsText"> | "emptyTrash" | "restoreSelected" | "disableLink" | "preview"
+// The listing-level dialog host's own state shape: every action's dialog kind plus the trash toolbar's "emptyTrash"
+// and the preview. "openAsText" opens the preview instead (handleDialogAction), so it is never a kind of its own.
+type ActiveDialogKind = Exclude<DriveActionDialogKind, "openAsText"> | "emptyTrash" | "preview"
 
 interface ActiveDialog {
 	kind: ActiveDialogKind
@@ -57,8 +53,7 @@ interface ActiveDialog {
 
 export interface DriveDialogHost {
 	isDialogOpen: boolean
-	handleItemAction: (kind: ItemActionDialogKind, item: DriveItem, startPath?: readonly string[]) => void
-	handleBulkDialogAction: (kind: BulkDialogActionKind, startPath?: readonly string[]) => void
+	handleDialogAction: (kind: DriveActionDialogKind, items: DriveItem[], startPath?: readonly string[]) => void
 	handleEmptyTrash: () => void
 	openPreview: (items: DriveItem[], index: number, slideshowSource?: SlideshowSource) => void
 	renderActiveDialog: () => ReactNode
@@ -66,7 +61,6 @@ export interface DriveDialogHost {
 
 interface UseDriveDialogHostParams {
 	variant: DriveVariant
-	selectedItems: DriveItem[]
 	// True when this listing would actually hide a dot-prefixed name (the preference AND
 	// hiddenFilterAppliesTo) — computed once by the listing, since it already holds both halves.
 	hiddenNoticeApplies: boolean
@@ -77,7 +71,7 @@ interface UseDriveDialogHostParams {
 // (rename/trash/delete/emptyTrash/restoreSelected) — the move/color/versions/info dialogs run their own
 // async calls internally and track their own pending state, since each needs more than one shared
 // boolean can express (e.g. versions has an independent restore vs. delete-confirm flow).
-export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies }: UseDriveDialogHostParams): DriveDialogHost {
+export function useDriveDialogHost({ variant, hiddenNoticeApplies }: UseDriveDialogHostParams): DriveDialogHost {
 	const { t } = useTranslation(["drive", "common"])
 	const { activeDialog, setActiveDialog, dialogPending, isDialogOpen, closeActiveDialog, runDialogOutcome, runBulkDialogActivity } =
 		useDialogHost<ActiveDialog>({ keepOpenOnNavigate: keepPreviewOpenOnNavigate })
@@ -94,19 +88,17 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 		setActiveDialog(prev => (prev?.kind === "preview" ? { ...prev, items, index } : prev))
 	}
 
-	// Threaded into DriveRow/DriveTile as onItemAction (consistent with onPointerSelect/onOpen) — every
-	// "dialog"-run item-menu descriptor calls this with its own kind; "direct"-run ones (favorite/
-	// restore) resolve fully inside itemMenu.tsx and never reach here.
-	function handleItemAction(kind: ItemActionDialogKind, item: DriveItem, startPath?: readonly string[]): void {
+	// Every "dialog" entry of the menus, the selection bar and the listing's keys, on the items it was offered for.
+	function handleDialogAction(kind: DriveActionDialogKind, items: DriveItem[], startPath?: readonly string[]): void {
 		// Just this file, with no pager: the siblings it would page through are the previewable files,
 		// which it is not one of.
 		if (kind === "openAsText") {
-			setActiveDialog({ kind: "preview", items: [item], index: 0, asText: true })
+			setActiveDialog({ kind: "preview", items: items.slice(0, 1), index: 0, asText: true })
 
 			return
 		}
 
-		setActiveDialog({ kind, items: [item], startPath })
+		setActiveDialog({ kind, items, startPath })
 	}
 
 	async function handleRenameSubmit(item: DriveItem, value: string): Promise<void> {
@@ -130,13 +122,13 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 		await runBulkDialogActivity(driveActivity(items, DRIVE_DELETE_PERMANENTLY, deleteItemsPermanently))
 	}
 
-	// Bulk restore CONFIRMS (unlike a single item's direct, unconfirmed restore — see
-	// itemMenu.logic.ts's RESTORE descriptor and driveRestoreSelectedConfirmTitle's own doc comment).
+	// A selection's restore CONFIRMS (one item restores directly — see selectionActions.ts's trash entries and
+	// driveRestoreSelectedConfirmTitle's own doc comment).
 	async function handleRestoreSelectedConfirm(items: DriveItem[]): Promise<void> {
 		await runBulkDialogActivity(driveActivity(items, DRIVE_RESTORE, restoreItems))
 	}
 
-	// Root-only (see itemMenu.logic.ts's UNSHARE gate) — the sharedIn/sharedOut root-listing patch
+	// Root-only (see selectionActions.ts's unshare gate) — the sharedIn/sharedOut root-listing patch
 	// lives inside unshareItems itself, keyed off the CURRENT variant (this listing's own).
 	async function handleUnshareConfirm(items: DriveItem[]): Promise<void> {
 		await runBulkDialogActivity(
@@ -146,21 +138,14 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 		)
 	}
 
-	// Links-root only (see bulkActionBar.logic.ts's own variant gate) — revokes every selected item's
+	// Links only (see selectionActions.ts's disableLink gate) — revokes every selected item's
 	// public link; disableLinks itself drops each succeeded item from the links listing.
 	async function handleDisableLinkConfirm(items: DriveItem[]): Promise<void> {
 		await runBulkDialogActivity(driveActivity(items, DRIVE_DISABLE_LINK, disableLinks))
 	}
 
-	// Routes a bulk-action-bar click to the dialog host, dispatching against the CURRENT selection —
-	// mirrors the drive.trash keymap command's identical setActiveDialog({kind:"trash", items:
-	// selectedItems}).
-	function handleBulkDialogAction(kind: BulkDialogActionKind, startPath?: readonly string[]): void {
-		setActiveDialog({ kind, items: selectedItems, startPath })
-	}
-
 	// Trash toolbar's own trigger — targets the WHOLE trash, never a selection, so unlike
-	// handleBulkDialogAction this carries no items (renderActiveDialog's "emptyTrash" arm never reads
+	// every other dialog this carries no items (renderActiveDialog's "emptyTrash" arm never reads
 	// activeDialog.items).
 	function handleEmptyTrash(): void {
 		setActiveDialog({ kind: "emptyTrash", items: [] })
@@ -333,17 +318,16 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 					/>
 				) : null
 			case "color": {
-				const item = activeDialog.items[0]
+				// Color is offered only where every item is a directory (selectionActions.ts); this narrows that into a type.
+				const directories = activeDialog.items.filter(item => item.type === "directory")
 
-				// The menu only ever offers Color for a directory (see itemMenu.logic.ts) — this narrows
-				// that guarantee into a type, it doesn't impose a new one.
-				if (item?.type !== "directory") {
+				if (directories.length === 0 || directories.length !== activeDialog.items.length) {
 					return null
 				}
 
 				return (
 					<ColorDialog
-						directory={item}
+						directories={directories}
 						onClose={closeActiveDialog}
 					/>
 				)
@@ -367,9 +351,7 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 					/>
 				)
 			case "unshare":
-				// Reached from a per-item menu (items: [item]) or the bulk bar (items: selectedItems) — both
-				// only ever dispatch this for sharedRootDirectory/sharedRootFile arms (itemMenu.logic.ts /
-				// bulkActionBar.logic.ts's own root-only gate).
+				// Only ever dispatched for sharedRootDirectory/sharedRootFile arms (selectionActions.ts's root-only gate).
 				return (
 					<ConfirmDialog
 						open
@@ -442,5 +424,5 @@ export function useDriveDialogHost({ variant, selectedItems, hiddenNoticeApplies
 		}
 	}
 
-	return { isDialogOpen, handleItemAction, handleBulkDialogAction, handleEmptyTrash, openPreview, renderActiveDialog }
+	return { isDialogOpen, handleDialogAction, handleEmptyTrash, openPreview, renderActiveDialog }
 }

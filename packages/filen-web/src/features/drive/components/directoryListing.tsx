@@ -27,8 +27,6 @@ import { dotFilenFilterAppliesTo, hiddenFilterAppliesTo } from "@/features/drive
 import { isDotFilenSystemDir } from "@/lib/dotFilen"
 import { isRootDotFilenItem } from "@/features/drive/lib/dotFilenGuard"
 import { DRIVE_SORT_PARTS, nextSortOrder, type DriveSortBy } from "@/features/drive/lib/sort"
-import { copyItemLink } from "@/features/drive/lib/copyLink"
-import { defaultRevealDeps, runOpenContainingDirectory } from "@/features/drive/lib/reveal"
 import { driveRouteIdFor, resolveDriveNavigationTarget, splatToUuids } from "@/features/drive/lib/navigate"
 import { listboxKeyTargetIsInteractive, openOptionContextMenu } from "@/features/drive/lib/listbox"
 import { driveItemMime, isDirectoryItem, type DriveItem } from "@/features/drive/lib/item"
@@ -41,11 +39,11 @@ import { gateRunsSniffer, SNIFFERS } from "@/features/preview/lib/contentSniff.l
 import { runContentSniff } from "@/features/preview/lib/contentSniff"
 import { previewCacheScope } from "@/features/preview/lib/accessMode"
 import { recordContentVerdict } from "@/features/drive/lib/contentVerdicts"
-import { aggregateDriveSelectionFlags, selectableForSelectAll } from "@/features/drive/lib/selectionFlags"
+import { selectableForSelectAll } from "@/features/drive/lib/selectionFlags"
 import { driveRowKey } from "@/features/drive/lib/rowKey"
 import { deriveAudioHandoff, isAudioItem } from "@/features/audio/lib/handoff"
 import { audioEngine } from "@/features/audio/lib/audioEngine"
-import { narrowToAnyFile, startDownloads } from "@/features/drive/lib/download"
+import { narrowToAnyFile } from "@/features/drive/lib/download"
 import {
 	useDirectoryListingQuery,
 	useHiddenDotFilenRoot,
@@ -59,21 +57,14 @@ import { asErrorDTO } from "@/lib/sdk/errors"
 import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
 import {
-	applyOfflineGate,
 	canOpenItem,
-	driveItemActions,
-	type ItemActionDialogKind,
-	type ItemActionId
-} from "@/features/drive/components/itemMenu.logic"
-import {
-	driveBulkActions,
 	driveDeleteKeyTarget,
-	isBulkActionOfflineDisabled,
-	isBulkDownloadEnabled,
-	runBulkFavorite,
-	type BulkActionDescriptor,
-	type BulkDialogActionKind
-} from "@/features/drive/components/bulkActionBar.logic"
+	driveSelectionActions,
+	offersAction,
+	type DriveActionDescriptor,
+	type DriveActionId
+} from "@/features/drive/lib/selectionActions"
+import { runDriveAction, type DriveActionHandlers } from "@/features/drive/lib/selectionDispatch"
 import {
 	filterDriveItemsByLocalSearch,
 	filterSharedInByBlocked,
@@ -422,9 +413,8 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	// Shared by me receiver's row being selected never highlights another receiver's.
 	const selectedRowKeys = useMemo(() => new Set(selectedItems.map(driveRowKey)), [selectedItems])
 
-	const { handleItemAction, handleBulkDialogAction, handleEmptyTrash, openPreview, renderActiveDialog } = useDriveDialogHost({
+	const { handleDialogAction, handleEmptyTrash, openPreview, renderActiveDialog } = useDriveDialogHost({
 		variant,
-		selectedItems: reconciledSelectedItems,
 		hiddenNoticeApplies: hideHidden
 	})
 
@@ -689,75 +679,73 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		[effectiveViewMode, applyViewModeChange]
 	)
 
-	// No preventDefault — F2 has no disruptive browser default.
-	// Reuses driveItemActions' own gating (rather than re-deriving "not in trash, not undecryptable"
-	// here) so this can never open a rename the item menu itself wouldn't offer for the same item.
-	useAction(
-		"drive.rename",
-		() => {
-			const item = sortedItems[safeActiveIndex]
-
-			if (!isOnline || !item || !driveItemActions(item, variant).some(descriptor => descriptor.id === "rename")) {
-				return
-			}
-
-			handleItemAction("rename", item)
-		},
-		OUTSIDE_OVERLAYS,
-		[sortedItems, safeActiveIndex, variant, isOnline]
-	)
-
-	// The selection's bulk actions, computed when a key asks rather than on every render.
-	function selectionActions(): BulkActionDescriptor[] {
-		return reconciledSelectedItems.length === 0 ? [] : driveBulkActions(variant, aggregateDriveSelectionFlags(reconciledSelectedItems))
-	}
-
-	// Whether the bulk bar would offer `id` for the selection, and enable it.
-	function selectionOffers(id: BulkActionDescriptor["id"]): boolean {
-		return !isBulkActionOfflineDisabled(id, isOnline) && selectionActions().some(descriptor => descriptor.id === id)
-	}
-
-	// Whether the item menu of the item under the cursor offers `id`, enabled: a key never opens what the menu would not.
-	// The row's menu has Open (and Open as text in its place) and, for a search hit, Open containing directory.
-	function cursorItemOffers(item: DriveItem | undefined, id: ItemActionId): item is DriveItem {
-		return (
-			item !== undefined &&
-			applyOfflineGate(driveItemActions(item, variant, { open: true, searchHit: isSearchHitRow(item) }), isOnline).some(
-				descriptor => descriptor.id === id && descriptor.enabled !== false
-			)
-		)
-	}
-
 	// A search hit whose parent is not the directory on screen, as its row tells it (useDriveItemCell's searchHit).
 	function isSearchHitRow(item: DriveItem): boolean {
 		return search.active && (search.parentPaths.get(item.data.uuid)?.length ?? 0) > 0
 	}
 
-	// An item-menu entry that acts on the cursor item through its own dialog, where the menu offers it.
-	function runCursorDialog(keyboardEvent: KeyboardEvent, itemAction: ItemActionId & ItemActionDialogKind): void {
-		const item = sortedItems[safeActiveIndex]
-
-		if (cursorItemOffers(item, itemAction)) {
-			keyboardEvent.preventDefault()
-			handleItemAction(itemAction, item)
+	// The listing's keys run what the menus would offer and enable, through the one dispatcher the menus use.
+	function actionHandlers(): DriveActionHandlers {
+		return {
+			variant,
+			onDialogAction: handleDialogAction,
+			navigate: target => {
+				void navigate(target)
+			}
 		}
 	}
 
-	// A selection-bar entry that opens a dialog over the whole selection, where the bar offers it.
-	function runSelectionDialog(keyboardEvent: KeyboardEvent, bulkAction: BulkActionDescriptor["id"] & BulkDialogActionKind): void {
-		if (selectionOffers(bulkAction)) {
+	// The selection's entries (the bar's, and a right-click's inside it), computed when a key asks rather than on every
+	// render.
+	function selectionActions(): DriveActionDescriptor[] {
+		return driveSelectionActions(reconciledSelectedItems, variant, { isOnline })
+	}
+
+	// Runs `id` on the selection where its menu offers it enabled.
+	function runOnSelection(keyboardEvent: KeyboardEvent, id: DriveActionId): void {
+		const descriptor = offersAction(selectionActions(), id)
+
+		if (descriptor !== undefined) {
 			keyboardEvent.preventDefault()
-			handleBulkDialogAction(bulkAction)
+			runDriveAction(descriptor, reconciledSelectedItems, actionHandlers())
+		}
+	}
+
+	// The item under the cursor, where its menu offers `id` enabled. The row's menu has Open (and Open as text in its
+	// place) and, for a search hit, Open containing directory.
+	function cursorOffers(item: DriveItem | undefined, id: DriveActionId): DriveActionDescriptor | undefined {
+		return item === undefined
+			? undefined
+			: offersAction(driveSelectionActions([item], variant, { isOnline, open: true, searchHit: isSearchHitRow(item) }), id)
+	}
+
+	function runOnCursor(keyboardEvent: KeyboardEvent, id: DriveActionId): void {
+		const item = sortedItems[safeActiveIndex]
+		const descriptor = cursorOffers(item, id)
+
+		if (item !== undefined && descriptor !== undefined) {
+			keyboardEvent.preventDefault()
+			runDriveAction(descriptor, [item], actionHandlers())
 		}
 	}
 
 	const cursorDeps = [sortedItems, safeActiveIndex, variant, isOnline, search.active, search.parentPaths]
 	const selectionDeps = [reconciledSelectedItems, variant, isOnline]
 
+	// The cursor item's own entries.
+	useAction(
+		"drive.rename",
+		keyboardEvent => {
+			runOnCursor(keyboardEvent, "rename")
+		},
+		OUTSIDE_OVERLAYS,
+		cursorDeps
+	)
+
 	useAction(
 		"drive.versions",
 		keyboardEvent => {
-			runCursorDialog(keyboardEvent, "versions")
+			runOnCursor(keyboardEvent, "versions")
 		},
 		OUTSIDE_OVERLAYS,
 		cursorDeps
@@ -766,7 +754,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	useAction(
 		"drive.color",
 		keyboardEvent => {
-			runCursorDialog(keyboardEvent, "color")
+			runOnCursor(keyboardEvent, "color")
 		},
 		OUTSIDE_OVERLAYS,
 		cursorDeps
@@ -775,16 +763,36 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	useAction(
 		"drive.openAsText",
 		keyboardEvent => {
-			runCursorDialog(keyboardEvent, "openAsText")
+			runOnCursor(keyboardEvent, "openAsText")
+		},
+		OUTSIDE_OVERLAYS,
+		cursorDeps
+	)
+
+	// The public link's URL to the clipboard, as the row menu's Copy link does.
+	useAction(
+		"drive.copyLink",
+		keyboardEvent => {
+			runOnCursor(keyboardEvent, "copyLink")
 		},
 		OUTSIDE_OVERLAYS,
 		cursorDeps
 	)
 
 	useAction(
+		"drive.info",
+		keyboardEvent => {
+			runOnCursor(keyboardEvent, "info")
+		},
+		OUTSIDE_OVERLAYS,
+		cursorDeps
+	)
+
+	// The selection's entries, as the selection bar runs them.
+	useAction(
 		"drive.copyTo",
 		keyboardEvent => {
-			runSelectionDialog(keyboardEvent, "copy")
+			runOnSelection(keyboardEvent, "copy")
 		},
 		OUTSIDE_OVERLAYS,
 		selectionDeps
@@ -793,115 +801,67 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	useAction(
 		"drive.share",
 		keyboardEvent => {
-			runSelectionDialog(keyboardEvent, "share")
+			runOnSelection(keyboardEvent, "share")
 		},
 		OUTSIDE_OVERLAYS,
 		selectionDeps
 	)
 
-	// The public link's URL to the clipboard, as the row menu's Copy link does.
-	useAction(
-		"drive.copyLink",
-		keyboardEvent => {
-			const item = sortedItems[safeActiveIndex]
-
-			if (cursorItemOffers(item, "copyLink")) {
-				keyboardEvent.preventDefault()
-				void copyItemLink(item, t("driveLinkUrlCopiedToast"), () => {
-					handleItemAction("link", item)
-				})
-			}
-		},
-		OUTSIDE_OVERLAYS,
-		cursorDeps
-	)
-
-	// preventDefault whenever the listing takes the key, guarded case or
-	// not — Backspace's "navigate back" in the engines that still have it. What it does is what takes the
-	// selection out of this listing (driveDeleteKeyTarget): trash, stop a share, disable a link. Nothing in
-	// the trash itself, where deleting forever has its own confirmed key.
+	// preventDefault whenever the listing takes the key, guarded case or not — Backspace's "navigate back" in the
+	// engines that still have it. It runs what takes the selection out of this listing (driveDeleteKeyTarget): trash,
+	// stop a share, disable a link. Nothing in the trash itself, where deleting forever has its own confirmed key.
 	useAction(
 		"drive.trash",
 		keyboardEvent => {
 			keyboardEvent.preventDefault()
 
-			if (!isOnline) {
-				return
-			}
+			const descriptors = selectionActions()
+			const target = driveDeleteKeyTarget(descriptors)
+			const descriptor = target === null ? undefined : offersAction(descriptors, target)
 
-			const target = driveDeleteKeyTarget(selectionActions())
-
-			if (target !== null) {
-				handleBulkDialogAction(target)
+			if (descriptor !== undefined) {
+				runDriveAction(descriptor, reconciledSelectedItems, actionHandlers())
 			}
 		},
 		OUTSIDE_OVERLAYS,
-		[reconciledSelectedItems, variant, isOnline]
+		selectionDeps
 	)
 
-	// The trash's two dispositions, each confirmed by its dialog. preventDefault only when they act.
+	// The trash's two dispositions: a selection's confirmed by its dialog, one item's restore direct as in its menu.
 	useAction(
 		"drive.restore",
 		keyboardEvent => {
-			if (selectionOffers("restoreSelected")) {
-				keyboardEvent.preventDefault()
-				handleBulkDialogAction("restoreSelected")
-			}
+			runOnSelection(keyboardEvent, "restore")
 		},
 		OUTSIDE_OVERLAYS,
-		[reconciledSelectedItems, variant, isOnline]
+		selectionDeps
 	)
 
 	useAction(
 		"drive.deletePermanently",
 		keyboardEvent => {
-			if (selectionOffers("delete")) {
-				keyboardEvent.preventDefault()
-				handleBulkDialogAction("delete")
-			}
+			runOnSelection(keyboardEvent, "deletePermanently")
 		},
 		OUTSIDE_OVERLAYS,
-		[reconciledSelectedItems, variant, isOnline]
+		selectionDeps
 	)
 
-	// Favorite and Move act on the selection, where and as the bulk bar does.
 	useAction(
 		"drive.toggleFavorite",
 		keyboardEvent => {
-			if (selectionOffers("favorite")) {
-				keyboardEvent.preventDefault()
-				void runBulkFavorite(reconciledSelectedItems)
-			}
+			runOnSelection(keyboardEvent, "favorite")
 		},
 		OUTSIDE_OVERLAYS,
-		[reconciledSelectedItems, variant, isOnline]
+		selectionDeps
 	)
 
 	useAction(
 		"drive.move",
 		keyboardEvent => {
-			if (selectionOffers("move")) {
-				keyboardEvent.preventDefault()
-				handleBulkDialogAction("move")
-			}
+			runOnSelection(keyboardEvent, "move")
 		},
 		OUTSIDE_OVERLAYS,
-		[reconciledSelectedItems, variant, isOnline]
-	)
-
-	// The item under the cursor, as Rename.
-	useAction(
-		"drive.info",
-		keyboardEvent => {
-			const item = sortedItems[safeActiveIndex]
-
-			if (cursorItemOffers(item, "info")) {
-				keyboardEvent.preventDefault()
-				handleItemAction("info", item)
-			}
-		},
-		OUTSIDE_OVERLAYS,
-		[sortedItems, safeActiveIndex, variant, isOnline]
+		selectionDeps
 	)
 
 	// The directory holding this one, with the one just left selected, as Finder and Explorer do. The flat listings
@@ -958,16 +918,11 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	const containingDirectoryRef = useAction(
 		"drive.openContainingDirectory",
 		keyboardEvent => {
-			const item = sortedItems[safeActiveIndex]
-
-			if (listboxKeyTargetIsInteractive(keyboardEvent.target) || !cursorItemOffers(item, "openContainingDirectory")) {
+			if (listboxKeyTargetIsInteractive(keyboardEvent.target)) {
 				return
 			}
 
-			keyboardEvent.preventDefault()
-			void runOpenContainingDirectory(defaultRevealDeps, item, target => {
-				void navigate(target)
-			})
+			runOnCursor(keyboardEvent, "openContainingDirectory")
 		},
 		OUTSIDE_OVERLAYS,
 		cursorDeps
@@ -985,33 +940,17 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		[setScrollElement, openRef, itemMenuRef, containingDirectoryRef]
 	)
 
-	// preventDefault whenever the listing takes the key — mod+s's
-	// browser default (Save Page As) must never fire over it. Guards: the trash variant (download isn't
-	// offered there, matching item-menu/bulk-bar's own trash exclusion) plus isBulkDownloadEnabled
-	// (bulkActionBar.logic.ts) — the single unifying ENABLED gate every download entry point shares, empty
-	// selection included (false for []), plus offline — a download has nothing to fetch from without a
-	// connection. Also inert when the selection includes an undecryptable item — its meta is ciphertext
-	// with no content key, so it can never decrypt (mirrors item-menu/bulk-bar's own undecryptable
-	// exclusion) — void, not awaited, so the FSA save picker inside startDownloads keeps this keydown's
-	// own live user gesture.
+	// preventDefault whenever the listing takes the key — mod+s's browser default (Save Page As) must never fire over it.
+	// It downloads where the selection's menu offers Download enabled (never in the trash, offline or with an undecryptable
+	// item), synchronously off the keydown so the save picker keeps its user activation.
 	useAction(
 		"drive.download",
 		keyboardEvent => {
 			keyboardEvent.preventDefault()
-
-			if (
-				variant === "trash" ||
-				!isOnline ||
-				!isBulkDownloadEnabled(reconciledSelectedItems) ||
-				reconciledSelectedItems.some(item => item.data.undecryptable)
-			) {
-				return
-			}
-
-			void startDownloads(reconciledSelectedItems)
+			runOnSelection(keyboardEvent, "download")
 		},
 		OUTSIDE_OVERLAYS,
-		[reconciledSelectedItems, variant, isOnline]
+		selectionDeps
 	)
 
 	// mod+c/x/v and the Paste entry in the upload menus. A paste always lands in the directory on
@@ -1289,9 +1228,8 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 														onPointerSelect={handlePointerSelect}
 														onCursorMove={setCursor}
 														onOpen={handleOpen}
-														onItemAction={handleItemAction}
+														onDialogAction={handleDialogAction}
 														destinationActions={destination.actionsFor}
-														onBulkAction={handleBulkDialogAction}
 														registerRef={registerRef}
 													/>
 												)
@@ -1339,9 +1277,8 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 																onPointerSelect={handlePointerSelect}
 																onCursorMove={setCursor}
 																onOpen={handleOpen}
-																onItemAction={handleItemAction}
+																onDialogAction={handleDialogAction}
 																destinationActions={destination.actionsFor}
-																onBulkAction={handleBulkDialogAction}
 																registerRef={registerRef}
 															/>
 														)
@@ -1514,7 +1451,20 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 									<BulkActionBar
 										variant={variant}
 										selectedItems={reconciledSelectedItems}
-										onDialogAction={handleBulkDialogAction}
+										onDialogAction={handleDialogAction}
+										onOpen={item => {
+											const index = sortedItems.findIndex(candidate => driveRowKey(candidate) === driveRowKey(item))
+
+											if (index !== -1) {
+												handleOpen(index)
+											}
+										}}
+										searchHit={isSearchHitRow}
+										destination={item => ({
+											actionsFor: destination.actionsFor,
+											ancestry: [...pathUuids, item.data.uuid],
+											pasteShortcut: false
+										})}
 									/>
 								</div>,
 								windowBarSlot

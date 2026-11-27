@@ -95,10 +95,10 @@ afterEach(() => {
 describe("useDriveDialogHost — Open as text", () => {
 	it("opens the preview overlay in its text mode on just that file", () => {
 		const item = named("settings.bin")
-		const { result } = renderHook(() => useDriveDialogHost({ variant: "drive", selectedItems: [], hiddenNoticeApplies: false }))
+		const { result } = renderHook(() => useDriveDialogHost({ variant: "drive", hiddenNoticeApplies: false }))
 
 		act(() => {
-			result.current.handleItemAction("openAsText", item)
+			result.current.handleDialogAction("openAsText", [item])
 		})
 
 		render(<>{result.current.renderActiveDialog()}</>)
@@ -108,7 +108,7 @@ describe("useDriveDialogHost — Open as text", () => {
 
 	it("opens a normal preview without it", () => {
 		const item = named("notes.txt")
-		const { result } = renderHook(() => useDriveDialogHost({ variant: "drive", selectedItems: [], hiddenNoticeApplies: false }))
+		const { result } = renderHook(() => useDriveDialogHost({ variant: "drive", hiddenNoticeApplies: false }))
 
 		act(() => {
 			result.current.openPreview([item], 0)
@@ -127,10 +127,10 @@ describe("useDriveDialogHost — Compress and Extract", () => {
 		["extractTo", "extractTo", "items"]
 	] as const)("routes the item menu's %s to its dialog", (kind, name, prop) => {
 		const item = named("backup.zip")
-		const { result } = renderHook(() => useDriveDialogHost({ variant: "sharedIn", selectedItems: [], hiddenNoticeApplies: false }))
+		const { result } = renderHook(() => useDriveDialogHost({ variant: "sharedIn", hiddenNoticeApplies: false }))
 
 		act(() => {
-			result.current.handleItemAction(kind, item)
+			result.current.handleDialogAction(kind, [item])
 		})
 
 		render(<>{result.current.renderActiveDialog()}</>)
@@ -146,10 +146,10 @@ describe("useDriveDialogHost — Compress and Extract", () => {
 
 	it.each(["compress", "extractTo"] as const)("routes the bulk %s to its dialog on the whole selection", kind => {
 		const selectedItems = [named("a.zip"), named("b.zip")]
-		const { result } = renderHook(() => useDriveDialogHost({ variant: "drive", selectedItems, hiddenNoticeApplies: false }))
+		const { result } = renderHook(() => useDriveDialogHost({ variant: "drive", hiddenNoticeApplies: false }))
 
 		act(() => {
-			result.current.handleBulkDialogAction(kind)
+			result.current.handleDialogAction(kind, selectedItems)
 		})
 
 		render(<>{result.current.renderActiveDialog()}</>)

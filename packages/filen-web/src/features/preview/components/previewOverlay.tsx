@@ -113,7 +113,7 @@ import { usePreviewPagerFocus } from "@/features/preview/hooks/usePreviewPagerFo
 import { RemoteChangeDialog } from "@/features/preview/components/remoteChangeDialog"
 import { DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
 import { toggleItemFavorite } from "@/features/drive/lib/favorite"
-import { applyOfflineGate, driveItemActions, type ItemActionId } from "@/features/drive/components/itemMenu.logic"
+import { driveSelectionActions, type DriveActionId } from "@/features/drive/lib/selectionActions"
 import { type ParentNaming } from "@/features/drive/lib/archiveTargets"
 import { Button } from "@/components/ui/button"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
@@ -160,7 +160,7 @@ export interface PreviewOverlayProps {
 	onFavoriteToggled?: (item: DriveItem) => void
 	// Header-menu entries the opening surface doesn't offer in its own menus, so the viewer matches them
 	// (Photos hides Move).
-	hiddenMenuActionIds?: ReadonlySet<ItemActionId> | undefined
+	hiddenMenuActionIds?: ReadonlySet<DriveActionId> | undefined
 	// The header menu's Compress for a surface with its own directory names and selection (Photos); the
 	// drive's when omitted.
 	compressParentNaming?: ParentNaming | undefined
@@ -1212,7 +1212,7 @@ export function PreviewOverlay({
 			return
 		}
 
-		const descriptors = applyOfflineGate(driveItemActions(driveItem, variant), isOnline)
+		const descriptors = driveSelectionActions([driveItem], variant, { isOnline })
 		const hidden = previewMenuHiddenActionIds(hiddenMenuActionIds, previewDownloadable(downloadable, variant))
 		const offered = descriptors.filter(descriptor => !hidden.has(descriptor.id))
 
@@ -1231,7 +1231,7 @@ export function PreviewOverlay({
 			return
 		}
 
-		// As the menu's own entries (onItemAction below).
+		// As the menu's own entries (onDialogAction below).
 		if (kind === "move" || kind === "versions") {
 			remote.expectOwnChange(driveItem.data.uuid, kind === "move" ? "move" : "restore")
 		}
@@ -1485,9 +1485,9 @@ export function PreviewOverlay({
 												</TooltipContent>
 											</Tooltip>
 											<DriveDropdownMenuContent
-												item={driveItem}
+												items={[driveItem]}
 												variant={variant}
-												onItemAction={(kind, _item, startPath) => {
+												onDialogAction={(kind, _items, startPath) => {
 													if (saving) return
 
 													// The move and version-restore dialogs report no outcome, so their echo, whenever it

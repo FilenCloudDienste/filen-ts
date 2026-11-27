@@ -67,7 +67,7 @@ import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { driveNamesQueryKey } from "@/features/drive/queries/drive"
 import { photosListingQueryKey, type PhotosListing } from "@/features/photos/queries/photos"
-import { PHOTOS_HIDDEN_ACTION_IDS, PHOTOS_HIDDEN_BULK_ACTION_IDS, photosParentNaming } from "@/features/photos/lib/itemActions"
+import { PHOTOS_HIDDEN_ACTION_IDS, photosParentNaming } from "@/features/photos/lib/itemActions"
 import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { PhotosBulkActionBar } from "@/features/photos/components/bulkActionBar"
@@ -187,7 +187,6 @@ afterEach(() => {
 describe("photos hidden actions", () => {
 	it("hide only Move and Extract, menus and selection bar alike", () => {
 		expect([...PHOTOS_HIDDEN_ACTION_IDS]).toEqual(["move", "extract"])
-		expect([...PHOTOS_HIDDEN_BULK_ACTION_IDS]).toEqual(["move", "extract"])
 	})
 })
 
@@ -279,11 +278,11 @@ describe("photo tile menu Compress", () => {
 					{ defaultOpen: true },
 					createElement(DropdownMenuTrigger, null, "menu"),
 					createElement(DriveDropdownMenuContent, {
-						item: EIFFEL,
+						items: [EIFFEL],
 						variant: "drive",
 						hiddenActionIds: PHOTOS_HIDDEN_ACTION_IDS,
 						compressParentNaming: photosParentNaming([PHOTOS_ROOT], "Photos"),
-						onItemAction: vi.fn()
+						onDialogAction: vi.fn()
 					})
 				)
 			)

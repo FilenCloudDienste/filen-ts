@@ -1,6 +1,10 @@
-import { applyOfflineGate, driveItemActions, type ItemActionId, type ItemMenuShortcuts } from "@/features/drive/components/itemMenu.logic"
-import { driveBulkActions, type BulkActionDescriptor } from "@/features/drive/components/bulkActionBar.logic"
-import { type DriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
+import {
+	driveSelectionActions,
+	offersAction,
+	type DriveActionDescriptor,
+	type DriveActionId,
+	type DriveActionShortcuts
+} from "@/features/drive/lib/selectionActions"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
 import { type ParentNaming } from "@/features/drive/lib/archiveTargets"
 import { cachedDirectoryName, driveNamesQueryKey } from "@/features/drive/queries/drive"
@@ -11,14 +15,12 @@ import { queryClient } from "@/queries/client"
 // preview alike) minus Move: mobile hides it from its photos context too, and a flat cross-tree
 // projection has no directory context for a move destination to restart from. Copy and Compress stay:
 // both only read the photos, and what they make lands in the Cloud Drive tree. Extract never applies: a
-// photos listing holds only images and videos.
-const PHOTOS_HIDDEN_IDS = ["move", "extract"] as const satisfies readonly (ItemActionId & BulkActionDescriptor["id"])[]
+// photos listing holds only images and videos. The selection bar drops the same ids.
+export const PHOTOS_HIDDEN_ACTION_IDS: ReadonlySet<DriveActionId> = new Set(["move", "extract"])
 
-export const PHOTOS_HIDDEN_ACTION_IDS: ReadonlySet<ItemActionId> = new Set(PHOTOS_HIDDEN_IDS)
-
-// The grid's keys (photos/lib/keymap.ts), as a photo's menus show them: drive's entries under the photos grid's own
-// actions.
-export const PHOTOS_ITEM_SHORTCUTS: ItemMenuShortcuts = {
+// The grid's keys (photos/lib/keymap.ts), as a photo's menus and the selection bar show them: drive's entries under the
+// photos grid's own actions.
+export const PHOTOS_ITEM_SHORTCUTS: DriveActionShortcuts = {
 	entries: {
 		rename: "photos.rename",
 		favorite: "photos.toggleFavorite",
@@ -30,22 +32,17 @@ export const PHOTOS_ITEM_SHORTCUTS: ItemMenuShortcuts = {
 	copyToClipboard: "photos.copy"
 }
 
-// The selection bar's counterpart (bulkActionBar.tsx), the same ids for the same reasons.
-export const PHOTOS_HIDDEN_BULK_ACTION_IDS: ReadonlySet<BulkActionDescriptor["id"]> = new Set(PHOTOS_HIDDEN_IDS)
-
-// What the selection bar offers for a photos selection, and so what the grid's keys may run on it. A photos selection
-// is always owned, decryptable, non-shared-root files, so the drive variant yields exactly the photos set once the
-// hidden ids are dropped.
-export function photosBulkActions(flags: DriveSelectionFlags): BulkActionDescriptor[] {
-	return driveBulkActions("drive", flags).filter(descriptor => !PHOTOS_HIDDEN_BULK_ACTION_IDS.has(descriptor.id))
+// What the menus offer for photos, and so what the grid's keys may run on them. Photos are always owned, decryptable,
+// non-shared-root files, so the drive variant yields exactly the photos set once the hidden ids are dropped.
+export function photosActions(items: readonly PhotoItem[], isOnline: boolean): DriveActionDescriptor[] {
+	return driveSelectionActions(items, "drive", { isOnline, shortcuts: PHOTOS_ITEM_SHORTCUTS }).filter(
+		descriptor => !PHOTOS_HIDDEN_ACTION_IDS.has(descriptor.id)
+	)
 }
 
-// Whether a photo's own menu offers `id`, enabled while `isOnline` says so: a key never opens what the menu would not.
-export function photoItemOffers(item: PhotoItem, id: ItemActionId, isOnline: boolean): boolean {
-	return (
-		!PHOTOS_HIDDEN_ACTION_IDS.has(id) &&
-		applyOfflineGate(driveItemActions(item, "drive"), isOnline).some(descriptor => descriptor.id === id && descriptor.enabled !== false)
-	)
+// Whether the menus over `items` offer `id`, enabled: a key never runs what the menu would not.
+export function photosOffer(items: readonly PhotoItem[], id: DriveActionId, isOnline: boolean): boolean {
+	return offersAction(photosActions(items, isOnline), id) !== undefined
 }
 
 // A compress's directory names from what Photos already holds, read only when a default name or

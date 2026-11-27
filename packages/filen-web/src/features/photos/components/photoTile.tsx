@@ -1,7 +1,7 @@
 import { type MouseEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { CheckIcon, PlayIcon, StarIcon } from "lucide-react"
-import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
+import { type DriveActionDialogKind } from "@/features/drive/lib/selectionActions"
 import { showVideoBadge } from "@/features/drive/components/driveTile.logic"
 import { useFileKindVerdict } from "@/features/drive/hooks/useFileKindVerdict"
 import { ItemThumbnail } from "@/features/drive/components/itemThumbnail"
@@ -34,7 +34,7 @@ export interface PhotoTileProps {
 	onTileClick: (index: number, event: MouseEvent<HTMLDivElement>, pointerType: string) => void
 	// A touch long-press: toggles the tile like a Ctrl/Cmd+click, where a mouse would right-click.
 	onTileToggle: (index: number) => void
-	onItemAction: (kind: ItemActionDialogKind, item: PhotoItem, startPath?: readonly string[]) => void
+	onItemAction: (kind: DriveActionDialogKind, item: PhotoItem, startPath?: readonly string[]) => void
 }
 
 // Square media tile — mirrors driveTile.tsx's own face/badge composition (thumbnail-or-icon, a
@@ -130,12 +130,12 @@ export function PhotoTile({
 									tabIndex={active ? 0 : -1}
 								/>
 								<DriveDropdownMenuContent
-									item={item}
+									items={[item]}
 									variant="drive"
 									hiddenActionIds={PHOTOS_HIDDEN_ACTION_IDS}
 									shortcuts={PHOTOS_ITEM_SHORTCUTS}
 									compressParentNaming={compressParentNaming}
-									onItemAction={(kind, _item, startPath) => {
+									onDialogAction={(kind, _items, startPath) => {
 										onItemAction(kind, item, startPath)
 									}}
 									onFavoriteToggled={updated => {
@@ -148,12 +148,12 @@ export function PhotoTile({
 				}
 			/>
 			<DriveContextMenuContent
-				item={item}
+				items={[item]}
 				variant="drive"
 				hiddenActionIds={PHOTOS_HIDDEN_ACTION_IDS}
 				shortcuts={PHOTOS_ITEM_SHORTCUTS}
 				compressParentNaming={compressParentNaming}
-				onItemAction={(kind, _item, startPath) => {
+				onDialogAction={(kind, _items, startPath) => {
 					onItemAction(kind, item, startPath)
 				}}
 				onFavoriteToggled={updated => {

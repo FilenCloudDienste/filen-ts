@@ -35,7 +35,7 @@ vi.mock("@/lib/keymap/kbd", async () => {
 
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
-import { DriveDropdownMenuContent, type ItemMenuContentProps } from "@/features/drive/components/itemMenu"
+import { DriveDropdownMenuContent, type DriveActionMenuProps } from "@/features/drive/components/itemMenu"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 
@@ -57,13 +57,13 @@ function report(favorited: boolean): DriveItem {
 
 const ERROR = { species: "plain", message: "Not allowed", label: "Not allowed" }
 
-async function choose(label: string, item: DriveItem, variant: DriveVariant, props: Partial<ItemMenuContentProps> = {}): Promise<void> {
+async function choose(label: string, item: DriveItem, variant: DriveVariant, props: Partial<DriveActionMenuProps> = {}): Promise<void> {
 	render(
 		createElement(
 			DropdownMenu,
 			{ defaultOpen: true },
 			createElement(DropdownMenuTrigger, null, "menu"),
-			createElement(DriveDropdownMenuContent, { item, variant, onItemAction: vi.fn(), ...props })
+			createElement(DriveDropdownMenuContent, { items: [item], variant, onDialogAction: vi.fn(), ...props })
 		)
 	)
 

@@ -1,8 +1,7 @@
 import { type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useDialogHost } from "@/lib/useDialogHost"
-import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
-import { type BulkDialogActionKind } from "@/features/drive/components/bulkActionBar.logic"
+import { type DriveActionDialogKind } from "@/features/drive/lib/selectionActions"
 import { renamePhotoItem, trashPhotos, patchPhoto } from "@/features/photos/lib/actions"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
 import { DRIVE_TRASH, driveActivity } from "@/features/drive/lib/activity"
@@ -30,8 +29,8 @@ type ActivePhotosDialog =
 
 export interface PhotosDialogHost {
 	isDialogOpen: boolean
-	handleItemAction: (kind: ItemActionDialogKind, item: PhotoItem, startPath?: readonly string[]) => void
-	handleBulkDialogAction: (kind: BulkDialogActionKind, startPath?: readonly string[]) => void
+	handleItemAction: (kind: DriveActionDialogKind, item: PhotoItem, startPath?: readonly string[]) => void
+	handleBulkDialogAction: (kind: DriveActionDialogKind, startPath?: readonly string[]) => void
 	openPreview: (items: DriveItem[], index: number) => void
 	renderActiveDialog: () => ReactNode
 }
@@ -69,11 +68,11 @@ export function usePhotosDialogHost({ rootUuids, selectedItems }: UsePhotosDialo
 		setActiveDialog({ kind: "preview", items, index })
 	}
 
-	// itemMenu.logic.ts's ItemActionDialogKind is wider than PhotosDialogKind (drive's own menu can
+	// selectionActions.ts's DriveActionDialogKind is wider than PhotosDialogKind (drive's own menu can
 	// dispatch move/color/unshare/delete/import too) — a photos item under PHOTOS_HIDDEN_ACTION_IDS never
 	// gets a descriptor carrying one of those, so this narrows defensively and no-ops rather than
 	// widening the type.
-	function handleItemAction(kind: ItemActionDialogKind, item: PhotoItem, startPath?: readonly string[]): void {
+	function handleItemAction(kind: DriveActionDialogKind, item: PhotoItem, startPath?: readonly string[]): void {
 		if (
 			kind !== "rename" &&
 			kind !== "copy" &&
@@ -90,7 +89,7 @@ export function usePhotosDialogHost({ rootUuids, selectedItems }: UsePhotosDialo
 		setActiveDialog({ kind, items: [item], startPath })
 	}
 
-	function handleBulkDialogAction(kind: BulkDialogActionKind, startPath?: readonly string[]): void {
+	function handleBulkDialogAction(kind: DriveActionDialogKind, startPath?: readonly string[]): void {
 		if (kind !== "copy" && kind !== "trash" && kind !== "share" && kind !== "compress") {
 			return
 		}

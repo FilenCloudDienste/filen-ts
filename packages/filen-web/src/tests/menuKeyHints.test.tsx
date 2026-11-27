@@ -41,8 +41,7 @@ const { registerAllActions, ALL_ACTIONS } = await import("@/lib/keymap/actions")
 const { clearUserCombo, setUserCombo, unbindAction } = await import("@/lib/keymap/registry")
 const { narrowItem } = await import("@/features/drive/lib/item")
 const { DriveDropdownMenuContent } = await import("@/features/drive/components/itemMenu")
-const { DRIVE_ITEM_SHORTCUTS, itemMenuShortcut } = await import("@/features/drive/components/itemMenu.logic")
-const { driveBulkKbdAction } = await import("@/features/drive/components/bulkActionBar.logic")
+const { DRIVE_ACTION_SHORTCUTS, driveSelectionActions } = await import("@/features/drive/lib/selectionActions")
 const { PHOTOS_ITEM_SHORTCUTS } = await import("@/features/photos/lib/itemActions")
 const { PREVIEW_ITEM_SHORTCUTS } = await import("@/features/preview/components/previewOverlay.logic")
 const { ZoomMenuContent } = await import("@/features/preview/components/commandBarControls")
@@ -85,14 +84,14 @@ function keysOf(label: string): string | undefined {
 	return entries().find(([entry]) => entry === label)?.[1]
 }
 
-function openItemMenu(variant: "drive" | "trash" | "links", shortcuts = DRIVE_ITEM_SHORTCUTS): void {
+function openItemMenu(variant: "drive" | "trash" | "links", shortcuts = DRIVE_ACTION_SHORTCUTS): void {
 	render(
 		<DropdownMenu defaultOpen>
 			<DropdownMenuTrigger>menu</DropdownMenuTrigger>
 			<DriveDropdownMenuContent
-				item={report()}
+				items={[report()]}
 				variant={variant}
-				onItemAction={vi.fn()}
+				onDialogAction={vi.fn()}
 				onOpen={vi.fn()}
 				shortcuts={shortcuts}
 			/>
@@ -109,30 +108,30 @@ describe("the item menus' key hints", () => {
 	it("name only registered actions", () => {
 		const registered = new Set(ALL_ACTIONS.map(def => def.id))
 		const named = [
-			...[DRIVE_ITEM_SHORTCUTS, PHOTOS_ITEM_SHORTCUTS, PREVIEW_ITEM_SHORTCUTS].flatMap(shortcuts => [
+			...[DRIVE_ACTION_SHORTCUTS, PHOTOS_ITEM_SHORTCUTS, PREVIEW_ITEM_SHORTCUTS].flatMap(shortcuts => [
 				...Object.values(shortcuts.entries),
 				shortcuts.copyToClipboard,
 				shortcuts.deleteKey
-			]),
-			...(
-				["favorite", "move", "copy", "compress", "extract", "share", "download", "downloadAs", "restoreSelected", "delete"] as const
-			).map(id => driveBulkKbdAction(id, null))
+			])
 		].filter(id => id !== undefined)
 
 		expect(named.filter(id => !registered.has(id))).toEqual([])
 	})
 
 	it("puts the Delete key on the removal it runs, after an entry's own key", () => {
-		expect(itemMenuShortcut(DRIVE_ITEM_SHORTCUTS, "rename", "trash")).toBe("drive.rename")
-		expect(itemMenuShortcut(DRIVE_ITEM_SHORTCUTS, "trash", "trash")).toBe("drive.trash")
-		expect(itemMenuShortcut(DRIVE_ITEM_SHORTCUTS, "unshare", "unshare")).toBe("drive.trash")
-		expect(itemMenuShortcut(DRIVE_ITEM_SHORTCUTS, "trash", "unshare")).toBeUndefined()
-		expect(itemMenuShortcut(DRIVE_ITEM_SHORTCUTS, "publicLink", null)).toBeUndefined()
-		expect(itemMenuShortcut(undefined, "rename", null)).toBeUndefined()
-		expect(itemMenuShortcut(PREVIEW_ITEM_SHORTCUTS, "trash", null)).toBe("preview.trash")
-		expect(driveBulkKbdAction("trash", "trash")).toBe("drive.trash")
-		expect(driveBulkKbdAction("unshare", "unshare")).toBe("drive.trash")
-		expect(driveBulkKbdAction("trash", "unshare")).toBeUndefined()
+		function kbd(variant: "drive" | "links", id: string, shortcuts = DRIVE_ACTION_SHORTCUTS): string | undefined {
+			return driveSelectionActions([report(), report()], variant, { isOnline: true, shortcuts }).find(each => each.id === id)
+				?.kbdAction
+		}
+
+		expect(driveSelectionActions([report()], "drive", { isOnline: true, shortcuts: DRIVE_ACTION_SHORTCUTS })[0]?.kbdAction).toBe(
+			"drive.rename"
+		)
+		expect(kbd("drive", "trash")).toBe("drive.trash")
+		expect(kbd("links", "disableLink")).toBe("drive.trash")
+		expect(kbd("links", "trash")).toBeUndefined()
+		expect(kbd("drive", "trash", PREVIEW_ITEM_SHORTCUTS)).toBe("preview.trash")
+		expect(driveSelectionActions([report()], "drive", { isOnline: true }).every(each => each.kbdAction === undefined)).toBe(true)
 	})
 
 	it("shows the drive listing's keys at the entries' ends, an unbound one showing nothing", () => {
@@ -170,9 +169,9 @@ describe("the item menus' key hints", () => {
 			<DropdownMenu defaultOpen>
 				<DropdownMenuTrigger>menu</DropdownMenuTrigger>
 				<DriveDropdownMenuContent
-					item={report()}
+					items={[report()]}
 					variant="drive"
-					onItemAction={vi.fn()}
+					onDialogAction={vi.fn()}
 				/>
 			</DropdownMenu>
 		)

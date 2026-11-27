@@ -3,7 +3,7 @@ import { StarIcon } from "lucide-react"
 import { ItemThumbnail } from "@/features/drive/components/itemThumbnail"
 import { formatItemSize, formatModifiedDate } from "@/features/drive/lib/format"
 import { DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
-import { DRIVE_ITEM_SHORTCUTS } from "@/features/drive/components/itemMenu.logic"
+import { DRIVE_ACTION_SHORTCUTS } from "@/features/drive/lib/selectionActions"
 import { DriveCellContextMenuContent } from "@/features/drive/components/bulkMenu"
 import { useDriveItemCell, type DriveItemCellProps } from "@/features/drive/hooks/useDriveItemCell"
 import { dropHighlightClass } from "@/features/drive/hooks/useDriveDropTarget"
@@ -37,9 +37,8 @@ export function DriveRow({
 	onPointerSelect,
 	onCursorMove,
 	onOpen,
-	onItemAction,
+	onDialogAction,
 	destinationActions,
-	onBulkAction,
 	registerRef
 }: DriveRowProps) {
 	const { t } = useTranslation("drive")
@@ -156,13 +155,13 @@ export function DriveRow({
 							{/* The ⋯ dropdown stays single-item — it is a per-row affordance, and the bulk
 							    surface already has its own bar plus the context menu below. */}
 							<DriveDropdownMenuContent
-								item={item}
+								items={[item]}
 								variant={variant}
-								onItemAction={onItemAction}
+								onDialogAction={onDialogAction}
 								searchHit={searchHit}
 								onOpen={open}
 								destination={destination}
-								shortcuts={DRIVE_ITEM_SHORTCUTS}
+								shortcuts={DRIVE_ACTION_SHORTCUTS}
 							/>
 						</DropdownMenu>
 					</div>
@@ -173,8 +172,7 @@ export function DriveRow({
 				item={item}
 				variant={variant}
 				selectedItems={selectedItems}
-				onBulkAction={onBulkAction}
-				onItemAction={onItemAction}
+				onDialogAction={onDialogAction}
 				searchHit={searchHit}
 				onOpen={open}
 				destination={destination}

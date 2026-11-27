@@ -12,7 +12,7 @@ export type ChatActionDialogKind = "rename" | "delete" | "leave" | "participants
 
 export type ChatActionId = "markRead" | "mute" | "participants" | "rename" | "copyId" | "delete" | "leave"
 
-// `enabled` mirrors itemMenu.logic.ts's own field; only applyOfflineGate below ever sets it.
+// `enabled` mirrors drive's descriptors' own field; only applyOfflineGate below ever sets it.
 export type ChatActionDescriptor = ActionDescriptor<ChatsKey, ChatActionId, ChatActionDialogKind> & { enabled?: boolean }
 
 const MARK_READ: ChatActionDescriptor = { id: "markRead", ...CHAT_ACTION_DEFS.markRead, run: "direct" }

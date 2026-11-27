@@ -19,7 +19,7 @@ const {
 	useIsOnline,
 	searchState,
 	useAction,
-	handleBulkDialogAction,
+	handleDialogAction,
 	virtualizerItems,
 	useDriveDirectorySizes,
 	EmptyState
@@ -28,7 +28,7 @@ const {
 	useDriveDirectorySizes: vi.fn(),
 	EmptyState: vi.fn((_props: { action?: ReactNode }) => null),
 	useAction: vi.fn<(...args: unknown[]) => () => void>(() => () => undefined),
-	handleBulkDialogAction: vi.fn(),
+	handleDialogAction: vi.fn(),
 	// Every items array the listing hands its virtualizer, in render order.
 	virtualizerItems: [] as unknown[],
 	useBlockedUsers: vi.fn(),
@@ -66,8 +66,7 @@ vi.mock("@/features/drive/hooks/useMarqueeSelection", () => ({
 vi.mock("@/features/drive/hooks/useDriveDialogHost", () => ({
 	useDriveDialogHost: () => ({
 		isDialogOpen: false,
-		handleItemAction: vi.fn(),
-		handleBulkDialogAction,
+		handleDialogAction,
 		handleEmptyTrash: vi.fn(),
 		openPreview: vi.fn(),
 		renderActiveDialog: () => null
@@ -637,7 +636,7 @@ describe("DirectoryListing — Delete/Backspace trash shortcut", () => {
 		select([documents])
 		pressTrash()
 
-		expect(handleBulkDialogAction).toHaveBeenCalledWith("trash")
+		expect(handleDialogAction).toHaveBeenCalledWith("trash", [documents])
 	})
 
 	// What takes a share out of Shared with me is leaving it, never trashing someone else's item.
@@ -648,7 +647,7 @@ describe("DirectoryListing — Delete/Backspace trash shortcut", () => {
 		select([shared])
 		pressTrash()
 
-		expect(handleBulkDialogAction).toHaveBeenCalledExactlyOnceWith("unshare")
+		expect(handleDialogAction).toHaveBeenCalledExactlyOnceWith("unshare", [shared])
 	})
 
 	it("does nothing in the trash, where deleting forever has its own key", () => {
@@ -658,7 +657,7 @@ describe("DirectoryListing — Delete/Backspace trash shortcut", () => {
 		select([trashed])
 		pressTrash()
 
-		expect(handleBulkDialogAction).not.toHaveBeenCalled()
+		expect(handleDialogAction).not.toHaveBeenCalled()
 	})
 })
 
@@ -673,15 +672,18 @@ describe("DirectoryListing — selection keys", () => {
 		})
 	}
 
-	it("restores and deletes forever in the trash, each through its confirm", () => {
-		const trashed = narrowItem(mockFile("old.pdf"))
-		const { select } = renderListing({ variant: "trash", items: [trashed] })
+	it("restores and deletes forever a selection in the trash, each through its confirm", () => {
+		const trashed = [narrowItem(mockFile("old.pdf")), narrowItem(mockFile("older.pdf"))]
+		const { select } = renderListing({ variant: "trash", items: trashed })
 
-		select([trashed])
+		select(trashed)
 		press("drive.restore")
 		press("drive.deletePermanently")
 
-		expect(handleBulkDialogAction.mock.calls).toEqual([["restoreSelected"], ["delete"]])
+		expect(handleDialogAction.mock.calls).toEqual([
+			["restoreSelected", trashed],
+			["delete", trashed]
+		])
 	})
 
 	it("neither restores nor deletes forever outside the trash", () => {
@@ -692,7 +694,7 @@ describe("DirectoryListing — selection keys", () => {
 		press("drive.restore")
 		press("drive.deletePermanently")
 
-		expect(handleBulkDialogAction).not.toHaveBeenCalled()
+		expect(handleDialogAction).not.toHaveBeenCalled()
 	})
 
 	it("copies anywhere the selection can be read, and shares only what is the caller's", () => {
@@ -703,10 +705,10 @@ describe("DirectoryListing — selection keys", () => {
 		press("drive.copyTo")
 		press("drive.share")
 
-		expect(handleBulkDialogAction.mock.calls).toEqual([["copy"]])
+		expect(handleDialogAction.mock.calls).toEqual([["copy", [shared]]])
 
 		cleanup()
-		handleBulkDialogAction.mockClear()
+		handleDialogAction.mockClear()
 
 		const documents = narrowItem(mockDir("Documents"))
 		const drive = renderListing({ variant: "drive", items: [documents] })
@@ -715,7 +717,10 @@ describe("DirectoryListing — selection keys", () => {
 		press("drive.copyTo")
 		press("drive.share")
 
-		expect(handleBulkDialogAction.mock.calls).toEqual([["copy"], ["share"]])
+		expect(handleDialogAction.mock.calls).toEqual([
+			["copy", [documents]],
+			["share", [documents]]
+		])
 	})
 
 	it("moves owned items, and never someone else's", () => {
@@ -725,10 +730,10 @@ describe("DirectoryListing — selection keys", () => {
 		select([documents])
 		press("drive.move")
 
-		expect(handleBulkDialogAction).toHaveBeenCalledExactlyOnceWith("move")
+		expect(handleDialogAction).toHaveBeenCalledExactlyOnceWith("move", [documents])
 
 		cleanup()
-		handleBulkDialogAction.mockClear()
+		handleDialogAction.mockClear()
 
 		const shared = narrowItem(mockSharedFile("FromFriend", OK_ROLE))
 		const sharedIn = renderListing({ variant: "sharedIn", items: [shared] })
@@ -736,7 +741,7 @@ describe("DirectoryListing — selection keys", () => {
 		sharedIn.select([shared])
 		press("drive.move")
 
-		expect(handleBulkDialogAction).not.toHaveBeenCalled()
+		expect(handleDialogAction).not.toHaveBeenCalled()
 	})
 })
 

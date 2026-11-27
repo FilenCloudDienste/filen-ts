@@ -78,7 +78,7 @@ export async function shareItems(
 }
 
 // Stops sharing a shared-root item — a directory shared out, or an item shared in the caller wants
-// gone. Root-only: itemMenu.logic.ts/bulkActionBar.logic.ts gate this action to isSharedRootDriveItem
+// gone. Root-only: selectionActions.ts gates this action to share roots
 // — the type guard below is a defense-in-depth backstop for a caller bug, never a state the real gated
 // callers can reach.
 //

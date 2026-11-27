@@ -38,9 +38,7 @@ export function isBlockingListingError(isRefetchError: boolean, hasData: boolean
 
 // Trash toolbar's own Empty trash trigger — present only in the trash variant, and only once the
 // listing actually holds something to empty. An already-empty trash has nothing for the confirm
-// dialog to act on, so hiding the trigger avoids a guaranteed no-op (mirrors
-// bulkActionBar.logic.ts's isBulkDownloadEnabled non-empty rationale, applied to a whole-listing
-// action instead of a selection).
+// dialog to act on, so hiding the trigger avoids a guaranteed no-op (as an empty selection offers no actions).
 export function isEmptyTrashTriggerVisible(variant: DriveVariant, itemCount: number): boolean {
 	return variant === "trash" && itemCount > 0
 }

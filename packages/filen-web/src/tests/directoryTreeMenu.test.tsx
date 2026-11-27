@@ -259,7 +259,7 @@ describe("sidebar tree menu", () => {
 				onPointerSelect: () => undefined,
 				onCursorMove: () => undefined,
 				onOpen: () => undefined,
-				onItemAction: () => undefined,
+				onDialogAction: () => undefined,
 				destinationActions: () => ({
 					newDirectory: () => undefined,
 					newTextFile: () => undefined,
@@ -267,7 +267,6 @@ describe("sidebar tree menu", () => {
 					pickFiles: () => undefined,
 					pickDirectory: () => undefined
 				}),
-				onBulkAction: () => undefined,
 				registerRef: () => undefined
 			})
 		)

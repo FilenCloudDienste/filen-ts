@@ -37,10 +37,10 @@ afterEach(() => {
 
 describe("useDriveDialogHost — the root .filen in the trash", () => {
 	it("asks for its name before deleting it permanently", () => {
-		const { result } = renderHook(() => useDriveDialogHost({ variant: "trash", selectedItems: [], hiddenNoticeApplies: false }))
+		const { result } = renderHook(() => useDriveDialogHost({ variant: "trash", hiddenNoticeApplies: false }))
 
 		act(() => {
-			result.current.handleItemAction("delete", trashed("dotfilen", ".filen"))
+			result.current.handleDialogAction("delete", [trashed("dotfilen", ".filen")])
 		})
 
 		render(<>{result.current.renderActiveDialog()}</>)
@@ -50,7 +50,7 @@ describe("useDriveDialogHost — the root .filen in the trash", () => {
 	})
 
 	it("says so in the empty-trash confirm, and only then", () => {
-		const { result } = renderHook(() => useDriveDialogHost({ variant: "trash", selectedItems: [], hiddenNoticeApplies: false }))
+		const { result } = renderHook(() => useDriveDialogHost({ variant: "trash", hiddenNoticeApplies: false }))
 
 		queryClient.setQueryData(driveListingQueryKey({ variant: "trash", uuid: null }), [trashed("docs", "Docs")])
 
