@@ -26,6 +26,7 @@ import { VideosSidebar } from "@/features/videos/components/videosSidebar"
 import { SyncSidebar } from "@/features/sync/components/syncSidebar"
 import { MountsSidebar } from "@/features/mounts/components/mountsSidebar"
 import { AccountReminders } from "@/features/shell/components/accountReminders"
+import { CommandPaletteHost } from "@/features/palette/components/commandPalette"
 import { AnnouncementStrip } from "@/features/shell/components/announcementStrip"
 import { SyncHost } from "@/features/notes/components/syncHost"
 import { ChatsSyncHost } from "@/features/chats/components/syncHost"
@@ -190,6 +191,8 @@ export function AppShell() {
 	return (
 		<div className="flex h-svh w-full flex-col overflow-hidden bg-canvas text-foreground">
 			<AccountReminders />
+			{/* Mod+K's command palette over the whole signed-in app. */}
+			<CommandPaletteHost />
 			{/* Notes sync outbox driver — mounted once in the authed shell so a pending edit flushes even
 			    while the user is on drive, not scoped to the notes route. Renders nothing. */}
 			<SyncHost />

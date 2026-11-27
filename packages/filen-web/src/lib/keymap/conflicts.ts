@@ -151,6 +151,10 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	// The shell's sidebar toggle and the desktop app's back and forward stand down while a dialog is open, and the PDF
 	// viewer and the presentation editor are bodies of the preview dialog.
 	["app.toggleSidebar", "preview.pdfToggleFit"],
+	// The command palette stands down in editable text and while a dialog is open; the editors' link keys act in their
+	// text (the notes editors) or in the preview dialog (the code, document and sheet editors).
+	["app.commandPalette", "editor.link"],
+	["app.commandPalette", "sheet.hyperlink"],
 	["desktop.back", "preview.pdfRotateCcw"],
 	["desktop.back", "presentation.objects.sendBackward"],
 	["desktop.back", "presentation.text.promote"],

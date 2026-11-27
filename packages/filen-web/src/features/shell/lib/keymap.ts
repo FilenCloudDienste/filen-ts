@@ -41,6 +41,9 @@ function moduleAction(id: string, descriptionKey: ActionDef["descriptionKey"], d
 
 export const APP_ACTIONS: readonly ActionDef[] = [
 	{ id: "app.openShortcuts", defaultCombo: "shift+slash", scope: "global", descriptionKey: "common:shortcutsTitle" },
+	// Mod+K, the command palette's key in most desktop apps and sites. The editors' link key holds it too, in text only,
+	// where the palette stands down (commandPaletteHost).
+	{ id: "app.commandPalette", defaultCombo: "mod+k", scope: "global", descriptionKey: "common:commandPalette" },
 	{
 		id: "app.openSettings",
 		defaultCombo: "mod+comma",

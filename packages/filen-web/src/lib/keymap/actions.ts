@@ -116,7 +116,7 @@ export function currentCatalog(record: KeymapRecord): ShortcutCatalog {
 }
 
 // The assistant's own keys: no handler is mounted while the user hides it (Settings > Assistant).
-const ASSISTANT_ACTION_IDS: ReadonlySet<string> = new Set(["app.toggleAssistant", "app.assistantTransform"])
+export const ASSISTANT_ACTION_IDS: ReadonlySet<string> = new Set(["app.toggleAssistant", "app.assistantTransform"])
 
 // The catalog without the assistant's keys, nor their conflicts; one per catalog.
 export function withoutAssistantActions(catalog: ShortcutCatalog): ShortcutCatalog {

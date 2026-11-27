@@ -4,6 +4,7 @@ import { sync as chatsSync } from "@/features/chats/lib/sync"
 import { clearAllTyping } from "@/features/chats/lib/typing"
 import { detachUnreadBadges } from "@/features/chats/lib/messagesVersion"
 import { resetDotFilen } from "@/lib/dotFilen"
+import { resetPaletteRecent } from "@/features/palette/lib/paletteRun"
 import { resetSocketReconnectState } from "@/features/chats/lib/socketHandlers"
 import { socketBridge } from "@/lib/sdk/socket"
 import { sdkApi } from "@/lib/sdk/client"
@@ -241,6 +242,8 @@ async function signOut(run: SignOutRun): Promise<boolean> {
 	// The drive clipboard's items and the sidebar tree's expanded directories belong to this account.
 	useDriveClipboardStore.getState().clear()
 	clearDirectoryTreeState()
+	// The command palette's recent rows name this account's items.
+	resetPaletteRecent()
 	// The assistant's saved conversations: a save still waiting out its delay must not land after the wipe.
 	resetConversationHistory()
 	// Tear the realtime socket down before the client is released — unsubscribeFromSocket needs the live

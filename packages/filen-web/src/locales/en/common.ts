@@ -179,6 +179,36 @@ export const common = {
 	/** Not-found page — action returning the visitor to the app (or sign-in when signed out) */
 	notFoundAction: "Go to Filen",
 
+	// Command palette (features/palette) — Mod+K's searchable list of actions, places, files, notes and chats
+	/** Command palette — the shortcut's name in the shortcuts list, and the dialog's accessible title */
+	commandPalette: "Command palette",
+	/** Command palette — placeholder and accessible name of the search box */
+	commandPalettePlaceholder: "Search actions, places, files, notes and chats",
+	/** Command palette — accessible name of the results list */
+	commandPaletteResults: "Results",
+	/** Command palette — shown when nothing matches the typed words */
+	commandPaletteNoResults: "Nothing matches",
+	/** Command palette — group heading: what the user picked here lately */
+	commandPaletteGroupRecent: "Recent",
+	/** Command palette — group heading: actions available on this screen */
+	commandPaletteGroupActions: "Actions",
+	/** Command palette — group heading: app sections and settings */
+	commandPaletteGroupNavigation: "Go to",
+	/** Command palette — group heading: directories and files from the listings already loaded */
+	commandPaletteGroupFiles: "Directories and files",
+	/** Command palette — group heading: notes */
+	commandPaletteGroupNotes: "Notes",
+	/** Command palette — group heading: chats */
+	commandPaletteGroupChats: "Chats",
+	/** Command palette — the last row while words are typed: hands them to Cloud Drive's own search */
+	commandPaletteSearchDrive: "Search Cloud Drive for “{{query}}”",
+	/** Command palette — a settings section row's detail line */
+	commandPaletteSettingsDetail: "Settings",
+	/** Command palette — detail line of a directory or file in Cloud Drive's root */
+	commandPaletteInDriveRoot: "In Cloud Drive",
+	/** Command palette — detail line of a directory or file: the directory holding it */
+	commandPaletteInDirectory: "In {{name}}",
+
 	// Keyboard shortcuts — the ? overlay and the Settings → Keyboard section render the same list
 	/** Keyboard shortcuts surface — title of both the overlay and the settings card, and the account-menu entry that opens it */
 	shortcutsTitle: "Keyboard shortcuts",
