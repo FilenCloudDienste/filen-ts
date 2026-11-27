@@ -13,6 +13,7 @@ import { TILE_CLASS, TILE_FACE_CLASS, TILE_NAME_CLASS, TILE_SUBLINE_CLASS } from
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu } from "@/components/ui/dropdown-menu"
 import { RowMenuTrigger } from "@/components/rowMenuTrigger"
+import { ItemLocationLabel } from "@/features/drive/components/itemLocationLabel"
 
 // Grid tiles are plain CSS-grid children of an already-positioned virtual row (see
 // directoryListing.tsx) — unlike DriveRow, no per-tile absolute-positioning style is needed.
@@ -178,7 +179,13 @@ export function DriveTile({
 							<span className={cn(TILE_SUBLINE_CLASS, "text-muted-foreground")}>
 								{t(shared.labelKey, { name: shared.name })}
 							</span>
-						) : null}
+						) : (
+							<ItemLocationLabel
+								item={item}
+								active={active}
+								className={cn(TILE_SUBLINE_CLASS, "text-muted-foreground")}
+							/>
+						)}
 					</div>
 				}
 			/>

@@ -120,6 +120,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { EmptyMessage, NoResultsMessage } from "@/components/emptyMessage"
 import { reroutedRoute, subscribeBranchChanges } from "@/features/drive/lib/branchChanges"
 import { cachedOwnParents } from "@/features/drive/lib/ownAncestry"
+import { cachedItemLocations, ItemLocationContext, showsItemLocation } from "@/features/drive/lib/itemLocation"
 import { canDragVariant } from "@/features/drive/lib/dnd.logic"
 import { ListingDropSurface } from "@/features/drive/components/listingDropSurface"
 import { PendingUploads, PendingUploadsBar } from "@/features/drive/components/pendingUploads"
@@ -492,6 +493,13 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	// Where a slideshow opened from here takes its subdirectories from (the listing's own hide rules).
 	const listingSearchActive = search.active || localSearchActive
 	const driveRootUuid = useDriveRootUuidQuery().data ?? ""
+	// Recents, Favorites and Trash rows name their parent directory from the cache alone, rebuilt only when
+	// the listing's rows change (a cursor move or a scroll keeps the value and every cell's render).
+	const rootLabel = t("driveMyDrive")
+	const itemLocations = useMemo(
+		() => (showsItemLocation(variant) ? cachedItemLocations({ items: visibleItems, rootUuid: driveRootUuid, rootLabel }) : null),
+		[variant, visibleItems, driveRootUuid, rootLabel]
+	)
 	const slideshowSource = useMemo(
 		() =>
 			listingSlideshowSource({
@@ -1212,106 +1220,108 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 							{/* Generic layout wrappers between the listbox and its options: role="presentation" keeps
 						    the owned-element relationship intact (an unlabelled generic in between breaks it). */}
 							<ThumbnailRankContext value={rankThumbnail}>
-								<div
-									role="presentation"
-									style={{ position: "relative", width: "100%", height: activeVirtualizer.getTotalSize() }}
-								>
-									<MarqueeRect store={marquee.rectStore} />
-									{hasPendingRows && pendingParentUuid !== undefined ? (
-										<PendingUploads
-											parentUuid={pendingParentUuid}
-											viewMode={effectiveViewMode}
-											columns={columns}
-											blockRef={setPendingBlock}
-										/>
-									) : null}
-									{effectiveViewMode === "list"
-										? listVirtualizer.getVirtualItems().map(virtualRow => {
-												const item = sortedItems[virtualRow.index]
+								<ItemLocationContext value={itemLocations}>
+									<div
+										role="presentation"
+										style={{ position: "relative", width: "100%", height: activeVirtualizer.getTotalSize() }}
+									>
+										<MarqueeRect store={marquee.rectStore} />
+										{hasPendingRows && pendingParentUuid !== undefined ? (
+											<PendingUploads
+												parentUuid={pendingParentUuid}
+												viewMode={effectiveViewMode}
+												columns={columns}
+												blockRef={setPendingBlock}
+											/>
+										) : null}
+										{effectiveViewMode === "list"
+											? listVirtualizer.getVirtualItems().map(virtualRow => {
+													const item = sortedItems[virtualRow.index]
 
-												if (!item) {
-													return null
-												}
+													if (!item) {
+														return null
+													}
 
-												// exactOptionalPropertyTypes forbids passing searchParentPath={undefined} outright (a distinct
-												// state from "omitted") — spread it in only when there's a real string to show.
-												const parentPath = search.active ? search.parentPaths.get(item.data.uuid) : undefined
+													// exactOptionalPropertyTypes forbids passing searchParentPath={undefined} outright (a distinct
+													// state from "omitted") — spread it in only when there's a real string to show.
+													const parentPath = search.active ? search.parentPaths.get(item.data.uuid) : undefined
 
-												return (
-													<DriveRow
+													return (
+														<DriveRow
+															key={virtualRow.key}
+															item={item}
+															index={virtualRow.index}
+															total={sortedItems.length}
+															selected={selectedRowKeys.has(driveRowKey(item))}
+															active={virtualRow.index === safeActiveIndex}
+															variant={variant}
+															splat={splat}
+															start={virtualRow.start}
+															{...(parentPath !== undefined ? { searchParentPath: parentPath } : {})}
+															directorySize={directorySizes.get(item.data.uuid)}
+															selectedItems={reconciledSelectedItems}
+															onPointerSelect={handlePointerSelect}
+															onCursorMove={setCursor}
+															onOpen={handleOpen}
+															onDialogAction={handleDialogAction}
+															destinationActions={destination.actionsFor}
+															registerRef={registerRef}
+														/>
+													)
+												})
+											: gridVirtualizer.getVirtualItems().map(virtualRow => (
+													<div
 														key={virtualRow.key}
-														item={item}
-														index={virtualRow.index}
-														total={sortedItems.length}
-														selected={selectedRowKeys.has(driveRowKey(item))}
-														active={virtualRow.index === safeActiveIndex}
-														variant={variant}
-														splat={splat}
-														start={virtualRow.start}
-														{...(parentPath !== undefined ? { searchParentPath: parentPath } : {})}
-														directorySize={directorySizes.get(item.data.uuid)}
-														selectedItems={reconciledSelectedItems}
-														onPointerSelect={handlePointerSelect}
-														onCursorMove={setCursor}
-														onOpen={handleOpen}
-														onDialogAction={handleDialogAction}
-														destinationActions={destination.actionsFor}
-														registerRef={registerRef}
-													/>
-												)
-											})
-										: gridVirtualizer.getVirtualItems().map(virtualRow => (
-												<div
-													key={virtualRow.key}
-													role="presentation"
-													style={{
-														position: "absolute",
-														top: 0,
-														left: 0,
-														width: "100%",
-														transform: `translateY(${String(virtualRow.start)}px)`,
-														display: "grid",
-														gridTemplateColumns: `repeat(${String(columns)}, minmax(0, 1fr))`
-													}}
-												>
-													{Array.from({ length: columns }, (_, column) => {
-														const itemIndex = virtualRow.index * columns + column
-														const item = sortedItems[itemIndex]
+														role="presentation"
+														style={{
+															position: "absolute",
+															top: 0,
+															left: 0,
+															width: "100%",
+															transform: `translateY(${String(virtualRow.start)}px)`,
+															display: "grid",
+															gridTemplateColumns: `repeat(${String(columns)}, minmax(0, 1fr))`
+														}}
+													>
+														{Array.from({ length: columns }, (_, column) => {
+															const itemIndex = virtualRow.index * columns + column
+															const item = sortedItems[itemIndex]
 
-														if (!item) {
-															return null
-														}
+															if (!item) {
+																return null
+															}
 
-														// exactOptionalPropertyTypes forbids passing searchParentPath={undefined} outright (a
-														// distinct state from "omitted") — spread it in only when there's a real string to show.
-														const parentPath = search.active
-															? search.parentPaths.get(item.data.uuid)
-															: undefined
+															// exactOptionalPropertyTypes forbids passing searchParentPath={undefined} outright (a
+															// distinct state from "omitted") — spread it in only when there's a real string to show.
+															const parentPath = search.active
+																? search.parentPaths.get(item.data.uuid)
+																: undefined
 
-														return (
-															<DriveTile
-																key={driveRowKey(item)}
-																item={item}
-																index={itemIndex}
-																total={sortedItems.length}
-																selected={selectedRowKeys.has(driveRowKey(item))}
-																active={itemIndex === safeActiveIndex}
-																variant={variant}
-																splat={splat}
-																{...(parentPath !== undefined ? { searchParentPath: parentPath } : {})}
-																selectedItems={reconciledSelectedItems}
-																onPointerSelect={handlePointerSelect}
-																onCursorMove={setCursor}
-																onOpen={handleOpen}
-																onDialogAction={handleDialogAction}
-																destinationActions={destination.actionsFor}
-																registerRef={registerRef}
-															/>
-														)
-													})}
-												</div>
-											))}
-								</div>
+															return (
+																<DriveTile
+																	key={driveRowKey(item)}
+																	item={item}
+																	index={itemIndex}
+																	total={sortedItems.length}
+																	selected={selectedRowKeys.has(driveRowKey(item))}
+																	active={itemIndex === safeActiveIndex}
+																	variant={variant}
+																	splat={splat}
+																	{...(parentPath !== undefined ? { searchParentPath: parentPath } : {})}
+																	selectedItems={reconciledSelectedItems}
+																	onPointerSelect={handlePointerSelect}
+																	onCursorMove={setCursor}
+																	onOpen={handleOpen}
+																	onDialogAction={handleDialogAction}
+																	destinationActions={destination.actionsFor}
+																	registerRef={registerRef}
+																/>
+															)
+														})}
+													</div>
+												))}
+									</div>
+								</ItemLocationContext>
 							</ThumbnailRankContext>
 						</div>
 					)}

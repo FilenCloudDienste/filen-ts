@@ -12,6 +12,10 @@ import { LIST_MODIFIED_COLUMN_CLASS, LIST_NAME_CLASS, LIST_ROW_CLASS, LIST_SIZE_
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu } from "@/components/ui/dropdown-menu"
 import { RowMenuTrigger } from "@/components/rowMenuTrigger"
+import { ItemLocationLabel } from "@/features/drive/components/itemLocationLabel"
+
+// A muted text column beside the name: a search hit's path, a flat listing row's location, a share's counterparty.
+const LIST_TRAIL_TEXT_CLASS = "hidden max-w-48 min-w-0 shrink truncate text-xs text-muted-foreground sm:block md:hidden lg:block"
 
 export interface DriveRowProps extends DriveItemCellProps {
 	// The virtualizer's offset for this row. A number, not a style object, so the compiled row keeps its
@@ -119,15 +123,15 @@ export function DriveRow({
 						    below md and narrowest just above it, because that is where the shell puts the sidebar
 						    back into the row. What they carry stays reachable in the item info dialog. */}
 						{searchHit ? (
-							<span className="hidden max-w-48 min-w-0 shrink truncate text-xs text-muted-foreground sm:block md:hidden lg:block">
-								{searchParentPath}
-							</span>
-						) : null}
-						{shared ? (
-							<span className="hidden max-w-48 min-w-0 shrink truncate text-xs text-muted-foreground sm:block md:hidden lg:block">
-								{t(shared.labelKey, { name: shared.name })}
-							</span>
-						) : null}
+							<span className={LIST_TRAIL_TEXT_CLASS}>{searchParentPath}</span>
+						) : (
+							<ItemLocationLabel
+								item={item}
+								active={active}
+								className={LIST_TRAIL_TEXT_CLASS}
+							/>
+						)}
+						{shared ? <span className={LIST_TRAIL_TEXT_CLASS}>{t(shared.labelKey, { name: shared.name })}</span> : null}
 						{item.data.favorited ? (
 							<>
 								<StarIcon
