@@ -70,6 +70,20 @@ export function isMediaTarget(target: EventTarget | null): boolean {
 	return target instanceof HTMLMediaElement
 }
 
+// The viewers a touch swipe pages on: a picture or a video. Every other viewer takes a horizontal drag itself (text
+// selection, a sheet, a document's pages, a map, a model, a comic's own pages).
+const SWIPE_PAGED_CATEGORIES: ReadonlySet<PreviewCategory> = new Set<PreviewCategory>(["image", "rawImage", "video"])
+
+export function swipePagesCategory(category: PreviewCategory | undefined): boolean {
+	return category !== undefined && SWIPE_PAGED_CATEGORIES.has(category)
+}
+
+// Where a paging swipe may start: on the picture at its fitted size. Never a zoomed picture (the drag pans it), a
+// control, nor a <video> with the browser's controls (their scrubber's drags reach the page as the element's).
+export function swipeStartsOn(target: EventTarget | null): boolean {
+	return hasClosest(target) && target.closest("img, canvas, video:not([controls])") !== null && target.closest("[data-zoomed]") === null
+}
+
 // A field that takes typing (a slider's range input does not): a key there is the field's.
 export function isTypingTarget(target: EventTarget | null): boolean {
 	return (

@@ -26,6 +26,8 @@ interface ZoomBinding {
 	readonly onPointerMove: (event: ReactPointerEvent<HTMLElement>) => void
 	readonly onPointerUp: (event: ReactPointerEvent<HTMLElement>) => void
 	readonly onPointerCancel: (event: ReactPointerEvent<HTMLElement>) => void
+	// Present while zoomed in or out: a swipe on the picture pans it rather than paging the preview.
+	readonly "data-zoomed": "" | undefined
 }
 
 // Fit-to-screen via max-width/max-height (an <img> and a <canvas> alike keep their aspect), plus pointer-drag pan
@@ -233,7 +235,8 @@ function useZoom(natural: Size | null): { containerRef: RefObject<HTMLDivElement
 			onPointerDown: handlePointerDown,
 			onPointerMove: handlePointerMove,
 			onPointerUp: handlePointerUp,
-			onPointerCancel: handlePointerUp
+			onPointerCancel: handlePointerUp,
+			"data-zoomed": transform.scale === 1 ? undefined : ""
 		}
 	}
 }

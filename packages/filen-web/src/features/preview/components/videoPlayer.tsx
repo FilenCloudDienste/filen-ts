@@ -389,7 +389,7 @@ export function VideoPlayer({
 						preload="metadata"
 						// Focusable, so a click on the picture hands the player the keyboard.
 						tabIndex={-1}
-						className="size-full object-contain outline-none"
+						className="size-full touch-pan-y object-contain outline-none"
 						onClick={handleSurfaceClick}
 						onContextMenu={
 							downloadable

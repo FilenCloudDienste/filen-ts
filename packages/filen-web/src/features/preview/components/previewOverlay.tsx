@@ -63,6 +63,7 @@ import { PasswordDraft, PasswordDraftContext } from "@/features/preview/lib/pass
 import { stableUuidOf } from "@/features/drive/store/useDriveClipboardStore"
 import { PreviewLoading } from "@/features/preview/components/previewErrorState"
 import { PreviewErrorBoundary } from "@/features/preview/components/previewErrorBoundary"
+import { usePreviewSwipe } from "@/features/preview/hooks/usePreviewSwipe"
 import { useSettledSlot } from "@/features/preview/hooks/useSettledSlot"
 import {
 	isMediaTarget,
@@ -86,7 +87,8 @@ import {
 	pagerDelta,
 	pagerIntent,
 	previewOverlayKey,
-	PREVIEW_ITEM_SHORTCUTS
+	PREVIEW_ITEM_SHORTCUTS,
+	swipePagesCategory
 } from "@/features/preview/components/previewOverlay.logic"
 import { IMAGE_EDITOR_ACTIONS, PREVIEW_OVERLAY_ACTIONS, type PreviewOverlayAction } from "@/features/preview/lib/keymap"
 import { imageOverlayKey } from "@/features/preview/imageEdit/lib/keys"
@@ -836,6 +838,26 @@ export function PreviewOverlay({
 			: { bytes: encoded.bytes, commit: null, encoding: slotText.encoding }
 	}
 
+	// A touch swipe on a picture or a video pages as the header's arrows do; never while editing, saving, a dialog is up
+	// or a slideshow runs.
+	const swipe = usePreviewSwipe(
+		items.length > 1 &&
+			editing === null &&
+			videoEditing === null &&
+			!saving &&
+			!dialogOpen &&
+			!slideshow.running &&
+			swipePagesCategory(pin?.category),
+		delta => {
+			if (index + delta < 0 || index + delta >= items.length) {
+				return
+			}
+
+			requestOrRun(delta === 1 ? "next" : "prev", () => {
+				onStep(delta)
+			})
+		}
+	)
 	const startImageEditRef = useLatestRef(startImageEdit)
 	const startVideoEditRef = useLatestRef(startVideoEdit)
 	// A video export's end, as things stand when it comes (the export may outlive the editor that started it).
@@ -1529,7 +1551,13 @@ export function PreviewOverlay({
 						</header>
 					)}
 					<div className="flex min-h-0 flex-1">
-						<div className="relative min-h-0 min-w-0 flex-1">
+						<div
+							className="relative min-h-0 min-w-0 flex-1"
+							onPointerDown={swipe.onPointerDown}
+							onPointerUp={swipe.onPointerUp}
+							onPointerCancel={swipe.onPointerCancel}
+							onClickCapture={swipe.onClickCapture}
+						>
 							<ArchiveListingScope>
 								{/* Mid-run (a held arrow key) the slots stepped through show only their header. */}
 								{editing !== null ? (
