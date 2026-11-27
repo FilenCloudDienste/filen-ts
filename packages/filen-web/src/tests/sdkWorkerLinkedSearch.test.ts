@@ -312,6 +312,54 @@ describe("linked search: the held listing reused", () => {
 		expect(names(await query("beach"))).toEqual(["beach.jpg"])
 	})
 
+	it("a page that left while a slideshow waited on a listing holds and downloads nothing more", async () => {
+		let land: (listing: LinkedDirsAndFiles) => void = () => undefined
+
+		fakeUnauth.listLinkedDirRecursive.mockImplementationOnce(
+			() =>
+				new Promise(resolve => {
+					land = resolve
+				})
+		)
+
+		const opened = api.searchLinkedOpen(ROOT, LINK, vi.fn())
+		const slides = api.listSlideshowLinked(PHOTOS, LINK)
+
+		await Promise.resolve()
+		await api.searchLinkedClose()
+		land(TREE)
+		await opened
+
+		expect(await slides).toEqual({ dirs: [], files: [] })
+		expect(fakeUnauth.listLinkedDirRecursive).toHaveBeenCalledTimes(1)
+
+		// Nothing held: a listing asks the SDK.
+		fakeUnauth.listLinkedDir.mockResolvedValueOnce({ dirs: [], files: [] })
+		await api.listLinkedDirAnon(TRIP, LINK)
+
+		expect(fakeUnauth.listLinkedDir).toHaveBeenCalledTimes(1)
+	})
+
+	it("a page that left while a slideshow's own listing downloaded keeps nothing and lists nothing again", async () => {
+		let land: (listing: LinkedDirsAndFiles) => void = () => undefined
+
+		fakeUnauth.listLinkedDirRecursive.mockImplementationOnce(
+			() =>
+				new Promise(resolve => {
+					land = resolve
+				})
+		)
+
+		const slides = api.listSlideshowLinked(ROOT, LINK)
+
+		await Promise.resolve()
+		await api.searchLinkedClose()
+		land(TREE)
+
+		expect(await slides).toEqual({ dirs: [], files: [] })
+		expect(fakeUnauth.listLinkedDirRecursive).toHaveBeenCalledTimes(1)
+	})
+
 	it("a search opened while a slideshow's listing is under way waits on that one, its progress reported", async () => {
 		let land: (listing: LinkedDirsAndFiles) => void = () => undefined
 		let progress: (downloaded: number, total: number | undefined) => void = () => undefined

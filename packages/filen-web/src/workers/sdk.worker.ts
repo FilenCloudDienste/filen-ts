@@ -2645,13 +2645,26 @@ const api = {
 	// from the link's held listing (linkedSearch), opened here when nothing held covers the directory, so one listing
 	// serves the slideshow, the search, the subdirectories' listings and the subtitles beside a video.
 	async listSlideshowLinked(dir: AnyLinkedDir, link: DirPublicLink): Promise<LinkedDirsAndFiles> {
+		const closes = linkedSearch.closeCount()
+
 		// A search's listing of the link under way may cover `dir`: never superseded by one of `dir` alone.
 		await linkedSearch.settle(link)
+
+		// The page left the link meanwhile: nothing is held for it, nor downloaded.
+		if (linkedSearch.closeCount() !== closes) {
+			return { dirs: [], files: [] }
+		}
+
 		await linkedSearch.open(dir, link, () => undefined)
 
-		// Superseded meanwhile (another directory's search, the page leaving): listed for this alone.
-		const result =
-			linkedSearch.subtree(dir, link) ?? (await withLinkedUnauth(unauth => unauth.listLinkedDirRecursive(dir, link, () => undefined)))
+		const held = linkedSearch.subtree(dir, link)
+
+		if (held === null && linkedSearch.closeCount() !== closes) {
+			return { dirs: [], files: [] }
+		}
+
+		// Superseded meanwhile by another directory's search: listed for this alone.
+		const result = held ?? (await withLinkedUnauth(unauth => unauth.listLinkedDirRecursive(dir, link, () => undefined)))
 
 		return {
 			dirs: result.dirs,

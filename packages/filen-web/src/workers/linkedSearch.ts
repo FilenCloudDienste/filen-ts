@@ -141,6 +141,8 @@ export function createLinkedSearch(listRecursive: ListLinkedRecursive) {
 	let pending: Pending | null = null
 	// Moves on every open and close, so a listing that lands after a newer one began (or a close) is dropped.
 	let generation = 0
+	// Moves on every close: a caller that awaited across one knows the page has gone.
+	let closes = 0
 
 	// The held listing when it covers `dirUuid` of `link`.
 	function covering(link: DirPublicLink, dirUuid: string): Held | null {
@@ -221,8 +223,14 @@ export function createLinkedSearch(listRecursive: ListLinkedRecursive) {
 
 	function close(): void {
 		generation++
+		closes++
 		held = null
 		pending = null
+	}
+
+	// A token that changes once the page closes the search (see `close`).
+	function closeCount(): number {
+		return closes
 	}
 
 	// Once the link's listing under way (if any) has landed or failed: a caller that may list a directory of its own
@@ -322,5 +330,5 @@ export function createLinkedSearch(listRecursive: ListLinkedRecursive) {
 		}
 	}
 
-	return { open, close, settle, range, children, subtree }
+	return { open, close, closeCount, settle, range, children, subtree }
 }
