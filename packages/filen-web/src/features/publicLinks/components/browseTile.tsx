@@ -7,7 +7,7 @@ import { useFileKindVerdict } from "@/features/drive/hooks/useFileKindVerdict"
 import { TILE_CLASS, TILE_FACE_CLASS, TILE_NAME_CLASS, TILE_SUBLINE_CLASS } from "@/features/drive/lib/listingCells"
 import { CONTEXT_TREE_MENU_FAMILY, DROPDOWN_TREE_MENU_FAMILY } from "@/features/drive/components/directoryTreeSubmenu"
 import { BrowseEntryMenuItems, SelectionBox, type BrowseCellProps } from "@/features/publicLinks/components/browseRow"
-import { browseEntryActions, entryName, entryPath } from "@/features/publicLinks/lib/browse.logic"
+import { entryName, entryPath } from "@/features/publicLinks/lib/browse.logic"
 import { useTouchLongPress } from "@/lib/useTouchLongPress"
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu, DropdownMenuContent } from "@/components/ui/dropdown-menu"
@@ -22,12 +22,11 @@ export function BrowseTile({
 	total,
 	selected,
 	active,
-	downloadable,
-	downloadBusy,
-	saveable,
 	onPointerSelect,
 	onOpen,
 	onToggle,
+	onRetarget,
+	menuFor,
 	onAction,
 	registerRef
 }: BrowseCellProps) {
@@ -37,9 +36,13 @@ export function BrowseTile({
 	const press = useTouchLongPress<HTMLDivElement>({
 		onLongPress: () => {
 			onToggle(index)
+		},
+		onContextMenu: () => {
+			if (!selected) {
+				onRetarget(index)
+			}
 		}
 	})
-	const actions = browseEntryActions(entry.kind, downloadable, saveable)
 	const path = entryPath(entry)
 
 	return (
@@ -114,8 +117,7 @@ export function BrowseTile({
 									<BrowseEntryMenuItems
 										family={DROPDOWN_TREE_MENU_FAMILY}
 										entry={entry}
-										actions={actions}
-										downloadBusy={downloadBusy}
+										menuFor={menuFor}
 										onAction={onAction}
 									/>
 								</DropdownMenuContent>
@@ -138,8 +140,7 @@ export function BrowseTile({
 				<BrowseEntryMenuItems
 					family={CONTEXT_TREE_MENU_FAMILY}
 					entry={entry}
-					actions={actions}
-					downloadBusy={downloadBusy}
+					menuFor={menuFor}
 					onAction={onAction}
 				/>
 			</ContextMenuContent>

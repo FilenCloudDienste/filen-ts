@@ -33,10 +33,11 @@ import {
 	selectionCheck,
 	toggleAllSelection,
 	toggleSelection,
+	type BrowseActionDescriptor,
 	type BrowseEntry,
-	type BrowseEntryAction,
 	type BrowseSelection
 } from "@/features/publicLinks/lib/browse.logic"
+import { type BrowseMenu } from "@/features/publicLinks/components/browseRow"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 import { useElementSize } from "@/lib/useElementSize"
 import { useLatestRef } from "@/lib/useLatestRef"
@@ -74,11 +75,10 @@ export interface BrowseListProps {
 	viewMode: DriveViewMode
 	// The link's preview cache scope (linkFingerprint): thumbnails reuse the bytes its previews hold.
 	linkScope: string
-	downloadable: boolean
-	downloadBusy: boolean
-	saveable: boolean
 	onOpen: (entry: BrowseEntry) => void
-	onAction: (entry: BrowseEntry, action: BrowseEntryAction) => void
+	// What a menu opened on an entry offers, and on which entries (the selection it is part of, or itself).
+	menuFor: (entry: BrowseEntry) => BrowseMenu
+	onAction: (descriptor: BrowseActionDescriptor, entries: readonly BrowseEntry[]) => void
 }
 
 // The level's entries as drive's list view (its column header with a select-all box ahead) or its grid view (a
@@ -99,10 +99,8 @@ export function BrowseList({
 	onSortChange,
 	viewMode,
 	linkScope,
-	downloadable,
-	downloadBusy,
-	saveable,
 	onOpen,
+	menuFor,
 	onAction
 }: BrowseListProps) {
 	const { t } = useTranslation(["drive", "publicLinks"])
@@ -176,7 +174,7 @@ export function BrowseList({
 	])
 
 	// The rows' handlers read the latest render through one ref, so a row only re-renders for its own values.
-	const latest = useLatestRef({ nav, entries, selection, onSelectionChange, onOpen, onAction, onResumed })
+	const latest = useLatestRef({ nav, entries, selection, onSelectionChange, onOpen, menuFor, onAction, onResumed })
 
 	// A grid knows its columns once its width is measured; before that a tile's row would be read as a one-column one.
 	const laidOut = !grid || contentWidth > 0
@@ -220,9 +218,24 @@ export function BrowseList({
 		},
 		[latest]
 	)
+	// A right-click outside the selection retargets it to the entry, as in drive, so the menu acts on what is shown
+	// selected.
+	const handleRetarget = useCallback(
+		(index: number) => {
+			const { entries: current, onSelectionChange: change, nav: cursor } = latest.current
+			const entry = current[index]
+
+			if (entry !== undefined) {
+				cursor.setCursor(index)
+				change(new Set([entry.item.data.uuid]))
+			}
+		},
+		[latest]
+	)
+	const handleMenuFor = useCallback((entry: BrowseEntry) => latest.current.menuFor(entry), [latest])
 	const handleAction = useCallback(
-		(entry: BrowseEntry, action: BrowseEntryAction) => {
-			latest.current.onAction(entry, action)
+		(descriptor: BrowseActionDescriptor, entries: readonly BrowseEntry[]) => {
+			latest.current.onAction(descriptor, entries)
 		},
 		[latest]
 	)
@@ -302,12 +315,11 @@ export function BrowseList({
 			total: entries.length,
 			selected: selection.has(entry.item.data.uuid),
 			active: index === nav.safeActiveIndex,
-			downloadable,
-			downloadBusy,
-			saveable,
 			onPointerSelect: handlePointerSelect,
 			onOpen: handleOpen,
 			onToggle: handleToggle,
+			onRetarget: handleRetarget,
+			menuFor: handleMenuFor,
 			onAction: handleAction,
 			registerRef
 		}

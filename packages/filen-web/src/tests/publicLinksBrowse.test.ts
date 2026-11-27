@@ -8,7 +8,8 @@ import {
 	sortEntries,
 	entryName,
 	entryKey,
-	browseEntryActions,
+	browseMenuEntries,
+	browseSelectionActions,
 	selectedEntries,
 	selectionCheck,
 	toggleAllSelection,
@@ -193,16 +194,72 @@ describe("navigation stack", () => {
 	})
 })
 
-describe("browseEntryActions", () => {
-	it("offers a file Open, Download where the link allows it, and Save where saveable", () => {
-		expect(browseEntryActions("file", true, true)).toEqual(["open", "download", "saveToDrive"])
-		expect(browseEntryActions("file", true, false)).toEqual(["open", "download"])
-		expect(browseEntryActions("file", false, false)).toEqual(["open"])
+describe("browseSelectionActions", () => {
+	const entries = sortEntries(toBrowseEntries(listing), DEFAULT_PUBLIC_SORT)
+	const [apple, , apricot, banana] = entries
+	const all = { downloadable: true, saveable: true, busy: false, isOnline: true }
+
+	function ids(picks: (BrowseEntry | undefined)[], context = all): string[] {
+		return browseSelectionActions(
+			picks.filter(entry => entry !== undefined),
+			context
+		).map(descriptor => descriptor.id)
+	}
+
+	it("offers one entry Open, its download where the link allows it, and Save where saveable, files and directories alike", () => {
+		expect(ids([apricot])).toEqual(["open", "download", "saveToDrive"])
+		expect(ids([apple])).toEqual(["open", "download", "saveToDrive"])
+		expect(ids([apricot], { ...all, saveable: false })).toEqual(["open", "download"])
+		expect(ids([apricot], { ...all, downloadable: false, saveable: false })).toEqual(["open"])
 	})
 
-	it("offers a directory Open and its zip, never a row's own Save", () => {
-		expect(browseEntryActions("dir", true, true)).toEqual(["open", "download"])
-		expect(browseEntryActions("dir", false, false)).toEqual(["open"])
+	it("offers several entries their zip and Save, never Open", () => {
+		expect(ids([apple, apricot, banana])).toEqual(["download", "saveToDrive"])
+		expect(ids([])).toEqual([])
+	})
+
+	it("names a directory's download its zip and pins both to the bar with their keys", () => {
+		const [, download, save] = browseSelectionActions(apple === undefined ? [] : [apple], all)
+
+		expect(download).toMatchObject({ labelKey: "publicLinks:downloadAsZip", kbdAction: "links.download", pinned: true })
+		expect(save).toMatchObject({ labelKey: "publicLinks:saveToDrive", kbdAction: "links.saveToDrive", pinned: true })
+	})
+
+	it("disables the download while another runs, and Save offline, each saying why where it can", () => {
+		const picks = [apricot, banana].filter(entry => entry !== undefined)
+		const busy = browseSelectionActions(picks, { ...all, busy: true }).find(descriptor => descriptor.id === "download")
+		const offline = browseSelectionActions(picks, { ...all, isOnline: false }).find(descriptor => descriptor.id === "saveToDrive")
+
+		expect(busy).toMatchObject({ enabled: false })
+		expect(busy?.disabledReasonKey).toBeUndefined()
+		expect(offline).toMatchObject({ enabled: false, disabledReasonKey: "common:offlineActionDisabled" })
+	})
+
+	it("refuses a zip of picks that share a name", () => {
+		const results = toSearchEntries([
+			{ item: makeFile("f1000000-0000-0000-0000-000000000001", "same.txt", 1n, 1n), trail: [] },
+			{ item: makeFile("f1000000-0000-0000-0000-000000000002", "same.txt", 1n, 1n), trail: [] }
+		])
+		const download = browseSelectionActions(results, all).find(descriptor => descriptor.id === "download")
+
+		expect(download).toMatchObject({ enabled: false, disabledReasonKey: "publicLinks:selectionNamesClash" })
+	})
+})
+
+describe("browseMenuEntries", () => {
+	const entries = sortEntries(toBrowseEntries(listing), DEFAULT_PUBLIC_SORT)
+	const [apple, zebra, apricot] = entries
+
+	it("acts on the selection when the entry is part of a 2+ one, else on the entry alone", () => {
+		if (apple === undefined || zebra === undefined || apricot === undefined) {
+			throw new Error("fixture")
+		}
+
+		const selection = new Set([entryKey(apple), entryKey(zebra)])
+
+		expect(browseMenuEntries(apple, [apple, zebra], selection)).toEqual([apple, zebra])
+		expect(browseMenuEntries(apricot, [apple, zebra], selection)).toEqual([apricot])
+		expect(browseMenuEntries(apple, [apple], new Set([entryKey(apple)]))).toEqual([apple])
 	})
 })
 

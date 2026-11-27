@@ -18,12 +18,14 @@ export interface SaveToDriveButtonProps {
 	glyph: CopyJobGlyph
 	// The slim bars' compact form: small, with the label only from sm up.
 	compact?: boolean
+	// Whether its key runs it: a directory with a selection gives the key to the selection.
+	keyEnabled?: boolean
 }
 
 // Copies what a public link points at into the signed-in visitor's own drive, through drive's own
 // destination picker and copy card. The caller renders it only when the link is saveable
 // (useLinkSaveable: signed in, not the visitor's own link, downloads allowed).
-export function SaveToDriveButton({ item, name, glyph, compact: compactProp }: SaveToDriveButtonProps) {
+export function SaveToDriveButton({ item, name, glyph, compact: compactProp, keyEnabled }: SaveToDriveButtonProps) {
 	// Not a destructuring default, which the React Compiler cannot lower.
 	const compact = compactProp ?? false
 	const { t } = useTranslation(["publicLinks", "common"])
@@ -42,7 +44,7 @@ export function SaveToDriveButton({ item, name, glyph, compact: compactProp }: S
 				setOpen(true)
 			}
 		},
-		OUTSIDE_OVERLAYS,
+		{ ...OUTSIDE_OVERLAYS, enabled: keyEnabled !== false },
 		[isOnline]
 	)
 

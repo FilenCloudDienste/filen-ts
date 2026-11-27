@@ -5,7 +5,6 @@ import { ChevronRightIcon, DownloadIcon } from "lucide-react"
 import type { AnyItemWithContext, DirPublicInfo, DirPublicLink } from "@filen/sdk-rs"
 import { type DriveSortBy } from "@/features/drive/lib/sort"
 import { type DriveViewMode } from "@/features/drive/lib/preferences"
-import { ACTION_DEFS } from "@/features/drive/lib/actionDefs"
 import { KEEP_SELECTION_PROPS } from "@/features/drive/lib/clickAway.logic"
 import { SearchInput } from "@/features/drive/components/searchInput"
 import { SortMenu } from "@/features/drive/components/sortMenu"
@@ -36,12 +35,16 @@ import {
 	browseSaveItems,
 	browseSaveGlyph,
 	browseZipItems,
+	browseMenuEntries,
+	browseSelectionActions,
 	DEFAULT_PUBLIC_SORT,
 	EMPTY_SELECTION,
+	type BrowseActionDescriptor,
+	type BrowseActionId,
 	type BrowseCrumb,
 	type BrowseEntry,
-	type BrowseEntryAction,
-	type BrowseSelection
+	type BrowseSelection,
+	type BrowseSelectionContext
 } from "@/features/publicLinks/lib/browse.logic"
 import {
 	startAnonDirZipDownload,
@@ -98,6 +101,8 @@ interface SaveTarget {
 // the level's files as listed (pagerEntries), held as they were when it opened.
 export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: DirPublicLink }) {
 	const { t } = useTranslation(["publicLinks", "common", "drive"])
+	// The actions' labels are drive's (ACTION_DEFS) or prefixed publicLinks keys.
+	const { t: tAction } = useTranslation(["drive", "publicLinks", "common"])
 	const isOnline = useIsOnline()
 	const [stack, setStack] = useState<BrowseCrumb[]>(() => [rootCrumb(info)])
 	const [selected, setSelected] = useState<{ entry: FileEntry; pager: BrowsePagerList } | null>(null)
@@ -140,6 +145,14 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 	// Picks from different directories of a search sharing a name would overwrite one another at the zip's top. A copy
 	// into the drive keeps both (the SDK names the second "name (1)"), so only the zip is refused.
 	const pickedNamesClash = picksShareName(picked)
+	// What every menu and the selection bar offer (browseSelectionActions).
+	const actionContext: BrowseSelectionContext = {
+		downloadable: link.enableDownload,
+		saveable,
+		busy: download.status === "running",
+		isOnline
+	}
+	const selectionActions = browseSelectionActions(selectedPicks, actionContext)
 
 	function clearSelection(): void {
 		setSelection(EMPTY_SELECTION)
@@ -227,37 +240,47 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 		)
 	}
 
-	function handleEntryAction(entry: BrowseEntry, action: BrowseEntryAction): void {
-		if (action === "open") {
-			openEntry(entry)
-		} else if (action === "saveToDrive") {
-			setSaveTarget({ items: browseSaveItems([entry], link), name: entryName(entry), glyph: browseSaveGlyph([entry]) })
-		} else if (download.status !== "running") {
-			const name = entryName(entry)
+	// Runs an entry of browseSelectionActions on the entries it was built for, from a menu, the bar or a key; a pick inside
+	// a picked directory goes with it. One entry downloads as itself (a directory as its zip); more, as one zip named
+	// after the level on screen.
+	function runBrowseAction(descriptor: BrowseActionDescriptor, chosen: readonly BrowseEntry[]): void {
+		const entries = withoutNestedPicks(chosen)
+		const [only] = entries
 
-			runDownload("item", entry.kind === "file" ? "file" : "directory", onProgress =>
-				entry.kind === "file"
-					? startAnonFileDownload({ file: entry.file, name, size: entry.file.size, linkScope, onProgress })
-					: startAnonDirZipDownload({ dir: { dir: entry.dir, link }, name, onProgress })
+		if (only === undefined || descriptor.enabled === false) {
+			return
+		}
+
+		if (descriptor.id === "open") {
+			openEntry(only)
+		} else if (descriptor.id === "saveToDrive") {
+			setSaveTarget({ items: browseSaveItems(entries, link), name: entryName(only), glyph: browseSaveGlyph(entries) })
+		} else if (entries.length > 1) {
+			runDownload("item", "selection", onProgress =>
+				startAnonItemsZipDownload({ items: browseZipItems(entries), link, name: current.name, onProgress })
+			)
+		} else {
+			const name = entryName(only)
+
+			runDownload("item", only.kind === "file" ? "file" : "directory", onProgress =>
+				only.kind === "file"
+					? startAnonFileDownload({ file: only.file, name, size: only.file.size, linkScope, onProgress })
+					: startAnonDirZipDownload({ dir: { dir: only.dir, link }, name, onProgress })
 			)
 		}
 	}
 
-	// A single entry downloads as its row menu does; more, as one zip named after the level on screen.
-	function handleDownloadSelected(): void {
-		const [only] = picked
+	// The selection's own entry `id`, run where the bar offers it enabled; false when there is none to run.
+	function runOnSelection(id: BrowseActionId): boolean {
+		const descriptor = selectionActions.find(each => each.id === id)
 
-		if (pickedNamesClash) {
-			return
+		if (descriptor === undefined) {
+			return false
 		}
 
-		if (only !== undefined && picked.length === 1) {
-			handleEntryAction(only, "download")
-		} else {
-			runDownload("item", "selection", onProgress =>
-				startAnonItemsZipDownload({ items: browseZipItems(picked), link, name: current.name, onProgress })
-			)
-		}
+		runBrowseAction(descriptor, selectedPicks)
+
+		return true
 	}
 
 	async function applyViewMode(next: DriveViewMode): Promise<void> {
@@ -287,17 +310,31 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 		[selected, stack.length]
 	)
 
+	// With a selection, Mod+S and Mod+Shift+S act on it, as its bar and menus show; else on the directory on screen
+	// (the header's Save to Cloud Drive takes its key then).
 	useAction(
 		"links.download",
 		event => {
 			event.preventDefault()
 
-			if (download.status !== "running") {
+			if (picked.length > 0) {
+				runOnSelection("download")
+			} else if (download.status !== "running") {
 				handleZip()
 			}
 		},
 		{ ...OUTSIDE_OVERLAYS, enabled: selected === null && link.enableDownload },
-		[download.status, current, link]
+		[download.status, current, link, picked, selectedPicks, selectionActions]
+	)
+
+	useAction(
+		"links.saveToDrive",
+		event => {
+			event.preventDefault()
+			runOnSelection("saveToDrive")
+		},
+		{ ...OUTSIDE_OVERLAYS, enabled: selected === null && picked.length > 0 && saveable },
+		[picked, selectedPicks, selectionActions]
 	)
 
 	// Drive's own selection keys over the level on screen.
@@ -403,6 +440,7 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 							name={current.name}
 							glyph="directory"
 							compact
+							keyEnabled={picked.length === 0}
 						/>
 					) : null}
 					{signedIn && link.enableDownload ? (
@@ -542,11 +580,13 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 						onSortChange={changeSort}
 						viewMode={viewMode}
 						linkScope={linkScope}
-						downloadable={link.enableDownload}
-						downloadBusy={download.status === "running"}
-						saveable={saveable}
 						onOpen={openEntry}
-						onAction={handleEntryAction}
+						menuFor={entry => {
+							const entries = browseMenuEntries(entry, selectedPicks, selection)
+
+							return { entries, descriptors: browseSelectionActions(entries, actionContext) }
+						}}
+						onAction={runBrowseAction}
 					/>
 				)}
 			</div>
@@ -566,30 +606,21 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 						clearKbdAction="drive.clearSelection"
 						onClear={clearSelection}
 					>
-						{link.enableDownload ? (
+						{selectionActions.map(descriptor => (
 							<BulkActionButton
-								icon={ACTION_DEFS.download.icon}
-								label={t("download")}
-								disabled={download.status === "running" || pickedNamesClash}
-								disabledReason={pickedNamesClash ? t("selectionNamesClash") : undefined}
-								onClick={handleDownloadSelected}
-							/>
-						) : null}
-						{saveable ? (
-							<BulkActionButton
-								icon={ACTION_DEFS.copy.icon}
-								label={t("saveToDrive")}
-								disabled={!isOnline}
-								disabledReason={isOnline ? undefined : t("common:offlineActionDisabled")}
+								key={descriptor.id}
+								icon={descriptor.icon}
+								label={tAction(descriptor.labelKey)}
+								disabled={descriptor.enabled === false}
+								disabledReason={
+									descriptor.disabledReasonKey === undefined ? undefined : tAction(descriptor.disabledReasonKey)
+								}
+								kbdAction={descriptor.kbdAction}
 								onClick={() => {
-									setSaveTarget({
-										items: browseSaveItems(picked, link),
-										name: picked[0] === undefined ? current.name : entryName(picked[0]),
-										glyph: browseSaveGlyph(picked)
-									})
+									runBrowseAction(descriptor, selectedPicks)
 								}}
 							/>
-						) : null}
+						))}
 					</SelectionActionBar>
 				</div>
 			) : null}

@@ -1,8 +1,7 @@
-import { type MouseEvent } from "react"
+import { createElement, type MouseEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { CheckIcon, MinusIcon } from "lucide-react"
 import { cn } from "@filen/shared"
-import { ACTION_DEFS } from "@/features/drive/lib/actionDefs"
 import { ItemThumbnail } from "@/features/drive/components/itemThumbnail"
 import { formatItemSize, formatModifiedDate } from "@/features/drive/lib/format"
 import { LIST_MODIFIED_COLUMN_CLASS, LIST_NAME_CLASS, LIST_ROW_CLASS, LIST_SIZE_COLUMN_CLASS } from "@/features/drive/lib/listingCells"
@@ -12,13 +11,13 @@ import {
 	type DirectoryTreeMenuFamily
 } from "@/features/drive/components/directoryTreeSubmenu"
 import {
-	browseEntryActions,
 	entryName,
 	entryPath,
+	type BrowseActionDescriptor,
 	type BrowseEntry,
-	type BrowseEntryAction,
 	type SelectionCheck
 } from "@/features/publicLinks/lib/browse.logic"
+import { MenuKbd } from "@/lib/keymap/kbdHints"
 import { useTouchLongPress } from "@/lib/useTouchLongPress"
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { DropdownMenu, DropdownMenuContent } from "@/components/ui/dropdown-menu"
@@ -32,14 +31,13 @@ export interface BrowseCellProps {
 	selected: boolean
 	// The roving cursor, which holds the listbox's one tab stop.
 	active: boolean
-	// The link allows downloads; `downloadBusy` while another download runs.
-	downloadable: boolean
-	downloadBusy: boolean
-	saveable: boolean
 	onPointerSelect: (index: number, event: MouseEvent<HTMLDivElement>, pointerType: string) => void
 	onOpen: (index: number) => void
 	onToggle: (index: number) => void
-	onAction: (entry: BrowseEntry, action: BrowseEntryAction) => void
+	// A right-click outside the selection: the selection becomes this entry.
+	onRetarget: (index: number) => void
+	menuFor: (entry: BrowseEntry) => BrowseMenu
+	onAction: (descriptor: BrowseActionDescriptor, entries: readonly BrowseEntry[]) => void
 	registerRef: (index: number, el: HTMLDivElement | null) => void
 }
 
@@ -72,12 +70,11 @@ export function BrowseRow({
 	start,
 	selected,
 	active,
-	downloadable,
-	downloadBusy,
-	saveable,
 	onPointerSelect,
 	onOpen,
 	onToggle,
+	onRetarget,
+	menuFor,
 	onAction,
 	registerRef
 }: BrowseRowProps) {
@@ -86,9 +83,13 @@ export function BrowseRow({
 	const press = useTouchLongPress<HTMLDivElement>({
 		onLongPress: () => {
 			onToggle(index)
+		},
+		onContextMenu: () => {
+			if (!selected) {
+				onRetarget(index)
+			}
 		}
 	})
-	const actions = browseEntryActions(entry.kind, downloadable, saveable)
 	const path = entryPath(entry)
 
 	return (
@@ -172,8 +173,7 @@ export function BrowseRow({
 								<BrowseEntryMenuItems
 									family={DROPDOWN_TREE_MENU_FAMILY}
 									entry={entry}
-									actions={actions}
-									downloadBusy={downloadBusy}
+									menuFor={menuFor}
 									onAction={onAction}
 								/>
 							</DropdownMenuContent>
@@ -185,8 +185,7 @@ export function BrowseRow({
 				<BrowseEntryMenuItems
 					family={CONTEXT_TREE_MENU_FAMILY}
 					entry={entry}
-					actions={actions}
-					downloadBusy={downloadBusy}
+					menuFor={menuFor}
 					onAction={onAction}
 				/>
 			</ContextMenuContent>
@@ -194,45 +193,44 @@ export function BrowseRow({
 	)
 }
 
-// The entry's menu, behind a right-click and its ⋯ trigger alike.
+// What a menu opened on an entry offers (browseSelectionActions) and the entries it acts on.
+export interface BrowseMenu {
+	entries: readonly BrowseEntry[]
+	descriptors: BrowseActionDescriptor[]
+}
+
+// The entry's menu, behind a right-click and its ⋯ trigger alike: over the selection when the entry is part of one.
+// Mounted only while open, so the selection is read then.
 export function BrowseEntryMenuItems({
 	family,
 	entry,
-	actions,
-	downloadBusy,
+	menuFor,
 	onAction
 }: {
 	family: DirectoryTreeMenuFamily
 	entry: BrowseEntry
-	actions: BrowseEntryAction[]
-	downloadBusy: boolean
-	onAction: (entry: BrowseEntry, action: BrowseEntryAction) => void
+	menuFor: (entry: BrowseEntry) => BrowseMenu
+	onAction: (descriptor: BrowseActionDescriptor, entries: readonly BrowseEntry[]) => void
 }) {
-	const { t } = useTranslation(["drive", "publicLinks"])
+	const { t } = useTranslation(["drive", "publicLinks", "common"])
 	const { Item } = family
-	const open = entry.kind === "dir" ? ACTION_DEFS.openDirectory : ACTION_DEFS.openFile
+	const menu = menuFor(entry)
 
-	return actions.map(action => {
-		const Icon = action === "open" ? open.icon : action === "download" ? ACTION_DEFS.download.icon : ACTION_DEFS.copy.icon
-		const label =
-			action === "open"
-				? t(open.labelKey)
-				: action === "download"
-					? entry.kind === "dir"
-						? t("publicLinks:downloadAsZip")
-						: t(ACTION_DEFS.download.labelKey)
-					: t("publicLinks:saveToDrive")
+	return menu.descriptors.map(descriptor => {
+		const disabled = descriptor.enabled === false
 
 		return (
 			<Item
-				key={action}
-				disabled={action === "download" && downloadBusy}
+				key={descriptor.id}
+				disabled={disabled}
+				title={disabled && descriptor.disabledReasonKey !== undefined ? t(descriptor.disabledReasonKey) : undefined}
 				onClick={() => {
-					onAction(entry, action)
+					onAction(descriptor, menu.entries)
 				}}
 			>
-				<Icon aria-hidden="true" />
-				{label}
+				{createElement(descriptor.icon, { "aria-hidden": true })}
+				{t(descriptor.labelKey)}
+				<MenuKbd action={descriptor.kbdAction} />
 			</Item>
 		)
 	})

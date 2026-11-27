@@ -351,7 +351,7 @@ describe("DirectoryBrowser — the list", () => {
 		fireEvent.contextMenu(option("a.txt"))
 
 		await act(async () => {
-			fireEvent.click(await screen.findByRole("menuitem", { name: "Download" }))
+			fireEvent.click(await screen.findByRole("menuitem", { name: /^Download(?! as)/ }))
 			await Promise.resolve()
 		})
 
@@ -366,7 +366,7 @@ describe("DirectoryBrowser — the list", () => {
 		fireEvent.contextMenu(option("Sub"))
 
 		await act(async () => {
-			fireEvent.click(await screen.findByRole("menuitem", { name: "Download as ZIP" }))
+			fireEvent.click(await screen.findByRole("menuitem", { name: /^Download as ZIP/ }))
 			await Promise.resolve()
 		})
 

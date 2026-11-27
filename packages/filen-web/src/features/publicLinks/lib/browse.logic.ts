@@ -11,6 +11,9 @@ import type {
 import { copyJobGlyph, driveItemName, nameSearchKey, type CopyJobGlyph } from "@filen/shared"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { sortByDriveItem, type DriveSortBy } from "@/features/drive/lib/sort"
+import { ACTION_DEFS } from "@/features/drive/lib/actionDefs"
+import { OFFLINE_REASON_KEY, type ActionDescriptor } from "@/lib/actionDescriptor"
+import { type DriveKey, type NamespaceKey } from "@/lib/i18n"
 
 // Pure client-side model for browsing a linked directory. Navigation is a VIRTUAL stack (old-web
 // parity): entering a subfolder pushes a crumb, breadcrumb clicks truncate it — the route's own uuid
@@ -113,22 +116,87 @@ export function sortEntries(entries: readonly BrowseEntry[], sort: DriveSortBy):
 	return sortByDriveItem([...entries], entry => entry.item, sort)
 }
 
-// What a row's ⋯ and context menus offer: Download is a directory's zip. A directory saves through the selection
-// bar, as several items do.
-export type BrowseEntryAction = "open" | "download" | "saveToDrive"
+// What a public directory's menus and selection bar offer, for one entry or a selection of them: Open (one entry), the
+// download (a file, a directory's zip, or several as one zip) and Save to Cloud Drive (files and directories alike).
+export type BrowseActionId = "open" | "download" | "saveToDrive"
 
-export function browseEntryActions(kind: BrowseEntry["kind"], downloadable: boolean, saveable: boolean): BrowseEntryAction[] {
-	const actions: BrowseEntryAction[] = ["open"]
+export type BrowseLabelKey = DriveKey | `publicLinks:${NamespaceKey<"publicLinks">}`
 
-	if (downloadable) {
-		actions.push("download")
+export type BrowseActionDescriptor = ActionDescriptor<BrowseLabelKey, BrowseActionId, never>
+
+export interface BrowseSelectionContext {
+	// The link allows downloads; `saveable` (useLinkSaveable) the visitor may also copy it into their drive.
+	downloadable: boolean
+	saveable: boolean
+	// Another download is running.
+	busy: boolean
+	isOnline: boolean
+}
+
+// The builder every surface reads: a row's right-click and ⋯ menu (over the selection when it is inside one) and the
+// selection bar alike, each entry with the key that runs it on the selection.
+export function browseSelectionActions(entries: readonly BrowseEntry[], context: BrowseSelectionContext): BrowseActionDescriptor[] {
+	const [only] = entries
+
+	if (only === undefined) {
+		return []
 	}
 
-	if (kind === "file" && saveable) {
-		actions.push("saveToDrive")
+	const single = entries.length === 1 ? only : undefined
+	const actions: BrowseActionDescriptor[] = []
+
+	if (single !== undefined) {
+		actions.push({
+			id: "open",
+			...(single.kind === "dir" ? ACTION_DEFS.openDirectory : ACTION_DEFS.openFile),
+			run: "direct",
+			kbdAction: "drive.open"
+		})
+	}
+
+	if (context.downloadable) {
+		// Several picks sharing a name would overwrite one another at the zip's top (a pick inside a picked directory goes
+		// with it).
+		const namesClash = single === undefined && picksShareName(withoutNestedPicks(entries))
+
+		actions.push({
+			id: "download",
+			icon: ACTION_DEFS.download.icon,
+			labelKey: single?.kind === "dir" ? "publicLinks:downloadAsZip" : ACTION_DEFS.download.labelKey,
+			run: "direct",
+			kbdAction: "links.download",
+			pinned: true,
+			...(namesClash
+				? { enabled: false, disabledReasonKey: "publicLinks:selectionNamesClash" }
+				: context.busy
+					? { enabled: false }
+					: {})
+		})
+	}
+
+	if (context.saveable) {
+		actions.push({
+			id: "saveToDrive",
+			icon: ACTION_DEFS.copy.icon,
+			labelKey: "publicLinks:saveToDrive",
+			run: "direct",
+			kbdAction: "links.saveToDrive",
+			pinned: true,
+			...(context.isOnline ? {} : { enabled: false, disabledReasonKey: OFFLINE_REASON_KEY })
+		})
 	}
 
 	return actions
+}
+
+// What a menu opened on `entry` acts on: the whole selection (`selected`, as listed) when the entry is part of a 2+ one,
+// else the entry alone.
+export function browseMenuEntries(
+	entry: BrowseEntry,
+	selected: readonly BrowseEntry[],
+	selection: BrowseSelection
+): readonly BrowseEntry[] {
+	return selection.has(entryKey(entry)) && selection.size > 1 ? selected : [entry]
 }
 
 // The selection: uuids over the level on screen, the listing's own entries never copied.
