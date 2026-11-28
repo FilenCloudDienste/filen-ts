@@ -74,11 +74,17 @@ function DetailsSurface({
 
 // Mounted by the listing with its selection: the listing's place for item details (its Info opens it). Nothing while
 // nothing is selected; from the side panel breakpoint up the panel docks beside the listing unless the user closed
-// it, below it the sheet opens from the toggle or Info only.
-export function DriveDetailsHost({ items, variant, onDialogAction }: Omit<DetailsSurfaceProps, "settled">) {
+// it, below it the sheet opens from the toggle or Info only. `suspended` while one of the listing's dialogs covers it
+// (the preview a double-click opens selects its item first): nothing is read for a panel no one sees.
+export function DriveDetailsHost({
+	items,
+	variant,
+	suspended,
+	onDialogAction
+}: Omit<DetailsSurfaceProps, "settled"> & { suspended: boolean }) {
 	const { t } = useTranslation("drive")
 	const key = selectionKey(items)
-	const settled = useDebouncedValue(key, DETAILS_SETTLE_MS) === key
+	const settled = useDebouncedValue(key, DETAILS_SETTLE_MS) === key && !suspended
 
 	if (items.length === 0) {
 		return null

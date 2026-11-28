@@ -39,8 +39,9 @@ function initialThumbnail(source: ThumbnailSource, item: DriveItem): string | nu
 //
 // Unmount withdraws this cell's interest; the service decides from there whether its generation is
 // still worth running (see ThumbGenerator in thumbnails.ts). `index` is the cell's place in a
-// virtualized listing, which ranks its generation against the rest while it waits for a slot.
-export function useThumbnail(item: DriveItem, index?: number): string | null | undefined {
+// virtualized listing, which ranks its generation against the rest while it waits for a slot. `generate` false asks
+// the service nothing: only a thumbnail already cached shows until it turns true.
+export function useThumbnail(item: DriveItem, index?: number, generate?: boolean): string | null | undefined {
 	const uuid = item.data.uuid
 	// The drive's own unless the listing says otherwise (a public link's: the public-link client, in memory only).
 	const source = use(ThumbnailSourceContext)
@@ -72,7 +73,7 @@ export function useThumbnail(item: DriveItem, index?: number): string | null | u
 	)
 
 	useEffect(() => {
-		if (settled) {
+		if (settled || generate === false) {
 			return
 		}
 
@@ -87,7 +88,7 @@ export function useThumbnail(item: DriveItem, index?: number): string | null | u
 		return () => {
 			controller.abort()
 		}
-	}, [uuid, settled])
+	}, [uuid, settled, generate])
 
 	return current.url
 }

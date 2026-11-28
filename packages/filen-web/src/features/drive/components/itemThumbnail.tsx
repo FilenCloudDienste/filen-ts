@@ -18,16 +18,19 @@ import { cn, dirColorHex } from "@filen/shared"
 export function ItemThumbnail({
 	item,
 	index,
+	generate,
 	imgClassName,
 	iconClassName
 }: {
 	item: DriveItem
 	// The cell's place in a virtualized listing (see useThumbnail).
 	index?: number
+	// False shows only a thumbnail already cached (see useThumbnail).
+	generate?: boolean | undefined
 	imgClassName: string
 	iconClassName: string
 }) {
-	const thumbUrl = useThumbnail(item, index)
+	const thumbUrl = useThumbnail(item, index, generate)
 	const source = use(ThumbnailSourceContext)
 	// Whether this mount had to wait for its thumbnail.
 	const [waited] = useState(thumbUrl === undefined)
@@ -62,7 +65,17 @@ export function ItemThumbnail({
 // The info and link dialogs' hero tile: the thumbnail or icon on a soft tonal tile. Only an owned
 // directory tints by its own color; a shared directory's arm carries the owner's color but reads as the
 // neutral default, mirroring filen-mobile's hero.
-export function ItemHeroTile({ item, className, iconClassName }: { item: DriveItem; className: string; iconClassName: string }) {
+export function ItemHeroTile({
+	item,
+	generate,
+	className,
+	iconClassName
+}: {
+	item: DriveItem
+	generate?: boolean | undefined
+	className: string
+	iconClassName: string
+}) {
 	const isDirectory = asDirectoryOrFile(item).type === "directory"
 	const dirHex = dirColorHex(item.type === "directory" ? item.data.color : "default")
 
@@ -79,6 +92,7 @@ export function ItemHeroTile({ item, className, iconClassName }: { item: DriveIt
 			<ItemThumbnail
 				key={item.data.uuid}
 				item={item}
+				generate={generate}
 				imgClassName="size-full object-cover"
 				iconClassName={iconClassName}
 			/>

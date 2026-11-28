@@ -176,10 +176,13 @@ function DirectorySizeRows({ item, enabled }: { item: DirectorySizeItem; enabled
 function ItemHero({
 	item,
 	large,
+	remoteReady,
 	renderName
 }: {
 	item: DriveItem
 	large: boolean
+	// False holds a thumbnail that would have to be generated (a read) back; a cached one still shows.
+	remoteReady: boolean
 	renderName: (name: string, className: string) => ReactNode
 }) {
 	const { t } = useTranslation("drive")
@@ -189,6 +192,7 @@ function ItemHero({
 		<div className="flex min-w-0 flex-col items-center gap-3 pt-2 text-center">
 			<ItemHeroTile
 				item={item}
+				generate={remoteReady}
 				className={large ? "size-28 rounded-2xl" : "size-20 rounded-2xl"}
 				iconClassName={large ? "size-12" : "size-9"}
 			/>
@@ -637,6 +641,7 @@ export function ItemDetails({
 			<ItemHero
 				item={item}
 				large={large}
+				remoteReady={remoteReady}
 				renderName={renderName}
 			/>
 			<GeneralRows

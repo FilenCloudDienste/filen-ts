@@ -99,7 +99,7 @@ function directory(label: string): DriveItem {
 }
 
 // The listing's mount, with the shell's side-panel slot beside it and the selection bar's toggle.
-function Listing({ items, toggle = false }: { items: DriveItem[]; toggle?: boolean }) {
+function Listing({ items, toggle = false, suspended = false }: { items: DriveItem[]; toggle?: boolean; suspended?: boolean }) {
 	const [slot, setSlot] = useState<HTMLDivElement | null>(null)
 
 	return (
@@ -108,6 +108,7 @@ function Listing({ items, toggle = false }: { items: DriveItem[]; toggle?: boole
 			<DriveDetailsHost
 				items={items}
 				variant="drive"
+				suspended={suspended}
 				onDialogAction={vi.fn()}
 			/>
 			<div ref={setSlot} />
@@ -237,6 +238,24 @@ describe("lazy reads", () => {
 			expect(sdk.getItemInfo).toHaveBeenCalledTimes(2)
 		})
 		expect(sdk.getItemInfo.mock.calls.map(([item]) => item)).toEqual([a.data, c.data])
+	})
+
+	it("reads nothing while a dialog covers it, and once it is uncovered", async () => {
+		const photo = file("photo", 5_000_000, "photo.jpg", "image/jpeg")
+		const view = renderListing([])
+
+		view.rerender(createElement(Listing, { items: [photo], suspended: true }))
+		await pastSettle()
+
+		expect(sdk.getItemInfo).not.toHaveBeenCalled()
+		expect(sdk.readFileBytesRange).not.toHaveBeenCalled()
+
+		view.rerender(createElement(Listing, { items: [photo] }))
+
+		await waitFor(() => {
+			expect(sdk.readFileBytesRange).toHaveBeenCalledTimes(1)
+		})
+		expect(sdk.getItemInfo).toHaveBeenCalledTimes(1)
 	})
 
 	it("reads a photo's header once, bounded, and cancels it when the selection moves on", async () => {

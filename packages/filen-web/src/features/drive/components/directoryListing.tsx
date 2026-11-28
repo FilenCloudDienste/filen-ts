@@ -456,7 +456,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	// Shared by me receiver's row being selected never highlights another receiver's.
 	const selectedRowKeys = useMemo(() => new Set(selectedItems.map(driveRowKey)), [selectedItems])
 
-	const { handleDialogAction, handleEmptyTrash, openPreview, renderActiveDialog } = useDriveDialogHost({
+	const { isDialogOpen, handleDialogAction, handleEmptyTrash, openPreview, renderActiveDialog } = useDriveDialogHost({
 		variant,
 		hiddenNoticeApplies: hideHidden,
 		infoOpensDetails: true
@@ -1538,6 +1538,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 				<DriveDetailsHost
 					items={reconciledSelectedItems}
 					variant={variant}
+					suspended={isDialogOpen}
 					onDialogAction={handleDialogAction}
 				/>
 			) : null}
