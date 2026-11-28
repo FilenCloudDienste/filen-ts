@@ -7,6 +7,7 @@ import { Kbd } from "@/lib/keymap/kbd"
 import { hasCommandModifier } from "@/lib/rowKeys"
 import { KEEP_SELECTION_PROPS } from "@/features/drive/lib/clickAway.logic"
 import { Input } from "@/components/ui/input"
+import { cn } from "@filen/shared"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 
 export interface SearchInputProps {
@@ -81,8 +82,10 @@ export function SearchInput({ action, label, value, onChange, onClear, onFocusLi
 						onFocusList()
 					}
 				}}
-				// The engine's own cancel glyph would sit beside the clear button below.
-				className="pr-8 pl-8 [&::-webkit-search-cancel-button]:appearance-none"
+				// The engine's own cancel glyph would sit beside the clear button below. The right padding clears
+				// whichever sits at the end: the shortcut hint while empty (two key chips), else that button. The
+				// placeholder names the directory and can be long, so it ellipsizes before the hint.
+				className={cn("pl-8 text-ellipsis [&::-webkit-search-cancel-button]:appearance-none", value.length > 0 ? "pr-8" : "pr-16")}
 			/>
 			{/* Flex, not a block: a block would seat the Kbd badge on a text line's baseline, off-center. */}
 			<div className="absolute top-1/2 right-1.5 flex -translate-y-1/2 items-center">
