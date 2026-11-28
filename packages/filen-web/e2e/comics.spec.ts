@@ -6,7 +6,7 @@ import { trackCspViolations } from "./helpers/csp"
 import { FIXTURE_FILES, gotoFixture } from "./helpers/fixtures"
 import { BOOT_SETTLE_TIMEOUT_MS, bootTo, LAZY_VIEWER_TIMEOUT_MS, SIGN_IN_HEADING } from "./helpers/listing"
 import { menuItemName } from "./helpers/menu"
-import { observeEgest } from "./helpers/requests"
+import { egestFileOf, observeEgest } from "./helpers/requests"
 import { COMIC_PAGES } from "./fixtures/comics"
 
 // The comic reader over the shared fixture tree's books (fixtures/comics.ts): a .cbz, a solid .cbr and a bare .cbt past
@@ -154,10 +154,28 @@ test.describe("comic books and sign-out", () => {
 
 		const listbox = await gotoFixture(page, "comics")
 
+		// Counted for the comic's own file only: every boot reads the synced office settings file too (the second tab's,
+		// and the reading tab's after its reload), which is none of the comic's. Its file is the one read to open it.
+		const comicFiles = new Set<string>()
+		let opened = false
+		const opening = observeEgest(context, {
+			of: url => {
+				const file = egestFileOf(url)
+
+				if (!opened && file !== undefined) {
+					comicFiles.add(file)
+				}
+
+				return !opened
+			}
+		})
+
 		await itemRow(listbox, CBZ).dblclick()
 		await expect(pageImage(page, 1)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+		opened = true
+		expect(opening.requests()).toBeGreaterThan(0)
 
-		const egest = observeEgest(context)
+		const egest = observeEgest(context, { of: url => comicFiles.has(egestFileOf(url) ?? "") })
 
 		// The in-tab clear a sign-out and an account switch begin with: the comic's reader closes, nothing more is read.
 		await page.evaluate(() => {

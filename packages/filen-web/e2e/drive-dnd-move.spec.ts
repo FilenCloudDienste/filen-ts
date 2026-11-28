@@ -1,6 +1,5 @@
 import { test, expect } from "./fixtures"
 import {
-	breadcrumb,
 	createDirectoryViaDialog,
 	descendInto,
 	uploadFiles,
@@ -8,10 +7,9 @@ import {
 	withScratchDirectory,
 	LIVE_WRITE_TIMEOUT_MS
 } from "./helpers/listing"
-import { pointerDragMove } from "./helpers/dnd"
+import { crumbDropTarget, pointerDragMove } from "./helpers/dnd"
 
 const ROW_SELECTOR = '[role="option"]'
-const BREADCRUMB_LINK_SELECTOR = 'nav[aria-label="Breadcrumb"] a'
 
 test.describe("drive drag-to-move", () => {
 	test("drags a file into a directory, then back out via the breadcrumb", async ({ page }) => {
@@ -50,16 +48,10 @@ test.describe("drive drag-to-move", () => {
 			const nestedFileRow = nested.listbox.getByRole("option", { name: fileName })
 			await expect(nestedFileRow).toBeVisible()
 
-			// 3) Drag it back out onto the scratch ancestor in the breadcrumb — it leaves the nested listing.
+			// 3) Drag it back out onto the scratch ancestor in the breadcrumb (its crumb, or its item in the "…" menu
+			// when the trail folded it) — it leaves the nested listing.
 			// Dragged once and waited out at the write budget, as in leg 1.
-			const scratchCrumb = breadcrumb(page).getByRole("link", { name: scratchName, exact: true })
-			await expect(scratchCrumb).toBeVisible()
-
-			await pointerDragMove(
-				page,
-				{ selector: ROW_SELECTOR, text: fileName },
-				{ selector: BREADCRUMB_LINK_SELECTOR, text: scratchName }
-			)
+			await pointerDragMove(page, { selector: ROW_SELECTOR, text: fileName }, crumbDropTarget(scratchName))
 			await expect(nestedFileRow).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 		})
 	})

@@ -16,7 +16,7 @@ import {
 } from "./helpers/archive"
 import { trackCspViolations } from "./helpers/csp"
 import { FIXTURE_FILES, openFixtureRows } from "./helpers/fixtures"
-import { bootTo, breadcrumb, descendInto, dismissOverlays, waitForListingSettled, type ListingHandle } from "./helpers/listing"
+import { bootTo, breadcrumb, clickCrumb, descendInto, dismissOverlays, waitForListingSettled, type ListingHandle } from "./helpers/listing"
 import { setAppOffline } from "./helpers/offline"
 import { menuItemLabels, menuItemName } from "./helpers/menu"
 
@@ -105,7 +105,7 @@ const catalogueKey = (row: Pick<ArchiveCatalogueRow, "choice" | "method">): stri
 async function toFixtureRoot(page: Page): Promise<ListingHandle> {
 	const { fixtureRoot } = readFixtureManifest()
 
-	await breadcrumb(page).getByRole("link", { name: fixtureRoot, exact: true }).click()
+	await clickCrumb(page, fixtureRoot)
 	await expect(breadcrumb(page).locator('[aria-current="page"]')).toHaveText(fixtureRoot)
 
 	return waitForListingSettled(page)

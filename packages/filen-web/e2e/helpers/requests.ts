@@ -97,14 +97,14 @@ async function responseBytes(request: Request): Promise<number> {
 }
 
 // Counts the download requests to the egest host family, and the bytes they carried: the positive control for
-// "nothing was downloaded" and the measure of a ranged read.
-export function observeEgest(context: BrowserContext): EgestObserver {
+// "nothing was downloaded" and the measure of a ranged read. `of` narrows the count to the reads it accepts.
+export function observeEgest(context: BrowserContext, { of = () => true }: { of?: (url: URL) => boolean } = {}): EgestObserver {
 	let requests = 0
 	let measured: Promise<number>[] = []
 	const isEgest = (request: Request): boolean => {
 		const url = networkUrl(request)
 
-		return url !== null && isFamilyHost(url.hostname, "egest")
+		return url !== null && isFamilyHost(url.hostname, "egest") && of(url)
 	}
 
 	context.on("request", request => {
@@ -130,4 +130,9 @@ export function observeEgest(context: BrowserContext): EgestObserver {
 			measured = []
 		}
 	}
+}
+
+// The file an egest chunk url reads: its path is /<region>/<bucket>/<file uuid>/<chunk index>.
+export function egestFileOf(url: URL): string | undefined {
+	return url.pathname.split("/").at(-2)
 }

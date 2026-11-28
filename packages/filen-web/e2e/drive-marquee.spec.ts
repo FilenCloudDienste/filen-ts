@@ -155,20 +155,29 @@ test.describe("drive rubber-band selection", () => {
 		await expect(listbox.getByRole("option", { selected: true })).toHaveCount(0)
 		await expect(selectedBar).toHaveCount(0)
 
-		// The page header's background, in the gap between the breadcrumb and the action buttons.
-		const header = page.locator("header", { has: crumbs })
-		const headerBox = await boxOf(header)
-		const breadcrumbBox = await boxOf(crumbs)
-		// The middle of the gap, not a fixed step past the breadcrumb: a long breadcrumb (the fixture root's name)
-		// leaves little room before the buttons.
-		const buttonsBox = await boxOf(header.getByRole("button", { name: "New", exact: true }))
-		const gapStart = breadcrumbBox.x + breadcrumbBox.width
-
-		expect(buttonsBox.x - gapStart).toBeGreaterThan(16)
-
+		// The page header's background, in the gap between the breadcrumb and the action buttons. Measured with the
+		// row selected: the details panel a selection opens beside the listing narrows the header.
 		await first.click()
 		await expect(page.getByText("1 selected", { exact: true })).toBeVisible()
-		await page.mouse.click((gapStart + buttonsBox.x) / 2, headerBox.y + headerBox.height / 2)
+
+		const header = page.locator("header", { has: crumbs })
+		const headerBox = await boxOf(header)
+		// The middle of the gap, not a fixed step past the breadcrumb: a long breadcrumb (the fixture root's name)
+		// leaves little room before the buttons. Polled: the trail folds its ancestors a frame after the header
+		// narrows (breadcrumb.tsx measures the width it was given).
+		let gapStart = 0
+		let gapEnd = 0
+
+		await expect(async () => {
+			const breadcrumbBox = await boxOf(crumbs)
+			const buttonsBox = await boxOf(header.getByRole("button", { name: "New", exact: true }))
+
+			gapStart = breadcrumbBox.x + breadcrumbBox.width
+			gapEnd = buttonsBox.x
+			expect(gapEnd - gapStart).toBeGreaterThan(16)
+		}).toPass({ timeout: 10_000 })
+
+		await page.mouse.click((gapStart + gapEnd) / 2, headerBox.y + headerBox.height / 2)
 		await expect(selectedBar).toHaveCount(0)
 
 		// A control that acts around the selection keeps it — including the press that closes its menu.

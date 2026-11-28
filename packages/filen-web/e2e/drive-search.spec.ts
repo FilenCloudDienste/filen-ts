@@ -67,7 +67,10 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 		const { listbox: rootListboxAgain } = await waitForListingSettled(page)
 		await descendInto(page, rootListboxAgain, scratchName)
 
-		const searchInput = page.getByLabel(`Search in ${scratchName}`, { exact: true })
+		// Named after the directory shown (searchInput.tsx), which the legs below change: the scoped name is
+		// asserted here, and the box is held by its stable prefix from then on.
+		await expect(page.getByRole("searchbox", { name: `Search in ${scratchName}`, exact: true })).toBeVisible()
+		const searchInput = page.getByRole("main").getByRole("searchbox", { name: /^Search in / })
 		await expect(searchInput).not.toBeFocused()
 		await page.keyboard.press(`${modKey}+f`)
 		await expect(searchInput).toBeFocused()

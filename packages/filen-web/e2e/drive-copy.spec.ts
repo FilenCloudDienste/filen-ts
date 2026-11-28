@@ -2,7 +2,7 @@ import type { Locator, Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import { compressPreset, escapeRegExp, extractQuick, namePattern, openRowMenu, pickTreeTarget } from "./helpers/archive"
 import { trackCspViolations } from "./helpers/csp"
-import { pointerDragCopy } from "./helpers/dnd"
+import { crumbDropTarget, pointerDragCopy } from "./helpers/dnd"
 import { FIXTURE_FILES, enterFixtureDirectory } from "./helpers/fixtures"
 import { boxOf } from "./helpers/geometry"
 import {
@@ -20,6 +20,7 @@ import {
 import {
 	bootTo,
 	breadcrumb,
+	clickCrumb,
 	clickSidebarLink,
 	createDirectoryViaDialog,
 	descendInto,
@@ -191,7 +192,7 @@ test.describe("drive copy", () => {
 			// Cut in the parent, paste into the subdirectory through its empty-space menu: a move.
 			const crumbs = breadcrumb(page)
 
-			await crumbs.getByRole("link", { name: scratchName, exact: true }).click()
+			await clickCrumb(page, scratchName)
 			await expect(listbox.getByRole("option", { name: movedName })).toBeVisible()
 			await listbox.getByRole("option", { name: movedName }).click()
 			await page.keyboard.press(`${mod}+x`)
@@ -207,7 +208,7 @@ test.describe("drive copy", () => {
 
 			// Gated on the current crumb before asserting: keptName is in both directories, and the moved row's
 			// absence would also hold for the moment between the two listings.
-			await crumbs.getByRole("link", { name: scratchName, exact: true }).click()
+			await clickCrumb(page, scratchName)
 			await expect(crumbs.locator('[aria-current="page"]')).toHaveText(scratchName)
 			await waitForListingSettled(page)
 			await expect(listbox.getByRole("option", { name: keptName })).toBeVisible()
@@ -242,16 +243,12 @@ test.describe("drive copy", () => {
 			// From inside the subdirectory back onto its parent's breadcrumb: a second copy there.
 			await descendInto(page, listbox, subName)
 			await expect(listbox.getByRole("option", { name: fileName })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
-			await pointerDragCopy(
-				page,
-				{ selector: '[role="option"]', text: fileName },
-				{ selector: 'nav[aria-label="Breadcrumb"] a', text: scratchName }
-			)
+			await pointerDragCopy(page, { selector: '[role="option"]', text: fileName }, crumbDropTarget(scratchName))
 			await expect(page.getByText(`Copied 1 item → ${scratchName}`)).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 			await hideJobCards(page, ["copy"])
 			await expect(listbox.getByRole("option", { name: fileName })).toBeVisible()
 
-			await breadcrumb(page).getByRole("link", { name: scratchName, exact: true }).click()
+			await clickCrumb(page, scratchName)
 			await expect(listbox.getByRole("option", { name: `dragged-${runId}` })).toHaveCount(2, { timeout: LIVE_WRITE_TIMEOUT_MS })
 		} finally {
 			await hideJobCards(page, ["copy"])

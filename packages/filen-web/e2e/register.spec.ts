@@ -62,6 +62,9 @@ test.describe("register", { tag: "@no-sdk" }, () => {
 		await expect(submit).toBeDisabled() // weak is the only strength tier that blocks submit
 	})
 
+	// The helper states the enforced rule (passwordStrengthTooWeak); its thresholds are interpolated.
+	const TOO_WEAK_HINT = /^Use at least \d+ characters including two of/
+
 	test("the strength meter renders the right tier and helper for each password", async ({ page }) => {
 		await gotoRegister(page, NOT_ELIGIBLE)
 
@@ -69,11 +72,11 @@ test.describe("register", { tag: "@no-sdk" }, () => {
 
 		await passwordField.fill(WEAK_PASSWORD)
 		await expect(page.getByText("Weak", { exact: true })).toBeVisible()
-		await expect(page.getByText("Choose a stronger password to continue")).toBeVisible()
+		await expect(page.getByText(TOO_WEAK_HINT)).toBeVisible()
 
 		await passwordField.fill(NORMAL_PASSWORD)
 		await expect(page.getByText("Fair", { exact: true })).toBeVisible()
-		await expect(page.getByText("Choose a stronger password to continue")).toHaveCount(0)
+		await expect(page.getByText(TOO_WEAK_HINT)).toHaveCount(0)
 
 		await passwordField.fill(STRONG_PASSWORD)
 		await expect(page.getByText("Strong", { exact: true })).toBeVisible()

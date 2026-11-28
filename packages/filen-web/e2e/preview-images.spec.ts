@@ -596,6 +596,9 @@ test("a 60 MP native image opens as the browser's own <img> on a desktop, with n
 		expect(egest.requests(), name).toBe(streamedChunks(browserName, chunks))
 		await page.keyboard.press("Escape")
 		await expect(picture(page, name)).toHaveCount(0)
+		// The row the double-click selected is the details panel's once the preview is gone (it reads nothing while
+		// covered): its photo header read belongs to neither open.
+		await egestQuiet(egest)
 	}
 })
 
@@ -629,6 +632,8 @@ test("on a phone, a native image past 50 MP is sized from its head and shown onl
 	await page.getByRole("button", { name: preview.previewImageOpenAnyway }).click()
 	await expectNativeImage(page, HUGE_PADDED)
 	await page.keyboard.press("Escape")
+	// The details panel's read of the still-selected row, once the preview is gone (see the desktop test above).
+	await egestQuiet(egest)
 
 	// Under 1 MiB: nothing read ahead, as before.
 	egest.reset()

@@ -5,7 +5,7 @@ import type { Page } from "@playwright/test"
 import { test as setup, expect, FIXTURES_DIR, FIXTURES_FILE, type FixtureManifest } from "../fixtures"
 import { waitForE2eHooks } from "../helpers/e2eHooks"
 import {
-	breadcrumb,
+	clickCrumb,
 	createDirectoryViaDialog,
 	descendInto,
 	directoryListbox,
@@ -213,7 +213,6 @@ setup("build the shared read-only fixture tree", async ({ page }) => {
 	// bounded on their own rather than charged against this.
 	const uploadDeadline = Date.now() + UPLOAD_BUDGET_MS
 	const workDir = mkdtempSync(join(tmpdir(), "filen-e2e-fixtures-"))
-	const breadcrumbHome = breadcrumb(page).getByRole("link", { name: manifest.fixtureRoot, exact: true })
 
 	try {
 		await waitForE2eHooks(page)
@@ -236,7 +235,7 @@ setup("build the shared read-only fixture tree", async ({ page }) => {
 			// navigation, so the SDK worker/OPFS session this setup depends on stays alive, and it is
 			// anchored on the fixture root by NAME instead of on however many history entries the descent
 			// happened to push.
-			await breadcrumbHome.click()
+			await clickCrumb(page, manifest.fixtureRoot)
 			await waitForListingSettled(page)
 		}
 	} finally {

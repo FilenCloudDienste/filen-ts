@@ -1,6 +1,7 @@
-import type { Page } from "@playwright/test"
+import type { Locator, Page } from "@playwright/test"
 import { expect } from "../fixtures"
 import { hitCenterOf } from "./geometry"
+import { CRUMB_OVERFLOW_LABEL } from "./listing"
 
 // HTML5 drags (the audio playlist's track rows; drive items drag on pointer events, see pointerDrag below).
 // Drives the exact browser event sequence a native HTML5 drag produces: one shared DataTransfer
@@ -108,24 +109,37 @@ export async function html5DragCopy(page: Page, source: DragEndpoint, target: Dr
 // drags: press on the source, move past the threshold onto the target, let go. The target must show the
 // drop highlight for the drop's mode before the release (a solid ring for a move, a dashed outline for a
 // copy) — the one sign it will take the drop, asserted so a target that stopped accepting fails here
-// rather than as a missing write later.
-async function pointerDrag(page: Page, source: DragEndpoint, target: DragEndpoint, copy: boolean): Promise<void> {
+// rather than as a missing write later. `target` is resolved once the drag is under way, which can change
+// the page under it (a drag selects its source, and the details panel that opens narrows the header).
+async function pointerDrag(
+	page: Page,
+	source: DragEndpoint,
+	target: DragEndpoint | ((page: Page) => Promise<Locator>),
+	copy: boolean
+): Promise<void> {
 	const from = await hitCenterOf(page.locator(source.selector).filter({ hasText: source.text }).first())
-	const targetElement = page.locator(target.selector).filter({ hasText: target.text }).first()
-	const to = await hitCenterOf(targetElement)
 	// The page's own copy modifier: Option on macOS, else Ctrl.
 	const mac = await page.evaluate(() => /mac/i.test(navigator.userAgent) && !/iphone|ipad|ipod/i.test(navigator.userAgent))
 	const modifier = mac ? "Alt" : "Control"
 
 	await page.mouse.move(from.x, from.y)
 	await page.mouse.down()
-	await page.mouse.move(to.x, to.y, { steps: 8 })
-
-	if (copy) {
-		await page.keyboard.down(modifier)
-	}
 
 	try {
+		// Past the drag threshold before the target is read.
+		await page.mouse.move(from.x + 24, from.y + 4, { steps: 4 })
+
+		const targetElement =
+			typeof target === "function" ? await target(page) : page.locator(target.selector).filter({ hasText: target.text }).first()
+
+		const to = await hitCenterOf(targetElement)
+
+		await page.mouse.move(to.x, to.y, { steps: 8 })
+
+		if (copy) {
+			await page.keyboard.down(modifier)
+		}
+
 		await expect(targetElement).toHaveClass(copy ? /outline-dashed/ : /ring-primary\/60/)
 	} finally {
 		await page.mouse.up()
@@ -136,10 +150,44 @@ async function pointerDrag(page: Page, source: DragEndpoint, target: DragEndpoin
 	}
 }
 
-export async function pointerDragMove(page: Page, source: DragEndpoint, target: DragEndpoint): Promise<void> {
+// An ancestor's crumb as a drop target, during a drag: its link in the trail, or — when the trail folded it
+// into the "…" menu (breadcrumb.tsx) — resting on "…" until the menu springs open, then its item there.
+export function crumbDropTarget(name: string): (page: Page) => Promise<Locator> {
+	return async page => {
+		const crumbs = page.getByRole("navigation", { name: "Breadcrumb" })
+		const link = crumbs.getByRole("link", { name, exact: true })
+		const more = crumbs.getByRole("button", { name: CRUMB_OVERFLOW_LABEL, exact: true })
+
+		await expect(link.or(more).first()).toBeVisible()
+
+		if ((await link.count()) > 0) {
+			return link
+		}
+
+		const at = await hitCenterOf(more)
+
+		await page.mouse.move(at.x, at.y, { steps: 8 })
+
+		const item = page.getByRole("menuitem", { name, exact: true })
+
+		await expect(item).toBeVisible()
+
+		return item
+	}
+}
+
+export async function pointerDragMove(
+	page: Page,
+	source: DragEndpoint,
+	target: DragEndpoint | ((page: Page) => Promise<Locator>)
+): Promise<void> {
 	await pointerDrag(page, source, target, false)
 }
 
-export async function pointerDragCopy(page: Page, source: DragEndpoint, target: DragEndpoint): Promise<void> {
+export async function pointerDragCopy(
+	page: Page,
+	source: DragEndpoint,
+	target: DragEndpoint | ((page: Page) => Promise<Locator>)
+): Promise<void> {
 	await pointerDrag(page, source, target, true)
 }

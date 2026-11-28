@@ -346,9 +346,8 @@ test("Download as is never offered in the trash, and is disabled offline", async
 		await page.keyboard.press("Escape")
 		await page.context().setOffline(false)
 
-		// Through to the committed trash: a one-item confirm stays open and pending for the whole write, and
-		// while it does the page behind it is outside the accessibility tree, so the row reads as gone at once
-		// and the trash link as missing. selectAndTrashRow waits the confirm out before checking the row.
+		// Through to the committed trash: selectAndTrashRow waits for the row to leave, which it does only once the
+		// write landed.
 		await selectAndTrashRow(page, listbox, trashed)
 
 		const trash = await openTrash(page)

@@ -156,6 +156,35 @@ export function breadcrumb(page: Page): Locator {
 	return page.getByRole("navigation", { name: "Breadcrumb" })
 }
 
+// The "…" a trail too wide for the header folds its oldest ancestors into (breadcrumb.tsx).
+export const CRUMB_OVERFLOW_LABEL = "Show hidden directories"
+
+// Up to an ancestor by its crumb: the link in the trail, or its item in the "…" menu when the trail folded it.
+// Which one is decided per attempt: the fold follows the header's width, which a selection (the details panel)
+// changes. A click that landed ends the retry, so a navigation is never driven twice.
+export async function clickCrumb(page: Page, name: string): Promise<void> {
+	const crumbs = breadcrumb(page)
+	const link = crumbs.getByRole("link", { name, exact: true })
+	const more = crumbs.getByRole("button", { name: CRUMB_OVERFLOW_LABEL, exact: true })
+	const item = page.getByRole("menuitem", { name, exact: true })
+
+	await expect(async () => {
+		await expect(link.or(more).first()).toBeVisible({ timeout: 5_000 })
+
+		if ((await link.count()) > 0) {
+			await link.click({ timeout: 5_000 })
+
+			return
+		}
+
+		if ((await item.count()) === 0) {
+			await more.click({ timeout: 5_000 })
+		}
+
+		await item.click({ timeout: 5_000 })
+	}).toPass({ timeout: 30_000 })
+}
+
 export function toasts(page: Page): Locator {
 	return page.locator("[data-sonner-toast]")
 }
@@ -257,19 +286,10 @@ export async function gotoDirectory(page: Page, path: readonly string[]): Promis
 	return listbox
 }
 
-// Up to an ancestor of the directory shown, by its breadcrumb link. A long path clips its oldest crumbs
-// out of the breadcrumb on purpose (breadcrumb.tsx), where no pointer reaches them; the link's own click
-// handler still navigates, so a crumb that fails the hit test gets a dispatched click instead.
+// Up to an ancestor of the directory shown, by its crumb (clickCrumb).
 export async function backTo(page: Page, name: string): Promise<void> {
-	const crumbs = breadcrumb(page)
-	const link = crumbs.getByRole("link", { name, exact: true })
-	const reachable = await link
-		.click({ trial: true, timeout: 2_000 })
-		.then(() => true)
-		.catch(() => false)
-
-	await (reachable ? link.click() : link.dispatchEvent("click"))
-	await expect(crumbs.locator('[aria-current="page"]')).toHaveText(name)
+	await clickCrumb(page, name)
+	await expect(breadcrumb(page).locator('[aria-current="page"]')).toHaveText(name)
 	await waitForListingSettled(page)
 }
 
@@ -653,74 +673,28 @@ async function waitForToastsClear(page: Page): Promise<void> {
 	}
 }
 
-// The row action never reached its confirm click, so no write was issued: the page itself is what
+// The row action never reached its Trash click, so no write was issued: the page itself is what
 // failed (a stuck overlay, a menu or drag a failed test left behind), and a fresh document may succeed.
 class RowActionNotConfirmedError extends Error {}
 
-// Selects then removes exactly ONE row by name through the bulk bar (whose buttons are icon-only, so
-// the label is their accessible name) — the whole select → toolbar-click → confirm sequence retried as
-// a single unit against a FRESHLY re-resolved row locator each attempt. A row captured once outside the
-// retry can go from visible to "element is not stable"/detached mid-sequence when the listing reorders
-// underneath it (a concurrent spec's own root-level mutation, or the background refetch
-// waitForListingSettled's own doc comment describes) — re-querying `listbox.getByRole` inside the
-// callback is what actually recovers, the same shape as descendInto's own toPass above.
+// Selects then trashes exactly ONE row by name through the bulk bar (whose buttons are icon-only, so the
+// label is their accessible name). Trash runs unconfirmed (its toast offers Undo; only the root .filen
+// still asks), so the bar's Trash click IS the write. The select → click sequence is retried as a single
+// unit against a FRESHLY re-resolved row locator each attempt — a row captured once outside the retry can
+// go from visible to "element is not stable"/detached mid-sequence when the listing reorders underneath it
+// — but only until that click: re-driving the UI after it would issue a SECOND write, and writes serialise
+// on the account-wide drive-write lease, so a duplicate queues behind the first and extends the hold every
+// other worker is waiting on.
 //
-// Only the confirm wait is pinned: it closes on a live account write, so it gets LIVE_WRITE_TIMEOUT_MS
-// rather than the 10s expect default — a slow-but-succeeding removal must not trip a retry whose next
-// attempt then finds the row already gone. Every other step falls back to the standard budgets
-// (expect's config default, actions' own) rather than tight hardcoded ones, which left too little slack
-// for a single attempt once waitForToastsClear's own up-to-20s wait was in the mix. The outer envelope
-// is sized off the confirm wait so a caller's own override (the fixture teardown's)
-// still gets real headroom around it instead of being silently capped by a fixed outer ceiling — and it
-// is a HARD ceiling on this whole helper, not merely on the gaps between attempts: toPass races each
-// attempt against its deadline (playwright-core's raceAgainstDeadline) rather than letting an in-flight
-// one run past it, so a lane budget only ever has to hold confirmTimeoutMs + 40s here.
-//
-// The confirm closing is NOT the outcome, but it IS the write: useDriveDialogHost's runBulkDialogActivity
-// keeps a one-item confirm open and pending for the whole operation and then closes it either way,
-// toasting whatever failed — so a server-side rejection (which leaves the item exactly where it was) closed it too
-// and this reported success. The row disappearing is the only proof the write landed, so that is what the
-// attempt now ends on, at the plain expect default rather than the write budget: trashItems patches the
-// row out of the listing query cache BEFORE its own promise resolves, so once the confirm is gone the
-// disappearance is a React commit, not a round trip. That also makes the "already gone" early return
-// load-bearing rather than defensive: once the confirm's action has been clicked, an attempt that dies on
-// a slow close-wait may still have completed the write, and the retry after it would otherwise fail on a
-// row that is correctly absent. Gating that return on the click (rather than checking on entry) keeps the
-// FIRST attempt waiting for a row the listing simply hasn't rendered yet instead of reporting a phantom
-// success. `confirmTimeoutMs` overrides the confirm wait for a caller whose target holds more than the
-// usual flat handful.
-export async function selectAndTrashRow(page: Page, listbox: Locator, name: string, confirmTimeoutMs?: number): Promise<void> {
-	const confirmBudgetMs = confirmTimeoutMs ?? LIVE_WRITE_TIMEOUT_MS
+// The row leaving is the proof the write landed: trashItems patches it out of the listing only once the
+// SDK call resolved (features/drive/lib/actions.ts), so a server-side rejection leaves it in place and
+// toasts the failure. That wait gets the write budget — acquiring the lease is unbounded under contention
+// — or `writeTimeoutMs` for a caller whose target holds more than the usual flat handful (the fixture
+// teardown's).
+export async function selectAndTrashRow(page: Page, listbox: Locator, name: string, writeTimeoutMs?: number): Promise<void> {
+	const writeBudgetMs = writeTimeoutMs ?? LIVE_WRITE_TIMEOUT_MS
 	const row = rowByName(listbox, name)
-	// Filtered by its own action button rather than taken as THE alertdialog on the page: a startup
-	// reminder is an alertdialog too and can pop asynchronously (this helper runs from teardowns, long
-	// after the initial dismissal), which would make a bare role lookup either a strict-mode violation
-	// or a click on the wrong dialog. Matched by a name ENDING in "Trash": while the write runs the button
-	// shows a spinner labelled "Loading" before it, and a dialog matched by the exact name would read as
-	// closed (the write settled) at once, leaving the write to be cut off by whatever the caller does next.
-	const confirm = page.getByRole("alertdialog").filter({ has: page.getByRole("button", { name: /(^|\s)Trash$/ }) })
-	let confirmed = false
-
-	// ONLY the interaction retries, and only until the confirm has been clicked. Everything after that
-	// point is the live write, and re-driving the UI there would issue a SECOND one: writes serialise on
-	// the account-wide drive-write lease, so a duplicate does not race the first, it queues behind it and
-	// extends the hold that every other worker's create is already waiting on. A teardown that thrashed
-	// the lock this way starved the next test's creates for the rest of the run.
 	await expect(async () => {
-		if (confirmed) {
-			// Wait the in-flight write out rather than issuing another; only once the confirm has closed
-			// is it settled. Still showing the row then means the server REJECTED it (runBulkDialogActivity
-			// closes either way and toasts the failure), and a rejected write is not in flight — so that
-			// one, unlike a slow one, is safe to drive again.
-			await expect(confirm).toHaveCount(0, { timeout: confirmBudgetMs })
-
-			if ((await row.count()) === 0) {
-				return
-			}
-
-			confirmed = false
-		}
-
 		await expect(row).toBeVisible()
 
 		// A click on the sole selected row deselects it, which would hide the bulk Trash on a retry.
@@ -730,22 +704,13 @@ export async function selectAndTrashRow(page: Page, listbox: Locator, name: stri
 
 		await waitForToastsClear(page)
 		await page.getByRole("button", { name: "Trash", exact: true }).click()
-		await expect(confirm).toBeVisible()
-		await confirm.getByRole("button", { name: "Trash", exact: true }).click()
-		confirmed = true
 	})
 		.toPass({ timeout: INTERACTION_RETRY_TIMEOUT_MS })
 		.catch((error: unknown) => {
-			throw confirmed ? error : new RowActionNotConfirmedError(`Trash on "${name}" was never confirmed`, { cause: error })
+			throw new RowActionNotConfirmedError(`Trash on "${name}" was never clicked`, { cause: error })
 		})
 
-	// Awaited ONCE, never retried. useDriveDialogHost's runBulkDialogActivity holds a one-item confirm open
-	// and pending for the whole operation and closes it either way, so the close IS the write settling
-	// — at the write budget, because acquiring the lease is unbounded under contention. Only then is the
-	// row's disappearance a React commit: trashItems patches the listing cache after its SDK call
-	// resolves (features/drive/lib/actions.ts), which is already done by the time the confirm closes.
-	await expect(confirm).toHaveCount(0, { timeout: confirmBudgetMs })
-	await expect(row).toHaveCount(0)
+	await expect(row).toHaveCount(0, { timeout: writeBudgetMs })
 }
 
 // One Escape closes exactly ONE layer. Base UI's dismiss handler stands down for any popup that still
@@ -785,9 +750,9 @@ export async function dismissOverlays(page: Page): Promise<boolean> {
 // report this one in its place. A failed trash is not swallowed, it is REPORTED — console.error naming
 // the directory, which is both the loud signal and the handoff to the next run's "e2e-" debris sweep —
 // because the alternative (letting it throw) hides the test's own failure AND skips that naming.
-// `confirmTimeoutMs` overrides the confirm-dialog wait for a caller whose directory holds more than the
+// `writeTimeoutMs` overrides the trash write's wait for a caller whose directory holds more than the
 // usual flat handful (the fixture teardown is the one caller that sets it).
-export async function trashScratchDirectory(page: Page, name: string, confirmTimeoutMs?: number): Promise<void> {
+export async function trashScratchDirectory(page: Page, name: string, writeTimeoutMs?: number): Promise<void> {
 	// The navigation back to root, the settle and the row wait all sit inside reachRootRow, and so are all
 	// guarded together, for the same reason: none of them failing means anything is wrong with the TEST,
 	// only that there is nothing here to remove. Settling is what throws when the root listing itself comes
@@ -864,7 +829,7 @@ export async function trashScratchDirectory(page: Page, name: string, confirmTim
 
 	try {
 		try {
-			await selectAndTrashRow(page, listbox, name, confirmTimeoutMs)
+			await selectAndTrashRow(page, listbox, name, writeTimeoutMs)
 		} catch (error) {
 			if (!(error instanceof RowActionNotConfirmedError)) {
 				throw error
@@ -875,7 +840,7 @@ export async function trashScratchDirectory(page: Page, name: string, confirmTim
 			console.error(`trashScratchDirectory: retrying "${name}" from a fresh document`, error)
 			await page.goto("/drive")
 			listbox = await reachRootRow()
-			await selectAndTrashRow(page, listbox, name, confirmTimeoutMs)
+			await selectAndTrashRow(page, listbox, name, writeTimeoutMs)
 		}
 	} catch (error) {
 		// Distinct from the case above, and worth telling apart in the log: the row WAS there and the

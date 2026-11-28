@@ -114,8 +114,8 @@ test("Download as PDF is not offered in the trash", async ({ page }) => {
 		const name = `e2e-${runId}-trashed.docx`
 
 		await uploadFiles(page, [{ name, mimeType: DOCX_MIME, buffer: docxFixtureBytes("notes.docx") }], listbox)
-		// Through to the committed trash: while the one-item confirm is pending, the page behind it is outside the
-		// accessibility tree and the row would read as gone at once (selectAndTrashRow waits the confirm out).
+		// Through to the committed trash: selectAndTrashRow waits for the row to leave, which it does only once the
+		// write landed.
 		await selectAndTrashRow(page, listbox, name)
 
 		const trash = await openTrash(page)
