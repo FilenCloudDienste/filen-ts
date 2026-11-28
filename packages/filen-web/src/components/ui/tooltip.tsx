@@ -1,6 +1,7 @@
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip"
 
 import { cn } from "@filen/shared"
+import { isFocusReturn } from "@/components/ui/tooltip.logic"
 
 function TooltipProvider({ ...props }: Omit<TooltipPrimitive.Provider.Props, "delay">) {
 	return (
@@ -12,7 +13,24 @@ function TooltipProvider({ ...props }: Omit<TooltipPrimitive.Provider.Props, "de
 	)
 }
 
-const Tooltip = TooltipPrimitive.Root
+// A trigger given focus back by a closing popup opens no tooltip: it would cover what sits beside the trigger and take
+// the next Escape, which the user meant for the layer under it.
+function Tooltip({ onOpenChange, ...props }: TooltipPrimitive.Root.Props) {
+	return (
+		<TooltipPrimitive.Root
+			{...props}
+			onOpenChange={(open, eventDetails) => {
+				if (open && eventDetails.reason === "trigger-focus" && isFocusReturn(eventDetails.event, eventDetails.trigger)) {
+					eventDetails.cancel()
+
+					return
+				}
+
+				onOpenChange?.(open, eventDetails)
+			}}
+		/>
+	)
+}
 
 function TooltipTrigger({ ...props }: TooltipPrimitive.Trigger.Props) {
 	return (
